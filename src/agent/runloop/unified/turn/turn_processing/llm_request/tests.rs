@@ -3,6 +3,7 @@ use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTur
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
+use vtcode_core::config::map_prompt_cache_key_for_provider;
 
 struct ScriptedProvider {
     provider_name: &'static str,
@@ -217,6 +218,73 @@ async fn openai_stale_previous_response_retry_is_disabled() {
     transcript::clear();
 }
 
+#[tokio::test]
+async fn llm_misconfiguration_does_not_retry_network_category() {
+    let recorded_previous_response_ids = Arc::new(Mutex::new(Vec::new()));
+    let provider = ScriptedProvider::new(
+        "mycorp",
+        false,
+        Arc::clone(&recorded_previous_response_ids),
+        vec![
+            ScriptedProviderOutcome::Error(uni::LLMError::Network {
+                message: "network error: invalid endpoint in provider_overrides.mycorp.base_url".to_string(),
+                metadata: None,
+            }),
+            ScriptedProviderOutcome::Success {
+                content: Some("unexpected retry"),
+                request_id: None,
+            },
+        ],
+    );
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    *ctx.provider_client = Box::new(provider);
+    ctx.working_history.push(uni::Message::user("continue".to_string()));
+
+    let result = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None).await;
+
+    assert!(result.is_err(), "an invalid endpoint must fail before a provider retry");
+}
+
+#[tokio::test]
+async fn llm_metadata_misconfiguration_does_not_retry_generic_provider_failure() {
+    let recorded_previous_response_ids = Arc::new(Mutex::new(Vec::new()));
+    let provider = ScriptedProvider::new(
+        "mycorp",
+        false,
+        Arc::clone(&recorded_previous_response_ids),
+        vec![
+            ScriptedProviderOutcome::Error(uni::LLMError::Provider {
+                message: "HTTP 503 Service Unavailable".to_string(),
+                metadata: Some(uni::LLMErrorMetadata::new(
+                    "mycorp",
+                    Some(404),
+                    Some("model_not_found".to_string()),
+                    None,
+                    None,
+                    None,
+                    Some("The requested model does not exist".to_string()),
+                )),
+            }),
+            ScriptedProviderOutcome::Success {
+                content: Some("unexpected retry"),
+                request_id: None,
+            },
+        ],
+    );
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    *ctx.provider_client = Box::new(provider);
+    ctx.working_history.push(uni::Message::user("continue".to_string()));
+
+    let result = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None).await;
+
+    assert!(result.is_err(), "provider metadata must block a retryable HTTP classification");
+    assert_eq!(recorded_previous_response_ids.lock().expect("provider calls").len(), 1);
+}
+
 #[test]
 fn retryable_llm_error_excludes_forbidden_quota_failures() {
     assert!(!is_retryable_llm_error(
@@ -271,6 +339,39 @@ async fn unmatched_tool_result_noop_repair_fails_closed_without_repeating_the_re
         Arc::clone(&recorded_previous_response_ids),
         vec![ScriptedProviderOutcome::Error(uni::LLMError::Provider {
             message: "Merge Gateway error (400 Bad Request): unmatched tool result for call_1".to_string(),
+            metadata: None,
+        })],
+    );
+
+    let mut backing = TestTurnProcessingBacking::new(4).await;
+    let mut ctx = backing.turn_processing_context();
+    *ctx.provider_client = Box::new(provider);
+    ctx.working_history.push(uni::Message::assistant_with_tools(
+        String::new(),
+        vec![uni::ToolCall::function(
+            "call_1".to_string(),
+            "read_file".to_string(),
+            "{}".to_string(),
+        )],
+    ));
+    ctx.working_history
+        .push(uni::Message::tool_response("call_1".to_string(), "result".to_string()));
+
+    let result = execute_llm_request(&mut ctx, 1, "noop-model", Some(320), false, None).await;
+
+    assert!(result.is_err());
+    assert_eq!(recorded_previous_response_ids.lock().expect("provider calls").len(), 1);
+}
+
+#[tokio::test]
+async fn misconfiguration_after_tool_result_skips_post_tool_retry() {
+    let recorded_previous_response_ids = Arc::new(Mutex::new(Vec::new()));
+    let provider = ScriptedProvider::new(
+        "any-provider",
+        false,
+        Arc::clone(&recorded_previous_response_ids),
+        vec![ScriptedProviderOutcome::Error(uni::LLMError::Network {
+            message: "network error: invalid endpoint in base_url".to_string(),
             metadata: None,
         })],
     );
@@ -576,6 +677,18 @@ fn session_affinity_prompt_cache_key_is_populated_for_openrouter_and_xai() {
         ),
         None
     );
+}
+
+#[test]
+fn merge_gateway_prompt_cache_key_is_stable_and_unsuffixed() {
+    // Interactive request assembly must pass this mapped key through unchanged
+    // (no `{stable_prefix_hash}` suffix). Prefix identity is tracked in
+    // tool_catalog_hash / system_prompt_prefix_hash, not the wire key —
+    // same contract as AgentRunner after c714e4593.
+    let key = build_openai_prompt_cache_key(true, &OpenAIPromptCacheKeyMode::Session, Some("lineage-abc-123"))
+        .map(|key| map_prompt_cache_key_for_provider("merge-gateway", key));
+
+    assert_eq!(key, Some("vtcode:merge:lineage-abc-123".to_string()));
 }
 
 #[test]

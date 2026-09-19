@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use anyhow::{Context, Result, bail};
 use toml::Value as TomlValue;
 
@@ -12,55 +14,173 @@ pub(crate) fn parent_view_path(path: &str) -> Option<String> {
         return None;
     }
 
-    if path.ends_with(']')
-        && let Some(start) = path.rfind('[')
-    {
-        let parent = &path[..start];
-        return (!parent.is_empty()).then(|| parent.to_string());
+    if path == super::SETTINGS_ADVANCED_VIEW_PATH {
+        return None;
     }
 
-    path.rfind('.').map(|idx| path[..idx].to_string())
+    if let Some(group_view) = path.strip_prefix(super::SETTINGS_GROUP_PREFIX) {
+        let (group_id, nested_path) = group_view.split_once(':')?;
+        return Some(
+            parent_view_path(nested_path)
+                .map(|parent| format!("{}{group_id}:{parent}", super::SETTINGS_GROUP_PREFIX))
+                .unwrap_or_else(|| format!("{}{group_id}", super::SETTINGS_GROUP_PREFIX)),
+        );
+    }
+
+    if let Some(nested_path) = path.strip_prefix(super::SETTINGS_ADVANCED_NESTED_PREFIX) {
+        return Some(
+            parent_view_path(nested_path)
+                .map(|parent| format!("{}{parent}", super::SETTINGS_ADVANCED_NESTED_PREFIX))
+                .unwrap_or_else(|| super::SETTINGS_ADVANCED_VIEW_PATH.to_string()),
+        );
+    }
+
+    if path.starts_with("advanced.") {
+        return Some(super::SETTINGS_ADVANCED_VIEW_PATH.to_string());
+    }
+
+    parent_setting_path(path)
 }
 
 pub(super) fn parse_path_tokens(path: &str) -> Result<Vec<PathToken>> {
     let mut tokens = Vec::new();
 
-    for segment in path.split('.') {
-        if segment.is_empty() {
+    let mut position = 0;
+    while position < path.len() {
+        if path.as_bytes()[position] == b'.' {
+            position += 1;
             continue;
         }
 
-        let mut rest = segment;
-        loop {
-            if let Some(index_start) = rest.find('[') {
-                let key = &rest[..index_start];
-                if !key.is_empty() {
-                    tokens.push(PathToken::Key(key.to_string()));
-                }
+        if path.as_bytes()[position] == b'[' {
+            tokens.push(parse_bracket_token(path, &mut position)?);
+            continue;
+        }
 
-                let after_start = &rest[index_start + 1..];
-                let Some(index_end) = after_start.find(']') else {
-                    bail!("Invalid path segment '{segment}': missing closing bracket");
-                };
-
-                let index_text = &after_start[..index_end];
-                let index = index_text
-                    .parse::<usize>()
-                    .with_context(|| format!("Invalid array index '{index_text}'"))?;
-                tokens.push(PathToken::Index(index));
-
-                rest = &after_start[index_end + 1..];
-                if rest.is_empty() {
-                    break;
-                }
-            } else {
-                tokens.push(PathToken::Key(rest.to_string()));
+        let start = position;
+        while position < path.len() {
+            let character = path[position..]
+                .chars()
+                .next()
+                .expect("position should remain on a character boundary");
+            if matches!(character, '.' | '[') {
                 break;
             }
+            position += character.len_utf8();
+        }
+        if position > start {
+            tokens.push(PathToken::Key(path[start..position].to_string()));
         }
     }
 
     Ok(tokens)
+}
+
+fn parse_bracket_token(path: &str, position: &mut usize) -> Result<PathToken> {
+    debug_assert_eq!(path.as_bytes()[*position], b'[');
+    *position += 1;
+
+    if path.as_bytes().get(*position) == Some(&b'"') {
+        *position += 1;
+        let mut key = String::new();
+        while *position < path.len() {
+            let character = path[*position..]
+                .chars()
+                .next()
+                .expect("position should remain on a character boundary");
+            *position += character.len_utf8();
+
+            match character {
+                '"' => {
+                    if path.as_bytes().get(*position) != Some(&b']') {
+                        bail!("Invalid quoted path key: missing closing bracket");
+                    }
+                    *position += 1;
+                    return Ok(PathToken::Key(key));
+                }
+                '\\' => {
+                    let escaped = path[*position..]
+                        .chars()
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("Invalid quoted path key: dangling escape"))?;
+                    *position += escaped.len_utf8();
+                    key.push(escaped);
+                }
+                _ => key.push(character),
+            }
+        }
+        bail!("Invalid quoted path key: missing closing quote")
+    }
+
+    let start = *position;
+    while *position < path.len() && path.as_bytes()[*position] != b']' {
+        *position += 1;
+    }
+    let Some(index_text) = path.get(start..*position) else {
+        bail!("Invalid array index in path");
+    };
+    if *position == path.len() {
+        bail!("Invalid path: missing closing bracket");
+    }
+    *position += 1;
+
+    let index = index_text
+        .parse::<usize>()
+        .with_context(|| format!("Invalid array index '{index_text}'"))?;
+    Ok(PathToken::Index(index))
+}
+
+pub(super) fn path_with_key(parent: &str, key: &str) -> String {
+    let mut path = parent.to_string();
+    append_key_path(&mut path, key);
+    path
+}
+
+fn append_key_path(path: &mut String, key: &str) {
+    if is_bare_key(key) {
+        if !path.is_empty() {
+            path.push('.');
+        }
+        path.push_str(key);
+        return;
+    }
+
+    path.push_str("[\"");
+    for character in key.chars() {
+        match character {
+            '\\' | '"' => {
+                path.push('\\');
+                path.push(character);
+            }
+            _ => path.push(character),
+        }
+    }
+    path.push_str("\"]");
+}
+
+fn is_bare_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+}
+
+fn parent_setting_path(path: &str) -> Option<String> {
+    let tokens = parse_path_tokens(path).ok()?;
+    (tokens.len() > 1).then(|| format_path_tokens(&tokens[..tokens.len() - 1]))
+}
+
+fn format_path_tokens(tokens: &[PathToken]) -> String {
+    let mut path = String::new();
+    for token in tokens {
+        match token {
+            PathToken::Key(key) => append_key_path(&mut path, key),
+            PathToken::Index(index) => {
+                let _ = write!(path, "[{index}]");
+            }
+        }
+    }
+    path
 }
 
 pub(super) fn get_node<'a>(root: &'a TomlValue, path: &str) -> Option<&'a TomlValue> {
@@ -186,5 +306,32 @@ mod tests {
             .expect("missing tables should be created");
 
         assert_eq!(get_node(&root, "agent.small_model.model").and_then(TomlValue::as_str), Some("small-model"));
+    }
+
+    #[test]
+    fn quoted_map_keys_round_trip_through_path_operations() {
+        let mut root: TomlValue = toml::from_str(
+            r#"
+            [profiles."gpt-5.4"]
+            temperature = 0.2
+            "#,
+        )
+        .expect("valid TOML");
+
+        let path = r#"profiles["gpt-5.4"].temperature"#;
+        assert_eq!(get_node(&root, path).and_then(TomlValue::as_float), Some(0.2));
+        assert_eq!(
+            parent_setting_path(r#"profiles["gpt-5.4"].temperature"#),
+            Some(r#"profiles["gpt-5.4"]"#.to_string())
+        );
+
+        set_node(&mut root, path, TomlValue::Float(0.7)).expect("quoted map key should be writable");
+        assert_eq!(get_node(&root, path).and_then(TomlValue::as_float), Some(0.7));
+
+        let unicode_tokens = parse_path_tokens("profiles.模型").expect("unicode path should parse");
+        assert!(matches!(
+            unicode_tokens.as_slice(),
+            [PathToken::Key(root), PathToken::Key(key)] if root == "profiles" && key == "模型"
+        ));
     }
 }

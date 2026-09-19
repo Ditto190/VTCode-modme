@@ -1,33 +1,182 @@
+use std::collections::BTreeSet;
+
 use anyhow::{Result, anyhow};
 use toml::Value as TomlValue;
 use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
 
-use super::docs::FIELD_DOCS;
+use super::docs::{FIELD_DOCS, FieldDoc};
 use super::mutations::resolve_cycle_options;
-use super::path::get_node;
+use super::path::{PathToken, get_node, parse_path_tokens, path_with_key};
 use super::render::{
     action_item, collection_subtitle, display_title, search_value_for_missing_doc, search_value_with_content,
     section_item, section_subtitle, setting_subtitle, summarize_value,
 };
 use super::{
-    ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, ACTION_PREFIX_ARRAY_ADD, ACTION_PREFIX_ARRAY_POP,
-    ACTION_PREFIX_OPEN, ACTION_PREFIX_SET, ACTION_RESET, ACTION_RESET_CANCEL, ACTION_RESET_CONFIRM,
-    OPTIONAL_DOC_FIELDS, RESET_CONFIRMATION_VIEW, SETTINGS_MODEL_CONFIG_MAIN_PATH, SETTINGS_MODEL_CONFIG_PATH,
-    SettingsPaletteState,
+    ACTION_BACK, ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, ACTION_PREFIX_ARRAY_ADD, ACTION_PREFIX_ARRAY_POP,
+    ACTION_PREFIX_EDIT, ACTION_PREFIX_OPEN, ACTION_PREFIX_SET, ACTION_RESET, ACTION_RESET_CANCEL, ACTION_RESET_CONFIRM,
+    OPTIONAL_DOC_FIELDS, RESET_CONFIRMATION_VIEW, SETTINGS_ADVANCED_VIEW_PATH, SETTINGS_GROUP_PREFIX,
+    SETTINGS_MODEL_CONFIG_MAIN_PATH, SETTINGS_MODEL_CONFIG_PATH, SettingsPaletteState,
 };
 use crate::agent::runloop::unified::config_section_headings::humanize_identifier;
 
 const HIDDEN_SETTINGS_PATHS: &[&str] = &["agent.small_model"];
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CuratedSettingsGroup {
+    pub(super) id: &'static str,
+    pub(super) title: &'static str,
+    pub(super) description: &'static str,
+    pub(super) paths: &'static [&'static str],
+}
+
+static CURATED_GROUPS: &[CuratedSettingsGroup] = &[
+    CuratedSettingsGroup {
+        id: "model_provider",
+        title: "Model & Provider",
+        description: "Choose the active provider, model, and response behavior.",
+        paths: &[
+            "agent.provider",
+            "agent.default_model",
+            "agent.reasoning_effort",
+            "agent.temperature",
+            "agent.verbosity",
+            "custom_providers",
+        ],
+    },
+    CuratedSettingsGroup {
+        id: "agent_automation",
+        title: "Agent & Automation",
+        description: "Tune planning, prompts, retries, and unattended runs.",
+        paths: &[
+            "agent.require_plan_confirmation",
+            "agent.todo_planning_mode",
+            "agent.tool_documentation_mode",
+            "agent.system_prompt_mode",
+            "agent.max_conversation_turns",
+            "agent.max_review_passes",
+            "agent.max_task_retries",
+            "automation.full_auto.enabled",
+            "automation.full_auto.max_turns",
+            "automation.full_auto.require_profile_ack",
+            "automation.scheduled_tasks.enabled",
+        ],
+    },
+    CuratedSettingsGroup {
+        id: "approvals_security",
+        title: "Approvals & Security",
+        description: "Control approval rules, sandboxing, and protection defaults.",
+        paths: &[
+            "permissions.enabled",
+            "permissions.audit_enabled",
+            "permissions.allow",
+            "permissions.ask",
+            "permissions.deny",
+            "security.human_in_the_loop",
+            "security.hitl_notification_bell",
+            "security.require_write_tool_for_claims",
+            "sandbox.enabled",
+            "sandbox.default_policy",
+            "sandbox.network.policy",
+            "dotfile_protection.enabled",
+        ],
+    },
+    CuratedSettingsGroup {
+        id: "tools_integrations",
+        title: "Tools & Integrations",
+        description: "Configure tools, the editor, search, MCP, and IDE bridges.",
+        paths: &[
+            "tools.default_policy",
+            "tools.profile",
+            "tools.max_tool_loops",
+            "tools.client_tool_search",
+            "tools.editor",
+            "tools.web_fetch.mode",
+            "tools.web_fetch.strict_https_only",
+            "tools.web_search.provider",
+            "mcp.enabled",
+            "mcp.providers",
+            "acp.enabled",
+            "ide_context.enabled",
+            "ide_context.show_in_tui",
+        ],
+    },
+    CuratedSettingsGroup {
+        id: "context_memory",
+        title: "Context & Memory",
+        description: "Manage context budgets, dynamic context, and persistent memory.",
+        paths: &[
+            "features.memories",
+            "agent.persistent_memory.enabled",
+            "agent.persistent_memory.auto_write",
+            "agent.persistent_memory.memories.use_memories",
+            "agent.persistent_memory.memories.generate_memories",
+            "context.max_context_tokens",
+            "context.dynamic.enabled",
+            "context.dynamic.tool_output_threshold",
+            "context.dynamic.retained_user_messages",
+            "context.ledger.enabled",
+            "context.ledger.include_in_prompt",
+            "workspace.include_context",
+        ],
+    },
+    CuratedSettingsGroup {
+        id: "interface_terminal",
+        title: "Interface & Terminal",
+        description: "Shape the chat surface, transcript, theme, and shell sessions.",
+        paths: &[
+            "agent.theme",
+            "ui.display_mode",
+            "ui.tool_display_mode",
+            "ui.tool_output_mode",
+            "ui.reasoning_display_mode",
+            "ui.show_sidebar",
+            "ui.show_task_panel",
+            "ui.vim_mode",
+            "ui.color_scheme_mode",
+            "pty.enabled",
+            "pty.command_timeout_seconds",
+            "pty.scrollback_lines",
+        ],
+    },
+    CuratedSettingsGroup {
+        id: "performance_diagnostics",
+        title: "Performance & Diagnostics",
+        description: "Balance runtime limits, caching, timeouts, and diagnostics.",
+        paths: &[
+            "agent.harness.max_tool_calls_per_turn",
+            "agent.harness.max_tool_wall_clock_secs",
+            "agent.harness.max_tool_retries",
+            "agent.harness.max_parallel_tool_calls",
+            "agent.harness.auto_compaction_enabled",
+            "optimization.command_cache.enabled",
+            "optimization.file_read_cache.enabled",
+            "optimization.llm_client.enable_response_caching",
+            "timeouts.default_ceiling_seconds",
+            "timeouts.long_running_command_ceiling_seconds",
+            "telemetry.trajectory_enabled",
+            "telemetry.atif_enabled",
+            "ui.show_diagnostics_in_transcript",
+            "optimization.profiling.enabled",
+        ],
+    },
+];
+
+pub(super) fn curated_group(id: &str) -> Option<&'static CuratedSettingsGroup> {
+    curated_groups().iter().find(|group| group.id == id)
+}
+
+pub(super) fn curated_groups() -> &'static [CuratedSettingsGroup] {
+    CURATED_GROUPS
+}
+
 pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlValue) -> Result<Vec<InlineListItem>> {
     let mut items = Vec::new();
 
-    items.push(section_item("Actions"));
     if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
         items.push(section_item("Confirm reset"));
         items.push(action_item(
             "Reset configuration",
-            &format!("Clear every setting in {}", state.source_path.display()),
+            "Clear every setting in the current write target",
             Some("Confirm"),
             ACTION_RESET_CONFIRM,
         ));
@@ -40,20 +189,37 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
         return Ok(items);
     }
 
-    items.push(action_item(
-        "Reload from disk",
-        "Reload effective values from current configuration files",
-        None,
-        super::ACTION_RELOAD,
-    ));
-
     if let Some(view_path) = state.view_path.as_deref() {
+        items.push(action_item("Back to settings", "Return to the previous settings view", None, ACTION_BACK));
         items.push(action_item(
-            "Back to sections",
-            "Return to the top-level settings sections",
+            "Reload configuration",
+            "Reload effective values from current configuration files",
             None,
-            super::ACTION_OPEN_ROOT,
+            super::ACTION_RELOAD,
         ));
+
+        if view_path == SETTINGS_ADVANCED_VIEW_PATH
+            || view_path.starts_with("advanced.")
+            || view_path.starts_with(super::SETTINGS_ADVANCED_NESTED_PREFIX)
+        {
+            append_advanced_items(&mut items, view_path, draft)?;
+            return Ok(items);
+        }
+
+        if let Some(group_view) = view_path.strip_prefix(SETTINGS_GROUP_PREFIX) {
+            if let Some((group_id, nested_path)) = group_view.split_once(':') {
+                let node = get_node(draft, nested_path)
+                    .ok_or_else(|| anyhow!("Could not resolve settings path {nested_path}"))?;
+                let open_prefix = format!("{SETTINGS_GROUP_PREFIX}{group_id}:");
+                append_node_items_with_context(&mut items, nested_path, node, draft, Some(open_prefix.as_str()))?;
+                return Ok(items);
+            }
+
+            if let Some(group) = curated_group(group_view) {
+                append_curated_group_items(&mut items, group, draft);
+                return Ok(items);
+            }
+        }
 
         if append_synthetic_model_config_items(&mut items, view_path, draft)? {
             return Ok(items);
@@ -61,42 +227,267 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
 
         let node = get_node(draft, view_path).ok_or_else(|| anyhow!("Could not resolve settings path {view_path}"))?;
         append_node_items(&mut items, view_path, node, draft)?;
-    } else if let TomlValue::Table(table) = draft {
+    } else {
+        append_curated_root_items(&mut items, draft);
+        items.push(action_item(
+            "Reload configuration",
+            "Reload effective values from current configuration files",
+            None,
+            super::ACTION_RELOAD,
+        ));
         items.push(action_item(
             "Reset configuration",
-            &format!("Clear every setting in {} (confirmation required)", state.source_path.display()),
+            "Clear every setting in the current write target (confirmation required)",
             None,
             ACTION_RESET,
         ));
-        items.push(section_item("Quick Access"));
-        items.push(action_item(
-            "Model Config",
-            "Edit the active provider and default model in one focused view",
-            None,
-            &format!("{ACTION_PREFIX_OPEN}{SETTINGS_MODEL_CONFIG_PATH}"),
-        ));
-        items.push(action_item(
-            "External Editor",
-            "Open guided setup for /edit, Ctrl+E, and single-click file links",
-            Some("Setup"),
-            ACTION_CONFIGURE_EDITOR,
-        ));
-        items.push(action_item(
-            "Editor Mode",
-            "Toggle Vim-style prompt editing (ui.vim_mode)",
-            None,
-            &format!("{ACTION_PREFIX_OPEN}ui"),
-        ));
-        items.push(action_item(
-            "Codex App Server",
-            "Review the local Codex sidecar command, startup timeout, and experimental switches",
-            None,
-            &format!("{ACTION_PREFIX_OPEN}agent.codex_app_server"),
-        ));
-        append_table_items(&mut items, table, None, None, draft);
     }
 
     Ok(items)
+}
+
+fn append_curated_root_items(items: &mut Vec<InlineListItem>, draft: &TomlValue) {
+    for group in curated_groups() {
+        let count = curated_group_items(group, draft, None).len();
+        let count_label = if count == 1 {
+            "editable setting"
+        } else {
+            "editable settings"
+        };
+        let paths = group.paths.join(" ");
+        items.push(InlineListItem {
+            title: group.title.to_string(),
+            subtitle: Some(format!("{} • {count} {count_label}", group.description)),
+            badge: Some("Group".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::ConfigAction(format!(
+                "{ACTION_PREFIX_OPEN}{SETTINGS_GROUP_PREFIX}{}",
+                group.id
+            ))),
+            search_value: Some(
+                format!("{} {} {} {paths}", group.title, group.id, group.description).to_ascii_lowercase(),
+            ),
+        });
+    }
+
+    items.push(action_item(
+        "Advanced settings",
+        &format!(
+            "Search the complete documented configuration • {} editable settings",
+            advanced_editable_count(draft)
+        ),
+        Some("Search"),
+        &format!("{ACTION_PREFIX_OPEN}{SETTINGS_ADVANCED_VIEW_PATH}"),
+    ));
+}
+
+fn curated_group_items(
+    group: &CuratedSettingsGroup,
+    draft: &TomlValue,
+    open_prefix: Option<&str>,
+) -> Vec<InlineListItem> {
+    group
+        .paths
+        .iter()
+        .filter_map(|path| curated_setting_item(path, draft, open_prefix))
+        .filter(|item| item.selection.is_some())
+        .collect()
+}
+
+fn append_curated_group_items(items: &mut Vec<InlineListItem>, group: &CuratedSettingsGroup, draft: &TomlValue) {
+    let open_prefix = format!("{SETTINGS_GROUP_PREFIX}{}:", group.id);
+    items.extend(
+        group
+            .paths
+            .iter()
+            .filter_map(|path| curated_setting_item(path, draft, Some(open_prefix.as_str()))),
+    );
+}
+
+fn curated_setting_item(path: &str, draft: &TomlValue, open_prefix: Option<&str>) -> Option<InlineListItem> {
+    if let Some(value) = get_node(draft, path) {
+        return Some(with_open_context(
+            item_for_value(path.rsplit('.').next().unwrap_or(path), path, value, draft),
+            open_prefix,
+        ));
+    }
+
+    let doc = FIELD_DOCS.lookup(path)?;
+    (!doc.options.is_empty()).then(|| {
+        with_open_context(item_for_missing_doc_value(path.rsplit('.').next().unwrap_or(path), path), open_prefix)
+    })
+}
+
+fn append_advanced_items(items: &mut Vec<InlineListItem>, view_path: &str, draft: &TomlValue) -> Result<()> {
+    if let Some(path) = view_path.strip_prefix(super::SETTINGS_ADVANCED_NESTED_PREFIX) {
+        if let Some(node) = get_node(draft, path)
+            && matches!(node, TomlValue::Array(_) | TomlValue::Table(_))
+        {
+            return append_node_items_with_context(
+                items,
+                path,
+                node,
+                draft,
+                Some(super::SETTINGS_ADVANCED_NESTED_PREFIX),
+            );
+        }
+        return append_advanced_path_item(items, path, draft, Some(super::SETTINGS_ADVANCED_NESTED_PREFIX));
+    }
+
+    if let Some(path) = view_path.strip_prefix("advanced.") {
+        if let Some(node) = get_node(draft, path)
+            && matches!(node, TomlValue::Array(_) | TomlValue::Table(_))
+        {
+            return append_node_items_with_context(
+                items,
+                path,
+                node,
+                draft,
+                Some(super::SETTINGS_ADVANCED_NESTED_PREFIX),
+            );
+        }
+        return append_advanced_path_item(items, path, draft, None);
+    }
+
+    for path in advanced_paths(draft) {
+        append_advanced_path_item(items, &path, draft, Some("advanced."))?;
+    }
+
+    Ok(())
+}
+
+fn advanced_paths(draft: &TomlValue) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    collect_advanced_paths(draft, "", &mut paths);
+    for path in FIELD_DOCS.sorted_paths() {
+        paths.insert(path.to_string());
+    }
+    paths
+}
+
+fn advanced_editable_count(draft: &TomlValue) -> usize {
+    advanced_paths(draft)
+        .into_iter()
+        .filter(|path| {
+            if is_schema_path(path) {
+                return false;
+            }
+            if let Some(value) = get_node(draft, path) {
+                return item_for_value(&advanced_label(path), path, value, draft).selection.is_some();
+            }
+
+            FIELD_DOCS.lookup(path).is_some_and(|doc| !doc.options.is_empty())
+        })
+        .count()
+}
+
+fn append_advanced_path_item(
+    items: &mut Vec<InlineListItem>,
+    path: &str,
+    draft: &TomlValue,
+    open_prefix: Option<&str>,
+) -> Result<()> {
+    let label = advanced_label(path);
+    if let Some(value) = get_node(draft, path) {
+        items.push(advanced_item_with_path(item_for_value(&label, path, value, draft), path, open_prefix));
+        return Ok(());
+    }
+
+    if let Some(doc) = FIELD_DOCS.lookup(path) {
+        if !is_schema_path(path) && !doc.options.is_empty() {
+            items.push(advanced_item_with_path(item_for_missing_doc_value(&label, path), path, open_prefix));
+        } else {
+            items.push(advanced_schema_item(path, doc));
+        }
+        return Ok(());
+    }
+
+    Err(anyhow!("Could not resolve advanced settings path {path}"))
+}
+
+fn is_schema_path(path: &str) -> bool {
+    path.contains("[]") || path.split('.').any(|segment| segment == "*")
+}
+
+fn collect_advanced_paths(value: &TomlValue, path: &str, paths: &mut BTreeSet<String>) {
+    match value {
+        TomlValue::Table(table) => {
+            for key in super::render::sorted_table_keys(table) {
+                let Some(child) = table.get(key) else {
+                    continue;
+                };
+                let child_path = path_with_key(path, key);
+                collect_advanced_paths(child, &child_path, paths);
+            }
+        }
+        TomlValue::Array(entries) => {
+            if !path.is_empty() {
+                paths.insert(path.to_string());
+            }
+            for (index, entry) in entries.iter().enumerate() {
+                collect_advanced_paths(entry, &format!("{path}[{index}]"), paths);
+            }
+        }
+        _ if !path.is_empty() => {
+            paths.insert(path.to_string());
+        }
+        _ => {}
+    }
+}
+
+fn advanced_item_with_path(mut item: InlineListItem, path: &str, open_prefix: Option<&str>) -> InlineListItem {
+    item = with_open_context(item, open_prefix);
+    let detail = item.subtitle.take().unwrap_or_default();
+    item.subtitle = Some(format!("{path} • {detail}"));
+    item
+}
+
+fn advanced_schema_item(path: &str, doc: &FieldDoc) -> InlineListItem {
+    let label = advanced_label(path);
+    let mut terms = vec![path.to_string(), label.clone(), humanize_identifier(path)];
+    if !doc.default_value.is_empty() {
+        terms.push(doc.default_value.clone());
+    }
+    if !doc.description.is_empty() {
+        terms.push(doc.description.clone());
+    }
+    terms.extend(doc.options.iter().cloned());
+
+    InlineListItem {
+        title: label,
+        subtitle: Some(format!(
+            "{path} • {}",
+            if doc.description.is_empty() {
+                "Documented schema field; configure a concrete entry to edit it."
+            } else {
+                doc.description.as_str()
+            }
+        )),
+        badge: Some("Schema".to_string()),
+        indent: 0,
+        selection: None,
+        search_value: Some(terms.join(" ").to_ascii_lowercase()),
+    }
+}
+
+fn advanced_label(path: &str) -> String {
+    let fallback = path
+        .strip_suffix("[]")
+        .or_else(|| path.strip_suffix(".*"))
+        .unwrap_or(path)
+        .rsplit('.')
+        .next()
+        .unwrap_or(path);
+    let label = parse_path_tokens(path)
+        .ok()
+        .and_then(|tokens| tokens.into_iter().next_back())
+        .and_then(|token| match token {
+            PathToken::Key(key) if key != "*" => Some(key),
+            PathToken::Index(_) => None,
+            PathToken::Key(_) => None,
+        })
+        .unwrap_or_else(|| fallback.to_string());
+    humanize_identifier(if label.is_empty() { path } else { &label })
 }
 
 fn append_node_items(
@@ -105,9 +496,19 @@ fn append_node_items(
     node: &TomlValue,
     draft_root: &TomlValue,
 ) -> Result<()> {
+    append_node_items_with_context(items, path, node, draft_root, None)
+}
+
+fn append_node_items_with_context(
+    items: &mut Vec<InlineListItem>,
+    path: &str,
+    node: &TomlValue,
+    draft_root: &TomlValue,
+    open_prefix: Option<&str>,
+) -> Result<()> {
     match node {
         TomlValue::Table(table) => {
-            append_table_items(items, table, Some(path), Some(node), draft_root);
+            append_table_items(items, table, Some(path), Some(node), draft_root, open_prefix);
         }
         TomlValue::Array(entries) => {
             items.push(action_item(
@@ -126,11 +527,11 @@ fn append_node_items(
             for (index, value) in entries.iter().enumerate() {
                 let child_path = format!("{path}[{index}]");
                 let label = format!("[{index}]");
-                items.push(item_for_value(&label, &child_path, value, draft_root));
+                items.push(with_open_context(item_for_value(&label, &child_path, value, draft_root), open_prefix));
             }
         }
         _ => {
-            items.push(item_for_value(path, path, node, draft_root));
+            items.push(with_open_context(item_for_value(path, path, node, draft_root), open_prefix));
         }
     }
 
@@ -177,6 +578,7 @@ fn append_table_items(
     parent_path: Option<&str>,
     optional_doc_root: Option<&TomlValue>,
     draft_root: &TomlValue,
+    open_prefix: Option<&str>,
 ) {
     let mut section_items = Vec::new();
     let mut setting_items = Vec::new();
@@ -186,12 +588,12 @@ fn append_table_items(
             continue;
         };
         let path = parent_path
-            .map(|parent| format!("{parent}.{key}"))
-            .unwrap_or_else(|| key.to_string());
+            .map(|parent| path_with_key(parent, key))
+            .unwrap_or_else(|| path_with_key("", key));
         if HIDDEN_SETTINGS_PATHS.contains(&path.as_str()) {
             continue;
         }
-        let entry = item_for_value(key, &path, value, draft_root);
+        let entry = with_open_context(item_for_value(key, &path, value, draft_root), open_prefix);
         if matches!(value, TomlValue::Table(_)) {
             section_items.push(entry);
         } else {
@@ -211,6 +613,21 @@ fn append_table_items(
         items.push(section_item("Settings"));
         items.extend(setting_items);
     }
+}
+
+fn with_open_context(mut item: InlineListItem, open_prefix: Option<&str>) -> InlineListItem {
+    let Some(open_prefix) = open_prefix else {
+        return item;
+    };
+    let Some(InlineListSelection::ConfigAction(action)) = item.selection.as_mut() else {
+        return item;
+    };
+    let Some(path) = action.strip_prefix(ACTION_PREFIX_OPEN) else {
+        return item;
+    };
+
+    *action = format!("{ACTION_PREFIX_OPEN}{open_prefix}{path}");
+    item
 }
 
 fn append_missing_optional_doc_items(items: &mut Vec<InlineListItem>, root: &TomlValue, parent_path: Option<&str>) {
@@ -287,13 +704,17 @@ fn item_for_value(label: &str, path: &str, value: &TomlValue, draft_root: &TomlV
         },
         TomlValue::String(current) => {
             let has_options = resolve_cycle_options(Some(draft_root), path, current).len() > 1;
+            let action = if has_options {
+                format!("{ACTION_PREFIX_SET}{path}:cycle")
+            } else {
+                format!("{ACTION_PREFIX_EDIT}{path}")
+            };
             InlineListItem {
                 title,
                 subtitle: Some(setting_subtitle(&summary, &description, has_options)),
-                badge: has_options.then(|| "Pick".to_string()),
+                badge: Some(if has_options { "Pick" } else { "Edit" }.to_string()),
                 indent: 0,
-                selection: has_options
-                    .then(|| InlineListSelection::ConfigAction(format!("{ACTION_PREFIX_SET}{path}:cycle"))),
+                selection: Some(InlineListSelection::ConfigAction(action)),
                 search_value: Some(search_value),
             }
         }
@@ -333,17 +754,18 @@ fn item_for_missing_doc_value(label: &str, path: &str) -> InlineListItem {
         .and_then(|entry| (!entry.description.is_empty()).then(|| entry.description.clone()))
         .unwrap_or_default();
     let has_options = doc.map(|entry| !entry.options.is_empty()).unwrap_or(false);
+    let action = if has_options {
+        format!("{ACTION_PREFIX_SET}{path}:cycle")
+    } else {
+        format!("{ACTION_PREFIX_EDIT}{path}")
+    };
 
     InlineListItem {
         title: humanize_identifier(label),
         subtitle: Some(setting_subtitle("<unset>", &description, has_options)),
-        badge: Some(if has_options {
-            "Pick".to_string()
-        } else {
-            "Unset".to_string()
-        }),
+        badge: Some(if has_options { "Pick" } else { "Edit" }.to_string()),
         indent: 0,
-        selection: has_options.then(|| InlineListSelection::ConfigAction(format!("{ACTION_PREFIX_SET}{path}:cycle"))),
+        selection: Some(InlineListSelection::ConfigAction(action)),
         search_value: Some(search_value_for_missing_doc(path, label, doc)),
     }
 }
@@ -355,5 +777,15 @@ fn missing_doc_label<'a>(path: &'a str, parent_path: Option<&str>) -> Option<&'a
             .and_then(|suffix| suffix.strip_prefix('.'))
             .filter(|suffix| !suffix.contains('.') && !suffix.contains('[')),
         None => Some(path),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::advanced_label;
+
+    #[test]
+    fn advanced_label_uses_quoted_map_key() {
+        assert_eq!(advanced_label(r#"mcp.providers[0].env["A.B"]"#), "A B");
     }
 }

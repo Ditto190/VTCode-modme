@@ -394,6 +394,7 @@ mod tests {
     #[test]
     fn invalid_positional_workspace_fails_during_cli_parse() {
         let mut command = build_augmented_cli_command();
+        // Workspace is a `last = true` positional; it is only parsed after `--`.
         let err = command
             .try_get_matches_from_mut(["vtcode", "--", "hellp"])
             .expect_err("invalid positional workspace should fail at clap parsing");

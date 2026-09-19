@@ -126,7 +126,7 @@ Merge Gateway native `/v1/responses` also sends session identity for automatic c
 | xAI native Chat Completions | header `x-grok-conv-id` + body `prompt_cache_key` | Per-server cache affinity; **requires global `[prompt_cache] enabled=true`** |
 | Anthropic / Gemini / DeepSeek / Moonshot / Z.AI native | automatic or `cache_control` | No client session key |
 
-Usage telemetry: OpenAI-style hosts report cache reads as `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens`; Anthropic-style as `cache_read_input_tokens`. VT Code maps these into both `cached_prompt_tokens` and `cache_read_tokens` so trajectory `prompt_cache_metrics` and cache-health are not zero-filled. Cost accounting still uses `cache_read_tokens` without double-counting.
+Usage telemetry: OpenAI-style hosts report cache reads as `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens`; Anthropic-style as `cache_read_input_tokens`. VT Code maps these into both `cached_prompt_tokens` and `cache_read_tokens` so trajectory `prompt_cache_metrics` and cache-health are not zero-filled. Cost accounting still uses `cache_read_tokens` without double-counting. Merge Gateway native Responses usage often reports cache activity only as Anthropic-style `cache_read_input_tokens` / `cache_creation_input_tokens`; the same dual mapping keeps trajectory and session cache summaries honest.
 
 Merge Gateway first-progress timeout is floored at **120s on planning and non-planning turns** when non-streaming fallback is available. Other remote providers with non-streaming fallback get a once-per-session advisory when a stream first-token timeout triggers the full-prompt retry (local providers excluded).
 

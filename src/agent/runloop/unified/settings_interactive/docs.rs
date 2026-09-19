@@ -21,9 +21,33 @@ pub(super) struct FieldDocIndex {
 
 impl FieldDocIndex {
     pub(super) fn lookup(&self, path: &str) -> Option<&FieldDoc> {
-        self.by_path
-            .get(path)
-            .or_else(|| self.by_path.get(&normalize_config_path(path)))
+        let normalized = normalize_config_path(path);
+        if let Some(doc) = self.by_path.get(path).or_else(|| self.by_path.get(&normalized)) {
+            return Some(doc);
+        }
+
+        let mut segments: Vec<&str> = normalized.split('.').collect();
+        for index in 0..segments.len() {
+            if matches!(segments[index], "*" | "[]") {
+                continue;
+            }
+
+            let original = segments[index];
+            segments[index] = "*";
+            let candidate = segments.join(".");
+            if let Some(doc) = self.by_path.get(&candidate) {
+                return Some(doc);
+            }
+            segments[index] = original;
+        }
+
+        None
+    }
+
+    pub(super) fn sorted_paths(&self) -> Vec<&str> {
+        let mut paths: Vec<&str> = self.by_path.keys().map(String::as_str).collect();
+        paths.sort_unstable();
+        paths
     }
 }
 

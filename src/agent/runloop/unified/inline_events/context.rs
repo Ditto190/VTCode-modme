@@ -167,9 +167,9 @@ impl<'a> InlineEventContext<'a> {
                     self.state.reset_interrupt_state();
                     self.modal.handle_submit(self.state.renderer(), selection).await?
                 }
-                TransientEvent::Submitted(TransientSubmission::Wizard(_)) => {
+                TransientEvent::Submitted(TransientSubmission::Wizard(selections)) => {
                     self.state.reset_interrupt_state();
-                    self.input_processor().passive()
+                    self.modal.handle_wizard_submit(self.state.renderer(), selections).await?
                 }
                 TransientEvent::Submitted(TransientSubmission::DiffApply) => {
                     self.state.reset_interrupt_state();

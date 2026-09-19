@@ -512,7 +512,8 @@ async fn execute_llm_request_with_options_impl(
             Err(err) => {
                 let msg = err.to_string();
                 let category = classify_llm_error(&msg);
-                let is_retryable = category.is_retryable();
+                let is_misconfiguration = vtcode_commons::detect_misconfiguration_in_anyhow(&err).is_some();
+                let is_retryable = category.is_retryable() && !is_misconfiguration;
                 last_error_retryable = Some(is_retryable);
                 last_error_preview = Some(compact_error_message(&msg, 180));
                 last_error_category = Some(category);
@@ -622,7 +623,7 @@ async fn execute_llm_request_with_options_impl(
                 // Universal post-tool recovery: when a provider fails after
                 // receiving tool results, prefer non-streaming when supported,
                 // otherwise keep streaming and compact the tool messages.
-                if has_post_tool_context && attempt < max_retries - 1 {
+                if !is_misconfiguration && has_post_tool_context && attempt < max_retries - 1 {
                     match next_post_tool_retry_action(
                         use_streaming,
                         supports_non_streaming,

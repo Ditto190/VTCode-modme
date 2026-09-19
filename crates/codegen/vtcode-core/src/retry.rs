@@ -17,6 +17,7 @@ use crate::tools::registry::ToolExecutionError;
 use crate::tools::tool_intent::is_command_tool;
 use crate::tools::unified_error::UnifiedToolError;
 use vtcode_commons::llm::{LLMError, LLMErrorMetadata};
+use vtcode_commons::misconfiguration::detect_misconfiguration;
 
 pub use vtcode_commons::retry::{RetryDecision, RetryPolicy};
 
@@ -63,6 +64,10 @@ impl RetryPolicyCoreExt for RetryPolicy {
         attempt_index: u32,
         tool_name: Option<&str>,
     ) -> RetryDecision {
+        // Misconfiguration-first: never retry user-fixable config failures.
+        if error.is_misconfiguration() {
+            return misconfiguration_decision(error.category, error.retry_after());
+        }
         decision_for_category_with_tool(self, error.category, attempt_index, error.retry_after(), tool_name)
     }
 
@@ -74,35 +79,55 @@ impl RetryPolicyCoreExt for RetryPolicy {
             return self.decision_for_llm_error(llm_error, attempt_index);
         }
         if let Some(tool_error) = error.downcast_ref::<UnifiedToolError>() {
-            let tool_name = tool_name.or_else(|| {
+            let category = tool_error.category();
+            if detect_misconfiguration(category, &unified_tool_text(tool_error)).is_some() {
+                return misconfiguration_decision(category, None);
+            }
+            // Preserve fallback tool name for command-timeout rule.
+            let effective_tool = tool_name.or_else(|| {
                 tool_error
                     .debug_context
                     .as_ref()
                     .map(|ctx| ctx.tool_name.as_str())
-                    .filter(|tool_name| !tool_name.is_empty())
+                    .filter(|name| !name.is_empty())
             });
-            return decision_for_category_with_tool(self, tool_error.category(), attempt_index, None, tool_name);
+            return decision_for_category_with_tool(self, category, attempt_index, None, effective_tool);
         }
 
         let category = vtcode_commons::classify_anyhow_error(error);
+        let message = format!("{error:#}");
+        if detect_misconfiguration(category, &message).is_some() {
+            return misconfiguration_decision(category, None);
+        }
         decision_for_category_with_tool(self, category, attempt_index, None, tool_name)
     }
 
     fn decision_for_llm_error(&self, error: &LLMError, attempt_index: u32) -> RetryDecision {
         let retry_after = llm_metadata(error).and_then(retry_after_from_llm_metadata);
-        decision_for_category_with_tool(self, ErrorCategory::from(error), attempt_index, retry_after, None)
+        let category = ErrorCategory::from(error);
+        if vtcode_commons::detect_misconfiguration_in_llm_error(error).is_some() {
+            return misconfiguration_decision(category, retry_after);
+        }
+        decision_for_category_with_tool(self, category, attempt_index, retry_after, None)
     }
 
     fn decision_for_tool_error(&self, error: &UnifiedToolError, attempt_index: u32) -> RetryDecision {
+        let category = error.category();
+        if detect_misconfiguration(category, &unified_tool_text(error)).is_some() {
+            return misconfiguration_decision(category, None);
+        }
         let tool_name = error
             .debug_context
             .as_ref()
             .map(|ctx| ctx.tool_name.as_str())
             .filter(|tool_name| !tool_name.is_empty());
-        decision_for_category_with_tool(self, error.category(), attempt_index, None, tool_name)
+        decision_for_category_with_tool(self, category, attempt_index, None, tool_name)
     }
 
     fn decision_for_tool_execution_error(&self, error: &ToolExecutionError, attempt_index: u32) -> RetryDecision {
+        if detect_misconfiguration(error.category, &tool_execution_text(error)).is_some() {
+            return misconfiguration_decision(error.category, error.retry_after());
+        }
         decision_for_category_with_tool(
             self,
             error.category,
@@ -113,6 +138,9 @@ impl RetryPolicyCoreExt for RetryPolicy {
     }
 
     fn step_for_vtcode_error(&self, error: VtCodeError, attempt_index: u32, tool_name: Option<&str>) -> RetryStep {
+        // Attach config guidance first so the surfaced error guides the user
+        // before any retry/backoff decision.
+        let error = error.with_misconfiguration_guidance();
         let decision = self.decision_for_vtcode_error(&error, attempt_index, tool_name);
         if decision.retryable {
             let delay = decision.delay.unwrap_or_else(|| self.delay_for_attempt(attempt_index));
@@ -128,6 +156,18 @@ impl RetryPolicyCoreExt for RetryPolicy {
         attempt_index: u32,
         tool_name: Option<&str>,
     ) -> ToolExecutionError {
+        if let Some(guidance) = detect_misconfiguration(error.category, &tool_execution_text(&error)) {
+            let decision = misconfiguration_decision(error.category, error.retry_after());
+            let mut guided = error.with_retry_decision(decision);
+            // Prepend config guidance so the user sees settings/config first.
+            let mut suggestions = vec![std::borrow::Cow::Owned(guidance.user_message())];
+            suggestions.append(&mut guided.recovery_suggestions);
+            guided.recovery_suggestions = suggestions;
+            guided.retryable = false;
+            guided.is_recoverable = false;
+            guided.circuit_breaker_impact = false;
+            return guided;
+        }
         let decision = decision_for_category_with_tool(
             self,
             error.category,
@@ -158,11 +198,44 @@ fn decision_for_category_with_tool(
     policy.decision_for_category(category, attempt_index, retry_after)
 }
 
+pub(crate) fn category_was_retryable(error: &VtCodeError) -> bool {
+    error.category.is_retryable() && !error.is_misconfiguration()
+}
+
+/// Fail-closed decision for user misconfiguration: never retry, preserve
+/// any `Retry-After` hint for diagnostics but force immediate `GiveUp`.
+fn misconfiguration_decision(category: ErrorCategory, retry_after: Option<Duration>) -> RetryDecision {
+    RetryDecision {
+        category,
+        retryable: false,
+        delay: None,
+        retry_after,
+    }
+}
+
 /// The single tool-aware retry rule: command tool timeouts are never
 /// retryable because the underlying process may still be running, so a
 /// retry can contend for locks or duplicate side effects.
 pub(crate) fn is_non_retryable_command_timeout(category: ErrorCategory, tool_name: Option<&str>) -> bool {
     matches!(category, ErrorCategory::Timeout) && tool_name.is_some_and(is_command_tool)
+}
+
+fn unified_tool_text(error: &UnifiedToolError) -> String {
+    let mut text = error.user_message.clone();
+    if let Some(source) = error.source.as_ref() {
+        text.push('\n');
+        text.push_str(&format!("{source:#}"));
+    }
+    text
+}
+
+fn tool_execution_text(error: &ToolExecutionError) -> String {
+    let mut text = error.message.clone();
+    if let Some(original) = error.original_error.as_deref() {
+        text.push('\n');
+        text.push_str(original);
+    }
+    text
 }
 
 /// Typed step produced by [`RetryPolicyCoreExt::step_for_vtcode_error`].
@@ -267,7 +340,7 @@ where
             }
             Err(err) => {
                 let err: VtCodeError = err.into();
-                let category_was_retryable = err.category.is_retryable();
+                let category_was_retryable = category_was_retryable(&err);
                 let step = policy.step_for_vtcode_error(err, attempt, None);
                 match step {
                     RetryStep::GiveUp { decision, error } => {
@@ -525,5 +598,92 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert_eq!(attempts.load(Ordering::SeqCst), 1, "GiveUp should short-circuit retries");
+    }
+
+    #[test]
+    fn misconfiguration_fails_fast_with_guidance() {
+        let policy = RetryPolicy::from_retries(5, Duration::from_secs(1), Duration::from_secs(8), 2.0);
+        let err = VtCodeError::new(
+            ErrorCategory::Authentication,
+            ErrorCode::AuthenticationFailed,
+            "Authentication failed: invalid api key",
+        );
+
+        let decision = policy.decision_for_vtcode_error(&err, 0, None);
+        assert!(!decision.retryable);
+        assert!(decision.delay.is_none());
+
+        let step = policy.step_for_vtcode_error(err, 0, None);
+        match step {
+            RetryStep::GiveUp { error, .. } => {
+                assert!(error.message.contains("Check settings/config first"));
+                assert!(error.message.contains("before retrying"));
+            }
+            RetryStep::Backoff { .. } => panic!("misconfiguration must not back off"),
+        }
+    }
+
+    #[test]
+    fn misconfiguration_model_error_does_not_retry() {
+        let policy = RetryPolicy::from_retries(5, Duration::from_secs(1), Duration::from_secs(8), 2.0);
+        let err = VtCodeError::input(ErrorCode::InvalidArgument, "unknown model 'gpt-99' in agent.model");
+
+        assert!(err.is_misconfiguration());
+        let decision = policy.decision_for_vtcode_error(&err, 0, None);
+        assert!(!decision.retryable);
+    }
+
+    #[test]
+    fn transient_errors_still_retry_without_guidance() {
+        let policy = RetryPolicy::from_retries(3, Duration::from_secs(1), Duration::from_secs(8), 2.0);
+        let err = VtCodeError::network(ErrorCode::ConnectionFailed, "connection reset by peer");
+
+        assert!(!err.is_misconfiguration());
+        let decision = policy.decision_for_vtcode_error(&err, 0, None);
+        assert!(decision.retryable);
+    }
+
+    #[test]
+    fn misconfiguration_does_not_count_as_retryable_category() {
+        let err = VtCodeError::network(ErrorCode::ConnectionFailed, "invalid provider_overrides configuration");
+
+        assert!(err.is_misconfiguration());
+        assert!(!category_was_retryable(&err));
+    }
+
+    #[test]
+    fn llm_auth_error_is_misconfiguration() {
+        let policy = RetryPolicy::from_retries(3, Duration::from_secs(1), Duration::from_secs(8), 2.0);
+        let err = LLMError::Authentication {
+            message: "invalid api key".to_string(),
+            metadata: None,
+        };
+
+        let decision = policy.decision_for_llm_error(&err, 0);
+        assert!(!decision.retryable);
+        assert_eq!(decision.category, ErrorCategory::Authentication);
+    }
+
+    #[test]
+    fn tool_execution_misconfiguration_prepends_guidance() {
+        use crate::tools::registry::ToolErrorType;
+
+        let policy = RetryPolicy::from_retries(3, Duration::from_secs(1), Duration::from_secs(8), 2.0);
+        let err = ToolExecutionError::new(
+            "test_tool".to_string(),
+            ToolErrorType::ExecutionError,
+            "unknown model 'foo' in agent.model".to_string(),
+        );
+
+        let guided = policy.apply_to_tool_execution_error(err, 0, None);
+        assert!(!guided.retryable);
+        assert!(!guided.is_recoverable);
+        assert!(!guided.circuit_breaker_impact);
+        assert!(
+            guided
+                .recovery_suggestions
+                .first()
+                .is_some_and(|s| s.contains("Check settings/config first"))
+        );
     }
 }

@@ -65,9 +65,16 @@ enum PlanSection {
     NonTracker,
 }
 
-fn plan_section(line: &str) -> Option<PlanSection> {
-    let mut label = line.trim().trim_start_matches('>').trim_start();
+fn normalized_plan_section_label(line: &str) -> (&str, bool, bool) {
+    let mut label = line.trim();
+    let mut is_quoted = false;
+    while let Some(unquoted) = label.strip_prefix('>') {
+        is_quoted = true;
+        label = unquoted.trim_start();
+    }
+    let mut is_heading = false;
     while let Some(stripped) = label.strip_prefix('#') {
+        is_heading = true;
         label = stripped.trim_start();
     }
     let label = label
@@ -78,11 +85,23 @@ fn plan_section(line: &str) -> Option<PlanSection> {
         .trim_end_matches(':')
         .trim();
 
+    (label, is_heading, is_quoted)
+}
+
+fn plan_section(line: &str) -> Option<PlanSection> {
+    let (label, _, _) = normalized_plan_section_label(line);
+    plan_section_label(label)
+}
+
+fn plan_section_label(label: &str) -> Option<PlanSection> {
     if label.eq_ignore_ascii_case("Summary") {
         Some(PlanSection::Summary)
     } else if label.eq_ignore_ascii_case("Scope") {
         Some(PlanSection::Scope)
-    } else if label.eq_ignore_ascii_case("Implementation Steps") || label.eq_ignore_ascii_case("Steps") {
+    } else if is_phase_section_label(label)
+        || label.eq_ignore_ascii_case("Implementation Steps")
+        || label.eq_ignore_ascii_case("Steps")
+    {
         Some(PlanSection::Implementation)
     } else if label.eq_ignore_ascii_case("Test Cases and Validation") || label.eq_ignore_ascii_case("Validation") {
         Some(PlanSection::Validation)
@@ -98,32 +117,21 @@ fn plan_section(line: &str) -> Option<PlanSection> {
     }
 }
 
+fn is_phase_section_label(label: &str) -> bool {
+    let Some(rest) = label.get(..5).filter(|prefix| prefix.eq_ignore_ascii_case("phase")) else {
+        return false;
+    };
+    let suffix = &label[rest.len()..];
+    suffix.trim_start().starts_with(|character: char| character.is_ascii_digit())
+}
+
 /// Bare section labels (`Summary`) without markdown hashes are valid plan
 /// markers — the same labels `PlanContent::from_markdown` accepts for display.
-/// Unknown `##` headings stay non-tracker context.
+/// Keep the list/quote normalization aligned with `plan_section`; unknown
+/// `##` headings stay non-tracker context.
 fn is_bare_section_label(trimmed: &str, section: PlanSection) -> bool {
-    if trimmed.starts_with('#') {
-        return false;
-    }
-    let label = trimmed.trim_end_matches(':').trim();
-    match section {
-        PlanSection::Summary => label.eq_ignore_ascii_case("summary"),
-        PlanSection::Scope => label.eq_ignore_ascii_case("scope"),
-        PlanSection::Implementation => {
-            label.eq_ignore_ascii_case("implementation steps") || label.eq_ignore_ascii_case("steps")
-        }
-        PlanSection::Validation => {
-            label.eq_ignore_ascii_case("validation") || label.eq_ignore_ascii_case("test cases and validation")
-        }
-        PlanSection::Assumptions => {
-            label.eq_ignore_ascii_case("assumptions") || label.eq_ignore_ascii_case("assumptions and defaults")
-        }
-        PlanSection::NonTracker => {
-            label.eq_ignore_ascii_case("expected outcomes")
-                || label.eq_ignore_ascii_case("dependencies and prerequisites")
-                || label.eq_ignore_ascii_case("repository facts checked")
-        }
-    }
+    let (label, is_heading, _) = normalized_plan_section_label(trimmed);
+    !is_heading && plan_section_label(label) == Some(section)
 }
 
 fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
@@ -136,8 +144,19 @@ fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
     for line in plan.raw_content.lines() {
         let trimmed = line.trim_start();
         let section = plan_section(line);
-        let is_heading = trimmed.starts_with('#');
-        let is_section_marker = is_heading || section.is_some_and(|section| is_bare_section_label(trimmed, section));
+        let (_, is_heading, is_quoted) = normalized_plan_section_label(line);
+        let is_section_marker =
+            !is_quoted && (is_heading || section.is_some_and(|section| is_bare_section_label(trimmed, section)));
+
+        if is_quoted && (is_heading || section.is_some()) {
+            // A blockquoted heading is quoted plan context, not a real section
+            // of the plan. Keep following unquoted numbered lines out of the
+            // tracker until an actual section heading appears.
+            in_implementation = false;
+            in_non_tracker_section = true;
+            compact_after_summary = false;
+            continue;
+        }
 
         if is_section_marker {
             if let Some(section) = section {
@@ -477,6 +496,54 @@ mod tests {
     }
 
     #[test]
+    fn sparse_plan_phase_headings_are_distilled() {
+        let plan = PlanContent::from_markdown(
+            "sparse-phases".to_string(),
+            "## Summary\nWork.\n\n## Phase 1: Implement\n1. Update the runtime\n\n## Phase 2: Verify\n1. Run focused checks\n\n## Test Cases and Validation\n1. Run the checks\n\n## Assumptions and Defaults\n1. Keep existing behavior\n",
+            None,
+        );
+        let items = task_items_from_plan(&plan);
+        let descriptions: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.get("description").and_then(|value| value.as_str()).map(ToOwned::to_owned))
+            .collect();
+
+        assert_eq!(descriptions, vec!["Update the runtime", "Run focused checks"]);
+    }
+
+    #[test]
+    fn sparse_plan_quoted_headings_are_not_distilled() {
+        let plan = PlanContent::from_markdown(
+            "sparse-quoted".to_string(),
+            "## Summary\nWork.\n\n1. Implement the change\n\n> ## Scope\n1. Keep this context only\n\n> ## Open Questions\n1. Decide the migration strategy\n",
+            None,
+        );
+        let items = task_items_from_plan(&plan);
+        let descriptions: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.get("description").and_then(|value| value.as_str()).map(ToOwned::to_owned))
+            .collect();
+
+        assert_eq!(descriptions, vec!["Implement the change"]);
+    }
+
+    #[test]
+    fn sparse_plan_quoted_implementation_heading_does_not_open_tracker_section() {
+        let plan = PlanContent::from_markdown(
+            "sparse-quoted-implementation".to_string(),
+            "## Summary\nWork.\n\n> ## Implementation Steps\n> 1. Quoted context\n\n## Implementation Steps\n1. Real implementation step\n",
+            None,
+        );
+        let items = task_items_from_plan(&plan);
+        let descriptions: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.get("description").and_then(|value| value.as_str()).map(ToOwned::to_owned))
+            .collect();
+
+        assert_eq!(descriptions, vec!["Real implementation step"]);
+    }
+
+    #[test]
     fn sparse_approved_plan_is_distilled_into_tracker_items() {
         let plan = PlanContent::from_markdown(
             "Launch plan".to_string(),
@@ -495,11 +562,11 @@ mod tests {
 
     #[test]
     fn repeated_plan_steps_are_deduplicated_in_order() {
-        // Dedup applies to implementation steps (named phases or sparse after
-        // Summary). Unknown `## Phase N` headings stay non-tracker context.
+        // Dedup applies to implementation steps in named phases or sparse
+        // plans after Summary.
         let plan = PlanContent::from_markdown(
             "Launch plan".to_string(),
-            "## Summary\nImprove the runtime.\n\n## Implementation Steps\n1. Inspect the runtime\n2. Apply the fix\n1. inspect   the runtime\n[x] Verify the fix\n[x] APPLY THE FIX",
+            "## Summary\nImprove the runtime.\n\n## Phase 1\n1. Inspect the runtime\n2. Apply the fix\n\n## Phase 2\n1. inspect   the runtime\n[x] Verify the fix\n[x] APPLY THE FIX",
             None,
         );
 

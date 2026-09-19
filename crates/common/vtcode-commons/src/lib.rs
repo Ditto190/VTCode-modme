@@ -46,6 +46,7 @@ pub mod llm;
 pub mod lr_map;
 pub mod memory;
 pub mod message_metadata;
+pub mod misconfiguration;
 pub mod modal_hints;
 pub mod model_family;
 pub mod paths;
@@ -92,6 +93,10 @@ pub(crate) use interjection::{
     drain_formatted, format_interjection, user_query,
 };
 pub use interner::{StringId, StringInterner};
+pub use misconfiguration::{
+    ConfigGuidance, MisconfigurationKind, detect_misconfiguration, detect_misconfiguration_in_anyhow,
+    detect_misconfiguration_in_llm_error, is_misconfiguration,
+};
 pub use modal_hints::{
     APPROVAL_NAVIGATE_CANCEL, APPROVAL_NAVIGATE_DENY, APPROVAL_NAVIGATE_STOP, choose_handling_line, truncate_modal_text,
 };

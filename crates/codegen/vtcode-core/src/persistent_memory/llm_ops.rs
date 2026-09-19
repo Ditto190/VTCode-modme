@@ -157,6 +157,10 @@ pub(crate) async fn classify_facts_strict(
 
 /// Try a memory LLM operation with primary route, falling back to the fallback route on error.
 /// This macro expands to the full routing/fallback pattern used by all memory LLM calls.
+fn memory_route_fallback_allowed(error: &anyhow::Error) -> bool {
+    vtcode_commons::detect_misconfiguration_in_anyhow(error).is_none()
+}
+
 macro_rules! try_with_memory_routes {
     ($runtime_config:expr, $vt_cfg:expr, $workspace_root:expr, $phase:expr, $provider_fn:expr) => {
         async {
@@ -168,6 +172,9 @@ macro_rules! try_with_memory_routes {
             match $provider_fn(__provider.as_ref(), &__routes.primary).await {
                 Ok(result) => Ok(result),
                 Err(__primary_err) => {
+                    if !memory_route_fallback_allowed(&__primary_err) {
+                        return Err(__primary_err);
+                    }
                     let Some(__fallback) = __routes.fallback.as_ref() else {
                         return Err(__primary_err);
                     };
@@ -626,4 +633,17 @@ fn runtime_provider_name(runtime_config: &RuntimeAgentConfig) -> String {
     infer_provider_from_model(&runtime_config.model)
         .map(|p| p.to_string().to_lowercase())
         .unwrap_or_else(|| "gemini".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::memory_route_fallback_allowed;
+
+    #[test]
+    fn memory_route_fallback_skips_configuration_failures() {
+        assert!(!memory_route_fallback_allowed(&anyhow::anyhow!(
+            "unknown model 'memory-model' in agent.small_model.model"
+        )));
+        assert!(memory_route_fallback_allowed(&anyhow::anyhow!("connection reset by peer")));
+    }
 }

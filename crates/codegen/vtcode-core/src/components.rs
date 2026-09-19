@@ -397,8 +397,8 @@ impl<Ctx: HasRetryPolicy> RetryProvider<Ctx> for ExponentialBackoffRetry {
         ctx.retry_policy().max_attempts.max(1)
     }
 
-    fn should_retry(_ctx: &Ctx, _tool_name: &str, _attempt: u32, _error: &Error) -> bool {
-        true
+    fn should_retry(_ctx: &Ctx, _tool_name: &str, _attempt: u32, error: &Error) -> bool {
+        vtcode_commons::detect_misconfiguration_in_anyhow(error).is_none()
     }
 
     fn backoff_duration(ctx: &Ctx, _tool_name: &str, attempt: u32) -> Duration {

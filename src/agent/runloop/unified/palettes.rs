@@ -14,8 +14,8 @@ use vtcode_ui::tui::core::convert_style;
 use crate::agent::runloop::slash_commands::{SessionPaletteMode, ThemePaletteMode};
 use crate::agent::runloop::ui::build_inline_header_context;
 use crate::agent::runloop::unified::settings_interactive::{
-    ACTION_OPEN_ROOT, ACTION_RELOAD, ACTION_RESET, ACTION_RESET_CANCEL, ACTION_RESET_CONFIRM, SettingsPaletteState,
-    apply_settings_action, parent_view_path, show_settings_palette,
+    ACTION_BACK, ACTION_OPEN_ROOT, ACTION_RELOAD, ACTION_RESET, ACTION_RESET_CANCEL, ACTION_RESET_CONFIRM,
+    SettingsPaletteState, apply_settings_action, parent_view_path, show_settings_palette,
 };
 use crate::agent::runloop::unified::url_guard::UrlGuardPrompt;
 use crate::agent::runloop::welcome::SessionBootstrap;
@@ -519,7 +519,7 @@ fn should_remember_settings_selection(selection: &InlineListSelection) -> bool {
     match selection {
         InlineListSelection::ConfigAction(action) => !matches!(
             action.as_str(),
-            ACTION_OPEN_ROOT | ACTION_RELOAD | ACTION_RESET | ACTION_RESET_CANCEL | ACTION_RESET_CONFIRM
+            ACTION_OPEN_ROOT | ACTION_RELOAD | ACTION_RESET | ACTION_RESET_CANCEL | ACTION_RESET_CONFIRM | ACTION_BACK
         ),
         _ => true,
     }
@@ -645,6 +645,7 @@ mod tests {
             ACTION_RESET,
             ACTION_RESET_CANCEL,
             ACTION_RESET_CONFIRM,
+            ACTION_BACK,
         ] {
             assert!(!should_remember_settings_selection(&InlineListSelection::ConfigAction(action.to_string(),)));
         }

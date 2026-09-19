@@ -10,7 +10,11 @@ use crate::tools::registry::{ToolErrorType, ToolExecutionError};
 use crate::tools::unified_error::{UnifiedErrorKind, UnifiedToolError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub use vtcode_commons::{BackoffStrategy, ErrorCategory, Retryability};
+use vtcode_commons::sanitizer::sanitize_provider_diagnostic;
+pub use vtcode_commons::{
+    BackoffStrategy, ConfigGuidance, ErrorCategory, MisconfigurationKind, Retryability, detect_misconfiguration,
+    is_misconfiguration,
+};
 
 /// Result type alias for VT Code operations.
 pub type Result<T> = std::result::Result<T, VtCodeError>;
@@ -186,6 +190,76 @@ impl VtCodeError {
     pub fn from_category<S: Into<String>>(category: ErrorCategory, message: S) -> Self {
         Self::new(category, ErrorCode::from_category(category), message)
     }
+
+    /// Check settings/config first: return guidance when this failure is
+    /// caused by user misconfiguration.
+    ///
+    /// Config error codes (`ConfigInvalid`/`ConfigMissing`/`ConfigParseFailed`)
+    /// are always misconfiguration. Otherwise the message plus context is
+    /// matched against config markers (credentials, model, provider,
+    /// `base_url`, `vtcode.toml`, MCP, sampling ranges). Transient failures
+    /// and LLM argument mistakes return `None`.
+    #[must_use]
+    pub fn misconfiguration_guidance(&self) -> Option<ConfigGuidance> {
+        if matches!(self.code, ErrorCode::ConfigInvalid | ErrorCode::ConfigMissing | ErrorCode::ConfigParseFailed) {
+            if let Some(guidance) = self.message_guidance() {
+                return Some(guidance);
+            }
+            return Some(ConfigGuidance {
+                kind: MisconfigurationKind::ConfigFile,
+                setting: "vtcode.toml",
+                location: "workspace / user / system config layers",
+                fix: std::borrow::Cow::Borrowed(
+                    "Invalid config file. Validate vtcode.toml syntax and fields, then retry.",
+                ),
+            });
+        }
+        self.message_guidance()
+    }
+
+    /// Whether this failure is user misconfiguration that must be fixed
+    /// before retrying.
+    #[must_use]
+    pub fn is_misconfiguration(&self) -> bool {
+        self.misconfiguration_guidance().is_some()
+    }
+
+    /// Attach config guidance to the error so it is visible in `Display`
+    /// (`{category}: {message}`) and does not get retried blindly.
+    /// Idempotent: does nothing when guidance is absent or already present.
+    #[must_use]
+    pub fn with_misconfiguration_guidance(mut self) -> Self {
+        let Some(guidance) = self.misconfiguration_guidance() else {
+            return self;
+        };
+        let suffix = guidance.user_message();
+        // Use the full terminal phrase as the idempotency marker; it is far
+        // less likely to collide with user content than the shorter prefix.
+        if self.message.contains("Correct the configuration before retrying.") {
+            return self;
+        }
+        // `context` is not part of thiserror's Display output, so keep the
+        // guidance in the visible message even when the provider returned a
+        // large diagnostic payload.
+        self.message.push(' ');
+        self.message.push_str(&suffix);
+        self
+    }
+
+    fn message_guidance(&self) -> Option<ConfigGuidance> {
+        let mut haystack = self.message.clone();
+        if let Some(context) = self.context.as_deref() {
+            haystack.push('\n');
+            haystack.push_str(context);
+        }
+        let mut source = self.source.as_deref().map(|source| source as &dyn std::error::Error);
+        while let Some(error) = source {
+            haystack.push('\n');
+            haystack.push_str(&error.to_string());
+            source = error.source();
+        }
+        detect_misconfiguration(self.category, &haystack)
+    }
 }
 
 impl ErrorCode {
@@ -247,13 +321,17 @@ impl ErrorCode {
 // Implement conversions from common error types
 impl From<std::io::Error> for VtCodeError {
     fn from(err: std::io::Error) -> Self {
-        VtCodeError::system(ErrorCode::IoError, err.to_string()).with_source(err)
+        VtCodeError::system(ErrorCode::IoError, err.to_string())
+            .with_source(err)
+            .with_misconfiguration_guidance()
     }
 }
 
 impl From<serde_json::Error> for VtCodeError {
     fn from(err: serde_json::Error) -> Self {
-        VtCodeError::config(ErrorCode::ConfigParseFailed, err.to_string()).with_source(err)
+        VtCodeError::config(ErrorCode::ConfigParseFailed, err.to_string())
+            .with_source(err)
+            .with_misconfiguration_guidance()
     }
 }
 
@@ -266,14 +344,18 @@ impl From<reqwest::Error> for VtCodeError {
         } else {
             ErrorCode::RequestFailed
         };
-        VtCodeError::network(code, err.to_string()).with_source(err)
+        VtCodeError::network(code, err.to_string())
+            .with_source(err)
+            .with_misconfiguration_guidance()
     }
 }
 
 impl From<anyhow::Error> for VtCodeError {
     fn from(err: anyhow::Error) -> Self {
         let category = vtcode_commons::classify_anyhow_error(&err);
-        VtCodeError::new(category, ErrorCode::from_category(category), err.to_string()).with_context(format!("{err:#}"))
+        VtCodeError::new(category, ErrorCode::from_category(category), err.to_string())
+            .with_context(format!("{err:#}"))
+            .with_misconfiguration_guidance()
     }
 }
 
@@ -315,14 +397,20 @@ impl From<LLMError> for VtCodeError {
             }
         };
         let message = llm_error_message(&err);
+        let metadata_context = llm_metadata_context(&err);
         let retry_after = llm_retry_after(&err);
 
-        let error = VtCodeError::new(category, code, message).with_source(err);
-        if let Some(retry_after) = retry_after {
+        let mut error = VtCodeError::new(category, code, message);
+        if let Some(context) = metadata_context {
+            error = error.with_context(context);
+        }
+        let error = error.with_source(err);
+        let error = if let Some(retry_after) = retry_after {
             error.with_retry_after(retry_after)
         } else {
             error
-        }
+        };
+        error.with_misconfiguration_guidance()
     }
 }
 
@@ -343,7 +431,7 @@ impl From<UnifiedToolError> for VtCodeError {
             error = error.with_context(metadata.join(", "));
         }
 
-        error.with_source(err)
+        error.with_source(err).with_misconfiguration_guidance()
     }
 }
 
@@ -364,7 +452,7 @@ impl From<ToolExecutionError> for VtCodeError {
             error = error.with_context(context_parts.join(", "));
         }
 
-        error
+        error.with_misconfiguration_guidance()
     }
 }
 
@@ -379,6 +467,25 @@ fn llm_error_message(error: &LLMError) -> String {
             .and_then(|meta| meta.message.clone())
             .unwrap_or_else(|| "rate limit exceeded".to_string()),
     }
+}
+
+fn llm_metadata_context(error: &LLMError) -> Option<String> {
+    let metadata = match error {
+        LLMError::Authentication { metadata, .. }
+        | LLMError::RateLimit { metadata }
+        | LLMError::InvalidRequest { metadata, .. }
+        | LLMError::Network { metadata, .. }
+        | LLMError::Provider { metadata, .. } => metadata.as_deref(),
+    }?;
+
+    let mut context = Vec::new();
+    if let Some(code) = metadata.code.as_deref() {
+        context.push(format!("provider_code={}", sanitize_provider_diagnostic(code.as_bytes())));
+    }
+    if let Some(message) = metadata.message.as_deref() {
+        context.push(format!("provider_message={}", sanitize_provider_diagnostic(message.as_bytes())));
+    }
+    (!context.is_empty()).then(|| context.join(", "))
 }
 
 fn llm_retry_after(error: &LLMError) -> Option<std::time::Duration> {
@@ -470,6 +577,32 @@ mod tests {
     }
 
     #[test]
+    fn test_llm_metadata_marks_converted_error_as_misconfiguration() {
+        let err = LLMError::Provider {
+            message: "provider request failed".to_string(),
+            metadata: Some(LLMErrorMetadata::new(
+                "OpenAI",
+                Some(404),
+                Some("model_not_found".to_string()),
+                None,
+                None,
+                None,
+                Some("The requested model does not exist".to_string()),
+            )),
+        };
+
+        let converted = VtCodeError::from(err);
+        assert!(converted.is_misconfiguration());
+        assert!(converted.message.contains("Check settings/config first"));
+        assert!(
+            converted
+                .context
+                .as_deref()
+                .is_some_and(|context| context.contains("provider_code=model_not_found"))
+        );
+    }
+
+    #[test]
     fn test_llm_error_conversion_preserves_fractional_retry_after() {
         let err = LLMError::RateLimit {
             metadata: Some(LLMErrorMetadata::new(
@@ -522,6 +655,16 @@ mod tests {
     }
 
     #[test]
+    fn test_unified_tool_source_marks_converted_error_as_misconfiguration() {
+        let err = UnifiedToolError::new(UnifiedErrorKind::Network, "provider request failed")
+            .with_source(anyhow::anyhow!("unknown model 'gpt-99' in agent.model"));
+
+        let converted = VtCodeError::from(err);
+        assert!(converted.is_misconfiguration());
+        assert!(converted.message.contains("Check settings/config first"));
+    }
+
+    #[test]
     fn test_tool_execution_error_conversion_uses_original_context() {
         let err = ToolExecutionError::with_original_error(
             "command_session".to_string(),
@@ -539,5 +682,61 @@ mod tests {
                 .as_deref()
                 .is_some_and(|ctx| ctx.contains("original_error=timed out waiting for process"))
         );
+    }
+
+    #[test]
+    fn test_misconfiguration_guidance_for_auth() {
+        let err = VtCodeError::new(
+            ErrorCategory::Authentication,
+            ErrorCode::AuthenticationFailed,
+            "Authentication failed: invalid api key",
+        );
+        assert!(err.is_misconfiguration());
+        let guided = err.with_misconfiguration_guidance();
+        assert!(guided.message.contains("Check settings/config first"));
+        assert!(guided.message.contains("before retrying"));
+    }
+
+    #[test]
+    fn test_misconfiguration_guidance_for_config_code() {
+        let err = VtCodeError::config(ErrorCode::ConfigInvalid, "custom_providers[x]: `base_url` must not be empty");
+        assert!(err.is_misconfiguration());
+    }
+
+    #[test]
+    fn test_transient_has_no_misconfiguration() {
+        let err = VtCodeError::network(ErrorCode::ConnectionFailed, "connection reset by peer");
+        assert!(!err.is_misconfiguration());
+        let guided = err.with_misconfiguration_guidance();
+        assert!(!guided.message.contains("Check settings/config first"));
+    }
+
+    #[test]
+    fn test_misconfiguration_is_idempotent() {
+        let err = VtCodeError::new(ErrorCategory::Authentication, ErrorCode::AuthenticationFailed, "bad key")
+            .with_misconfiguration_guidance()
+            .with_misconfiguration_guidance();
+        assert_eq!(err.message.matches("Correct the configuration before retrying.").count(), 1);
+    }
+
+    #[test]
+    fn test_misconfiguration_guidance_does_not_echo_secrets() {
+        let secret = concat!("sk-", "test1234567890abcdef");
+        let err = VtCodeError::new(
+            ErrorCategory::Authentication,
+            ErrorCode::AuthenticationFailed,
+            format!("Authentication failed: invalid api key {secret}"),
+        );
+        let guidance = err.misconfiguration_guidance().expect("auth must match");
+        assert!(!guidance.user_message().contains(secret));
+    }
+
+    #[test]
+    fn test_misconfiguration_guidance_stays_visible_for_large_errors() {
+        let mut message = "x".repeat(8 * 1024);
+        message.push_str(" invalid api key");
+        let guided = VtCodeError::execution(ErrorCode::Unexpected, message).with_misconfiguration_guidance();
+        assert!(guided.message.contains("Check settings/config first"));
+        assert!(guided.to_string().contains("Correct the configuration before retrying."));
     }
 }

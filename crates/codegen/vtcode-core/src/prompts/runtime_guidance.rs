@@ -79,6 +79,7 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Never use emojis"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("incl. verification recaps"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("not checkmarks/crosses"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("retrieved evidence"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("Keep this file concise and under 150 lines"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("vtcode-exec-events::ThreadEvent"));
     }

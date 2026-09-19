@@ -287,7 +287,8 @@ pub use dotfile_protection::{
     ProtectionDecision, ProtectionViolation, get_global_guardian, init_global_guardian, is_protected_dotfile,
 };
 pub use error::{
-    ErrorCategory as VtCodeErrorCategory, ErrorCode as VtCodeErrorCode, Result as VtCodeResult, VtCodeError,
+    ConfigGuidance, ErrorCategory as VtCodeErrorCategory, ErrorCode as VtCodeErrorCode, MisconfigurationKind,
+    Result as VtCodeResult, VtCodeError,
 };
 pub use exec::events::{
     AgentMessageItem, CommandExecutionItem, CommandExecutionStatus, ContextResetEvent, ContextResetTrigger,

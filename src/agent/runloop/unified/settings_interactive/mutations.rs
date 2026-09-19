@@ -14,7 +14,7 @@ use crate::agent::runloop::unified::config_section_headings::{heading_for_path, 
 
 use super::SettingsPaletteState;
 use super::docs::{FIELD_DOCS, FieldDoc};
-use super::path::{PathToken, get_node, get_node_mut, parse_path_tokens, set_node};
+use super::path::{PathToken, get_node, get_node_mut, parse_path_tokens, path_with_key, set_node};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ScalarOperation {
@@ -486,7 +486,8 @@ fn render_table_with_comments(
         && !path.is_empty()
     {
         write_section_comments(output, path);
-        writeln!(output, "[{path}]").context("Failed to render table header")?;
+        let header = toml_header_path(path)?;
+        writeln!(output, "[{header}]").context("Failed to render table header")?;
     }
 
     let mut scalar_keys = Vec::new();
@@ -600,7 +601,59 @@ fn wrap_comment(text: &str, max_width: usize) -> Vec<String> {
 
 fn build_path(prefix: Option<&str>, key: &str) -> String {
     match prefix {
-        Some(prefix) if !prefix.is_empty() => format!("{prefix}.{key}"),
-        _ => key.to_string(),
+        Some(prefix) if !prefix.is_empty() => path_with_key(prefix, key),
+        _ => path_with_key("", key),
     }
+}
+
+fn toml_header_path(path: &str) -> Result<String> {
+    let tokens = parse_path_tokens(path).with_context(|| format!("Invalid TOML table path '{path}'"))?;
+    let mut header = String::new();
+
+    for token in tokens {
+        match token {
+            PathToken::Key(key) => {
+                if !header.is_empty() {
+                    header.push('.');
+                }
+                header.push_str(&toml_key_component(&key));
+            }
+            PathToken::Index(index) => {
+                bail!("Cannot render array item {index} as a TOML table header: {path}");
+            }
+        }
+    }
+
+    if header.is_empty() {
+        bail!("Cannot render an empty TOML table header for path '{path}'");
+    }
+    Ok(header)
+}
+
+fn toml_key_component(key: &str) -> String {
+    if !key.is_empty()
+        && key
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return key.to_string();
+    }
+
+    let mut escaped = String::with_capacity(key.len());
+    for character in key.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\u{0008}' => escaped.push_str("\\b"),
+            '\t' => escaped.push_str("\\t"),
+            '\n' => escaped.push_str("\\n"),
+            '\u{000C}' => escaped.push_str("\\f"),
+            '\r' => escaped.push_str("\\r"),
+            character if character.is_control() => {
+                let _ = write!(escaped, "\\u{:04X}", character as u32);
+            }
+            character => escaped.push(character),
+        }
+    }
+    format!("\"{escaped}\"")
 }

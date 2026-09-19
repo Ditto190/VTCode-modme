@@ -344,6 +344,10 @@ impl TimeoutDetector {
     /// Determine if an error should trigger a retry.
     /// Uses case-insensitive matching to avoid extra string allocations.
     pub async fn should_retry(&self, operation_type: &OperationType, error: &anyhow::Error, attempt: u32) -> bool {
+        if vtcode_commons::detect_misconfiguration_in_anyhow(error).is_some() {
+            return false;
+        }
+
         let config = self.get_config(operation_type).await;
 
         if attempt >= config.max_retries {
@@ -575,5 +579,18 @@ mod tests {
 
         let delay2 = detector.calculate_retry_delay(&OperationType::ApiCall, 1).await;
         assert!(delay2 > delay); // Should increase with backoff
+    }
+
+    #[tokio::test]
+    async fn test_misconfiguration_does_not_retry_even_when_pattern_matches() {
+        let detector = TimeoutDetector::new();
+        let config = TimeoutConfig {
+            retry_on_errors: vec!["network".to_string()],
+            ..Default::default()
+        };
+        detector.set_config(OperationType::ApiCall, config).await;
+
+        let error = anyhow::anyhow!("network error: invalid endpoint in base_url");
+        assert!(!detector.should_retry(&OperationType::ApiCall, &error, 0).await);
     }
 }

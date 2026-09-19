@@ -958,6 +958,168 @@ fn pty_command_header_preserves_status_color_on_bullet() {
 }
 
 #[test]
+fn pty_multiline_command_header_body_matches_single_line_tool_header() {
+    // Screenshot 2026-09-18: a wrapped `• Ran ...` header with `│`
+    // continuations rendered shell token colors (bold `cargo`/`echo`) while
+    // single-line Tool headers stay uniform. Both header lines must render
+    // as uniform non-bold foreground text: status bullet, bold verb only.
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let bold_command = Arc::new(InlineTextStyle {
+        color: Some(AnsiColorEnum::Ansi(anstyle::AnsiColor::Green)),
+        effects: anstyle::Effects::BOLD,
+        ..InlineTextStyle::default()
+    });
+    let option = Arc::new(InlineTextStyle {
+        color: Some(AnsiColorEnum::Ansi(anstyle::AnsiColor::Red)),
+        ..InlineTextStyle::default()
+    });
+    let plain = Arc::new(InlineTextStyle::default());
+    // Shell-highlighted multi-segment header, as produced by live PTY
+    // segment splitting: bullet, verb, body with bold command + option.
+    session.push_line(
+        InlineMessageKind::Pty,
+        vec![
+            InlineSegment {
+                text: "• ".to_string(), style: Arc::clone(&plain)
+            },
+            InlineSegment { text: "Ran".to_string(), style: Arc::clone(&plain) },
+            InlineSegment { text: " ".to_string(), style: Arc::clone(&plain) },
+            InlineSegment {
+                text: "cargo".to_string(),
+                style: Arc::clone(&bold_command),
+            },
+            InlineSegment {
+                text: " nextest run".to_string(),
+                style: Arc::clone(&plain),
+            },
+            InlineSegment {
+                text: " -p".to_string(),
+                style: Arc::clone(&option),
+            },
+        ],
+    );
+    // Wrapped `│` continuation carrying shell token styles, including bold.
+    session.push_line(
+        InlineMessageKind::Pty,
+        vec![
+            InlineSegment { text: "  ".to_string(), style: Arc::clone(&plain) },
+            InlineSegment { text: "│".to_string(), style: Arc::clone(&plain) },
+            InlineSegment { text: " ".to_string(), style: Arc::clone(&plain) },
+            InlineSegment {
+                text: "/tmp/theme6.log".to_string(),
+                style: Arc::clone(&plain),
+            },
+            InlineSegment { text: " ".to_string(), style: Arc::clone(&plain) },
+            InlineSegment {
+                text: "echo".to_string(),
+                style: Arc::clone(&bold_command),
+            },
+        ],
+    );
+
+    let theme_fg = InlineTheme::default().foreground.map(ratatui_color_from_ansi);
+    let first = session.reflow_pty_lines(0, 80);
+    let first_spans: Vec<_> = first.iter().flat_map(|line| line.line.spans.iter()).collect();
+    let first_text: String = first_spans.iter().map(|span| span.content.as_ref()).collect();
+    assert!(first_text.contains("• Ran cargo nextest run -p"), "header text preserved, got: {first_text:?}");
+    for span in &first_spans {
+        let content: &str = span.content.as_ref();
+        if content.is_empty() {
+            continue;
+        }
+        if content == "Ran" {
+            assert!(span.style.add_modifier.contains(Modifier::BOLD), "verb stays bold");
+        } else if content == "• " {
+            assert!(
+                !span.style.add_modifier.contains(Modifier::BOLD),
+                "bullet not bold, got {:?}",
+                span.style.add_modifier
+            );
+        } else {
+            assert!(
+                !span.style.add_modifier.contains(Modifier::BOLD),
+                "header body not bold, got {:?} for {content:?}",
+                span.style.add_modifier
+            );
+            assert_eq!(span.style.fg, theme_fg, "header body uses foreground, got {:?} for {content:?}", span.style.fg);
+        }
+    }
+
+    let second = session.reflow_pty_lines(1, 80);
+    let second_spans: Vec<_> = second.iter().flat_map(|line| line.line.spans.iter()).collect();
+    let second_text: String = second_spans.iter().map(|span| span.content.as_ref()).collect();
+    assert!(second_text.contains("/tmp/theme6.log"), "continuation path kept, got: {second_text:?}");
+    assert!(second_text.contains("echo"), "continuation command kept, got: {second_text:?}");
+    for span in &second_spans {
+        let content: &str = span.content.as_ref();
+        if content.trim().is_empty() {
+            continue;
+        }
+        assert!(
+            !span.style.add_modifier.contains(Modifier::BOLD),
+            "continuation not bold, got {:?} for {content:?}",
+            span.style.add_modifier
+        );
+        assert_eq!(span.style.fg, theme_fg, "continuation uses foreground, got {:?} for {content:?}", span.style.fg);
+    }
+}
+
+#[test]
+fn pty_pipe_prefixed_output_after_output_keeps_pty_style() {
+    // A `│`-prefixed row that follows output (not a header) must keep PTY
+    // body styling instead of chaining onto the uniform header treatment.
+    let foreground = AnsiColorEnum::Rgb(RgbColor(0xCC, 0xCC, 0xCC));
+    let pty_body = AnsiColorEnum::Rgb(RgbColor(0x66, 0x66, 0x66));
+    let mut session = Session::new(
+        InlineTheme {
+            foreground: Some(foreground),
+            pty_body: Some(pty_body),
+            ..Default::default()
+        },
+        None,
+        VIEW_ROWS,
+    );
+    session.push_line(InlineMessageKind::Pty, vec![make_pty_segment("  └ some output")]);
+    session.push_line(InlineMessageKind::Pty, vec![make_pty_segment("  │ tree output")]);
+
+    let rendered = session.reflow_pty_lines(1, 80);
+    let tree_span = rendered
+        .iter()
+        .flat_map(|line| line.line.spans.iter())
+        .find(|span| span.content.contains("tree"))
+        .expect("expected tree span");
+    assert_eq!(tree_span.style.fg, Some(Color::Rgb(0x66, 0x66, 0x66)));
+}
+
+#[test]
+fn pty_pipe_prefixed_output_after_wrapped_header_keeps_pty_style() {
+    let foreground = AnsiColorEnum::Rgb(RgbColor(0xCC, 0xCC, 0xCC));
+    let pty_body = AnsiColorEnum::Rgb(RgbColor(0x66, 0x66, 0x66));
+    let mut session = Session::new(
+        InlineTheme {
+            foreground: Some(foreground),
+            pty_body: Some(pty_body),
+            ..Default::default()
+        },
+        None,
+        VIEW_ROWS,
+    );
+    session.push_line(InlineMessageKind::Pty, vec![make_pty_segment("• Ran long command")]);
+    session.push_line(InlineMessageKind::Pty, vec![make_pty_segment("  │ wrapped argument")]);
+    // The four-space output gutter is distinct from the two-space header
+    // continuation prefix, even when the program output starts with `│`.
+    session.push_line(InlineMessageKind::Pty, vec![make_pty_segment("    │ program output")]);
+
+    let rendered = session.reflow_pty_lines(2, 80);
+    let output_span = rendered
+        .iter()
+        .flat_map(|line| line.line.spans.iter())
+        .find(|span| span.content.contains("program output"))
+        .expect("expected pipe-prefixed output span");
+    assert_eq!(output_span.style.fg, Some(Color::Rgb(0x66, 0x66, 0x66)));
+}
+
+#[test]
 fn tool_command_header_does_not_use_accent_tool_body_as_fallback() {
     let foreground = AnsiColorEnum::Rgb(RgbColor(0xCC, 0xCC, 0xCC));
     let mut session = Session::new(

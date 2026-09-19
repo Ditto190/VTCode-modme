@@ -8,7 +8,10 @@ use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 use vtcode_core::llm::provider::{self as uni};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
-use vtcode_ui::tui::app::{InlineHandle, InlineHeaderContext, InlineListSelection, SubmittedInput};
+use vtcode_ui::tui::app::{
+    InlineHandle, InlineHeaderContext, InlineListItem, InlineListSelection, SubmittedInput, TransientRequest,
+    WizardModalMode, WizardOverlayRequest, WizardStep,
+};
 
 use crate::agent::runloop::model_picker::{ModelPickerProgress, ModelPickerStart, ModelPickerState};
 use crate::agent::runloop::slash_commands::SessionPaletteMode;
@@ -19,7 +22,8 @@ use crate::agent::runloop::unified::palettes::{
 };
 use crate::agent::runloop::unified::planning_workflow::{PlanExecutionContext, PlanExecutionTarget};
 use crate::agent::runloop::unified::settings_interactive::{
-    ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, show_settings_palette,
+    ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, ACTION_PREFIX_EDIT, apply_string_edit, begin_string_edit,
+    show_settings_palette,
 };
 use crate::agent::runloop::unified::ui_interaction::PlaceholderSpinner;
 use crate::agent::runloop::unified::url_guard::{
@@ -141,7 +145,7 @@ impl<'a> InlineModalProcessor<'a> {
         match self.model_picker.handle_submit(renderer, selection).await? {
             ModelPickerOutcome::SkipPalette => Ok(InlineLoopAction::Continue),
             ModelPickerOutcome::ForwardToPalette(selection) => {
-                if let Some(action) = self.handle_settings_submit(&selection) {
+                if let Some(action) = self.handle_settings_submit(&selection)? {
                     return Ok(action);
                 }
                 if self.handle_palette_redirect(renderer, &selection).await? {
@@ -172,7 +176,77 @@ impl<'a> InlineModalProcessor<'a> {
             return Ok(InlineLoopAction::Continue);
         }
 
+        if let Some(ActivePalette::Settings { state, .. }) = self.palette.state.as_mut()
+            && state.pending_edit_path.take().is_some()
+        {
+            show_settings_palette(renderer, state.as_ref(), state.selection_for_view(state.view_path.as_deref()))?;
+            return Ok(InlineLoopAction::Continue);
+        }
+
         self.palette.handle_cancel(renderer)?;
+        Ok(InlineLoopAction::Continue)
+    }
+
+    pub(crate) async fn handle_wizard_submit(
+        &mut self,
+        renderer: &mut AnsiRenderer,
+        selections: Vec<InlineListSelection>,
+    ) -> Result<InlineLoopAction> {
+        let Some(ActivePalette::Settings { state, .. }) = self.palette.state.as_mut() else {
+            return Ok(InlineLoopAction::Continue);
+        };
+        let Some(path) = state.pending_edit_path.take() else {
+            return Ok(InlineLoopAction::Continue);
+        };
+
+        let value = selections.into_iter().find_map(|selection| match selection {
+            InlineListSelection::RequestUserInputAnswer { other, selected, .. } => {
+                other.or_else(|| selected.into_iter().next())
+            }
+            _ => None,
+        });
+
+        let Some(value) = value else {
+            show_settings_palette(renderer, state.as_ref(), None)?;
+            return Ok(InlineLoopAction::Continue);
+        };
+
+        let outcome = apply_string_edit(state, &path, value);
+        match outcome {
+            Ok(outcome) => {
+                if let Some(message) = outcome.message {
+                    renderer.line(MessageStyle::Info, &message)?;
+                }
+                if outcome.saved
+                    && let Err(err) = crate::agent::runloop::unified::palettes::refresh_runtime_config_from_manager(
+                        renderer,
+                        self.model_picker.handle,
+                        self.model_picker.config,
+                        self.model_picker.vt_cfg,
+                        self.model_picker.provider_client.as_ref(),
+                        self.model_picker.session_bootstrap,
+                        self.model_picker.full_auto,
+                    )
+                    .await
+                {
+                    renderer.line(
+                        MessageStyle::Warning,
+                        &format!("Settings saved, but the running session kept its last valid runtime config: {err:#}"),
+                    )?;
+                }
+            }
+            Err(err) => {
+                renderer.line(
+                    MessageStyle::Warning,
+                    &format!("Could not apply settings change; keeping the last valid configuration: {err:#}"),
+                )?;
+            }
+        }
+
+        if let Some(ActivePalette::Settings { state, .. }) = self.palette.state.as_ref() {
+            let selected = InlineListSelection::ConfigAction(format!("{ACTION_PREFIX_EDIT}{path}"));
+            show_settings_palette(renderer, state.as_ref(), Some(selected))?;
+        }
         Ok(InlineLoopAction::Continue)
     }
 
@@ -318,16 +392,58 @@ impl<'a> InlineModalProcessor<'a> {
         }
     }
 
-    fn handle_settings_submit(&mut self, selection: &InlineListSelection) -> Option<InlineLoopAction> {
+    fn handle_settings_submit(&mut self, selection: &InlineListSelection) -> Result<Option<InlineLoopAction>> {
+        if let (Some(ActivePalette::Settings { state, .. }), InlineListSelection::ConfigAction(action)) =
+            (self.palette.state.as_mut(), selection)
+            && let Some(path) = action.strip_prefix(ACTION_PREFIX_EDIT)
+        {
+            let current = begin_string_edit(state, path)?;
+            self.show_settings_string_editor(path, current);
+            return Ok(Some(InlineLoopAction::Continue));
+        }
+
         match (self.palette.state.as_ref(), selection) {
             (Some(ActivePalette::Settings { .. }), InlineListSelection::ConfigAction(action))
                 if action == ACTION_CONFIGURE_EDITOR =>
             {
                 self.palette.state.take();
-                Some(InlineLoopAction::Submit("/config tools.editor".into()))
+                Ok(Some(InlineLoopAction::Submit("/config tools.editor".into())))
             }
-            _ => None,
+            _ => Ok(None),
         }
+    }
+
+    fn show_settings_string_editor(&self, path: &str, current: String) {
+        self.model_picker
+            .handle
+            .show_transient(TransientRequest::Wizard(WizardOverlayRequest {
+                title: "Edit setting".to_string(),
+                steps: vec![WizardStep {
+                    title: "Value".to_string(),
+                    question: format!("Enter a new value for `{path}`."),
+                    items: vec![InlineListItem {
+                        title: "Edit value".to_string(),
+                        subtitle: Some("Type the value below, then press Enter to save it.".to_string()),
+                        badge: None,
+                        indent: 0,
+                        selection: Some(InlineListSelection::RequestUserInputAnswer {
+                            question_id: "settings_value".to_string(),
+                            selected: Vec::new(),
+                            other: Some(String::new()),
+                        }),
+                        search_value: Some("edit value custom response".to_string()),
+                    }],
+                    completed: false,
+                    answer: None,
+                    allow_freeform: true,
+                    freeform_label: Some("Value".to_string()),
+                    freeform_placeholder: Some("Type a value".to_string()),
+                    freeform_default: Some(current),
+                }],
+                current_step: 0,
+                search: None,
+                mode: WizardModalMode::TabbedList,
+            }));
     }
 }
 

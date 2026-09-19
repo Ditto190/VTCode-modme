@@ -4,19 +4,25 @@ use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
 use crate::agent::runloop::unified::config_section_headings::{heading_for_path, humanize_identifier};
 
 use super::docs::FieldDoc;
+use super::path::path_with_key;
 use vtcode_commons::formatting::truncate_middle;
 
 const SETTINGS_SUBTITLE_MAX_LEN: usize = 90;
 
 pub(super) fn display_title(label: &str, path: &str, value: &TomlValue) -> String {
-    if label.starts_with('[') {
+    if label.starts_with('[') && !ends_with_quoted_map_key(path) {
         return format!("Item {label}");
     }
 
     match value {
+        TomlValue::Table(_) if ends_with_quoted_map_key(path) => label.to_string(),
         TomlValue::Table(_) => heading_for_path(path).title.into_owned(),
         _ => humanize_identifier(label),
     }
+}
+
+fn ends_with_quoted_map_key(path: &str) -> bool {
+    path.rfind("[\"").is_some_and(|start| path[start..].ends_with("\"]"))
 }
 
 pub(super) fn section_subtitle(path: &str, value: &TomlValue) -> String {
@@ -130,7 +136,7 @@ fn collect_search_terms(path: &str, value: &TomlValue, parts: &mut Vec<String>) 
                 let Some(child) = table.get(key) else {
                     continue;
                 };
-                let child_path = format!("{path}.{key}");
+                let child_path = path_with_key(path, key);
                 parts.push(child_path.clone());
                 parts.push(humanize_identifier(key));
                 collect_search_terms(&child_path, child, parts);
@@ -174,5 +180,22 @@ pub(super) fn summarize_value(value: &TomlValue) -> String {
             format!("{} setting{}", count, if count == 1 { "" } else { "s" })
         }
         _ => "<unsupported>".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_title_preserves_quoted_map_key_for_table() {
+        let value = TomlValue::Table(toml::map::Map::new());
+
+        assert_eq!(
+            display_title("provider.with.dot", r#"mcp.allowlist.providers["provider.with.dot"]"#, &value,),
+            "provider.with.dot"
+        );
+        assert_eq!(display_title("[section]", r#"mcp.allowlist.providers["[section]"]"#, &value,), "[section]");
+        assert!(!ends_with_quoted_map_key(r#"mcp.allowlist.providers["provider.with.dot"].settings"#));
     }
 }

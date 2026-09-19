@@ -547,6 +547,22 @@ async fn retry_provider_retries_failed_execute() {
     assert_eq!(result.get("attempt").and_then(|value| value.as_u64()), Some(2));
 }
 
+#[test]
+fn retry_provider_skips_misconfiguration() {
+    let ctx = TestRetryCtx::new(
+        Arc::new(AtomicUsize::new(0)),
+        RetryPolicy::from_retries(2, Duration::ZERO, Duration::ZERO, 2.0),
+    );
+    let error = anyhow::anyhow!("network error: invalid endpoint in base_url");
+
+    assert!(!<ExponentialBackoffRetry as RetryProvider<TestRetryCtx>>::should_retry(
+        &ctx,
+        "provider_tool",
+        1,
+        &error,
+    ));
+}
+
 // ================================================================
 // Phase 3 tests: concrete runtime contexts
 // ================================================================

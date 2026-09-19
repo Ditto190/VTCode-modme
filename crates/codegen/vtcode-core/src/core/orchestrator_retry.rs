@@ -120,7 +120,7 @@ impl RetryManager {
                 }
             };
 
-            let category_was_retryable = err.category.is_retryable();
+            let category_was_retryable = crate::retry::category_was_retryable(&err);
             let step = policy.step_for_vtcode_error(err, attempt, None);
 
             match step {
@@ -131,6 +131,13 @@ impl RetryManager {
                         decision: &decision,
                         category_was_retryable,
                     });
+                    // A fallback is useful only after the primary model has
+                    // exhausted a retryable failure. Configuration and other
+                    // non-retryable failures must remain fail-closed.
+                    if fallback_model.is_some() && category_was_retryable {
+                        last_error = Some(error);
+                        break;
+                    }
                     return Err(error);
                 }
                 RetryStep::Backoff { delay, decision, error } => {
@@ -166,6 +173,7 @@ impl RetryManager {
                 Err(err) => {
                     let err: VtCodeError = err.into();
                     let fallback_err = err
+                        .with_misconfiguration_guidance()
                         .with_context(format!("fallback model '{fallback}' failed for operation '{operation_name}'"));
                     warn!(
                         operation = operation_name,
@@ -397,5 +405,80 @@ mod tests {
         assert_eq!(result.unwrap(), "success");
         assert_eq!(manager.stats().total_attempts, 2);
         assert_eq!(manager.stats().successful_retries, 1);
+    }
+
+    #[tokio::test]
+    async fn test_fallback_misconfiguration_keeps_guidance_visible() {
+        let mut manager = RetryManager::with_policy(RetryPolicy::from_retries(
+            1,
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+            2.0,
+        ));
+        let primary = ModelId::Gemini38Flash;
+        let fallback = ModelId::ClaudeSonnet5;
+        let attempt_count = Arc::new(Mutex::new(0));
+        let attempt_count_clone = Arc::clone(&attempt_count);
+        let result = manager
+            .execute_with_retry("test_operation", &primary, Some(&fallback), move |_model| {
+                let attempt_count = Arc::clone(&attempt_count_clone);
+                async move {
+                    let mut count = attempt_count.lock().expect("attempt count lock");
+                    *count += 1;
+                    if *count <= 2 {
+                        Err::<String, VtCodeError>(VtCodeError::network(
+                            ErrorCode::ConnectionFailed,
+                            "temporary failure",
+                        ))
+                    } else {
+                        Err::<String, VtCodeError>(VtCodeError::new(
+                            crate::error::ErrorCategory::Authentication,
+                            ErrorCode::AuthenticationFailed,
+                            "bad key",
+                        ))
+                    }
+                }
+            })
+            .await;
+
+        let error = result.expect_err("fallback should fail");
+        assert_eq!(*attempt_count.lock().expect("attempt count lock"), 3);
+        assert_eq!(manager.stats().fallback_activations, 1);
+        assert!(error.message.contains("Check settings/config first"), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn test_misconfiguration_does_not_activate_fallback() {
+        let mut manager = RetryManager::with_policy(RetryPolicy::from_retries(
+            1,
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+            2.0,
+        ));
+        let attempt_count = Arc::new(Mutex::new(0));
+        let attempt_count_clone = Arc::clone(&attempt_count);
+        let result = manager
+            .execute_with_retry(
+                "test_operation",
+                &ModelId::Gemini38Flash,
+                Some(&ModelId::ClaudeSonnet5),
+                move |_model| {
+                    let attempt_count = Arc::clone(&attempt_count_clone);
+                    async move {
+                        *attempt_count.lock().expect("attempt count lock") += 1;
+                        Err::<String, VtCodeError>(VtCodeError::new(
+                            crate::error::ErrorCategory::Authentication,
+                            ErrorCode::AuthenticationFailed,
+                            "bad key",
+                        ))
+                    }
+                },
+            )
+            .await;
+
+        let error = result.expect_err("authentication failure should surface immediately");
+        assert_eq!(*attempt_count.lock().expect("attempt count lock"), 1);
+        assert_eq!(manager.stats().fallback_activations, 0);
+        assert!(error.message.contains("Check settings/config first"), "{error:?}");
     }
 }

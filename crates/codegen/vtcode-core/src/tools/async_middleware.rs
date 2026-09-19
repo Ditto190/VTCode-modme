@@ -414,7 +414,7 @@ impl AsyncMiddleware for AsyncRetryMiddleware {
                 tokio::time::sleep(backoff).await;
             }
 
-            let result = next(request.clone()).await;
+            let mut result = next(request.clone()).await;
 
             if result.success {
                 if attempt > 0 {
@@ -430,9 +430,13 @@ impl AsyncMiddleware for AsyncRetryMiddleware {
 
             // Skip retry for non-retryable errors (auth failures, policy
             // violations, invalid parameters) to fail fast.
-            if let Some(ref error_msg) = result.error {
-                let category = vtcode_commons::classify_error_message(error_msg);
-                if !category.is_retryable() {
+            if let Some(error_msg) = result.error.clone() {
+                let category = vtcode_commons::classify_error_message(&error_msg);
+                let guidance = vtcode_commons::detect_misconfiguration(category, &error_msg);
+                if !category.is_retryable() || guidance.is_some() {
+                    if let Some(guidance) = guidance {
+                        result.error = Some(format!("{error_msg}: {}", guidance.user_message()));
+                    }
                     tracing::debug!(
                         attempt = attempt,
                         category = ?category,
@@ -561,6 +565,48 @@ mod tests {
 
         assert!(!result.success);
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn async_retry_skips_misconfiguration_with_network_category() {
+        let obs = Arc::new(ObservabilityContext::noop());
+        let middleware = AsyncRetryMiddleware::new(3, 1, 2, obs);
+        let attempts = Arc::new(AtomicUsize::new(0));
+
+        let executor_attempts = attempts.clone();
+        let executor: BoxedExecutor = Box::new(move |_req: ToolRequest| {
+            let executor_attempts = executor_attempts.clone();
+            Box::pin(async move {
+                executor_attempts.fetch_add(1, Ordering::SeqCst);
+                MiddlewareToolResult {
+                    success: false,
+                    output: None,
+                    error: Some("network error: invalid endpoint in base_url".to_string()),
+                    duration_ms: 0,
+                    from_cache: false,
+                }
+            })
+        });
+
+        let result = middleware
+            .execute(
+                ToolRequest {
+                    tool_name: "provider_tool".into(),
+                    arguments: "{}".to_string(),
+                    context: "{}".to_string(),
+                },
+                executor,
+            )
+            .await;
+
+        assert!(!result.success);
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("Check settings/config first"))
+        );
     }
 
     #[tokio::test]

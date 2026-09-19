@@ -58,6 +58,22 @@ fn is_provider_context_capacity_failure(failure_stage: &str, err: &anyhow::Error
     failure_stage == "execute_llm_request" && vtcode_commons::is_context_capacity_error(err)
 }
 
+fn misconfiguration_guidance(err: &anyhow::Error) -> Option<vtcode_commons::ConfigGuidance> {
+    let message = format!("{err:#}");
+    if message.contains("Correct the configuration before retrying.") {
+        return None;
+    }
+    vtcode_commons::detect_misconfiguration_in_anyhow(err)
+}
+
+fn is_misconfiguration_error(err: &anyhow::Error) -> bool {
+    vtcode_commons::detect_misconfiguration_in_anyhow(err).is_some()
+}
+
+fn is_transient_recovery_error(err: &anyhow::Error) -> bool {
+    vtcode_commons::classify_anyhow_error(err).is_retryable() && !is_misconfiguration_error(err)
+}
+
 fn planning_synthesis_retry_allowed(
     tool_free_recovery: bool,
     planning_active: bool,
@@ -68,6 +84,7 @@ fn planning_synthesis_retry_allowed(
     tool_free_recovery
         && planning_active
         && vtcode_commons::classify_anyhow_error(err).is_retryable()
+        && !is_misconfiguration_error(err)
         && harness_state.recovery_retry_count() < MAX_PLANNING_SYNTHESIS_RECOVERY_RETRIES
         && !harness_state.wall_clock_exhausted_emitted
         && !harness_state.wall_clock_exhausted()
@@ -167,6 +184,11 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         out_of_band_tool_progress,
     }: PostToolLlmRecoveryInputs<'_>,
 ) -> Result<PostToolFailureRecovery> {
+    let config_guidance = misconfiguration_guidance(err);
+    if let Some(guidance) = config_guidance.as_ref() {
+        renderer.line(MessageStyle::Warning, &guidance.user_message())?;
+    }
+
     if is_unmatched_tool_result_error(&err.to_string()) {
         // A repaired retry has already been attempted, or the request was
         // already clean. Preserve the existing resume handoff and do not
@@ -201,9 +223,10 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     }
 
     let err_cat = vtcode_commons::classify_anyhow_error(err);
+    let misconfiguration = is_misconfiguration_error(err);
     let context_capacity_failure = is_provider_context_capacity_failure(failure_stage, err);
     let retry_scheduled = allow_tool_free_retry || allow_tool_enabled_retry;
-    let transient_hint = if err_cat.is_retryable() && !context_capacity_failure {
+    let transient_hint = if err_cat.is_retryable() && !misconfiguration && !context_capacity_failure {
         if retry_scheduled {
             " (transient; bounded retry scheduled)"
         } else {
@@ -216,16 +239,18 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         format!("Tool execution completed, but the model follow-up failed{transient_hint}. Output above is valid.",);
     renderer.line(MessageStyle::Info, &summary)?;
     renderer.line(MessageStyle::Info, &format!("Follow-up error category: {}", err_cat.user_label()))?;
-    let should_retry_tool_enabled = allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
-    let should_retry_tool_free =
-        allow_tool_free_retry && (err_cat.is_retryable() || matches!(err_cat, ErrorCategory::ExecutionError));
+    let should_retry_tool_enabled =
+        !misconfiguration && allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
+    let should_retry_tool_free = !misconfiguration
+        && allow_tool_free_retry
+        && (err_cat.is_retryable() || matches!(err_cat, ErrorCategory::ExecutionError));
     // The "next turn reuses evidence" tip only applies when the turn actually
     // ends here (StopAfterDirective). When a bounded retry is scheduled below,
     // the same-turn retry reuses the evidence immediately, so emitting the
     // next-turn tip alongside the retry notice contradicts the recovery flow
     // (observed: ExecutionError in plan mode showed both the tip and
     // "scheduling a final tool-free recovery pass").
-    if !err_cat.is_retryable() && !should_retry_tool_enabled && !should_retry_tool_free {
+    if !misconfiguration && !err_cat.is_retryable() && !should_retry_tool_enabled && !should_retry_tool_free {
         if planning_active {
             renderer.line(
                 MessageStyle::Info,
@@ -278,7 +303,7 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         step = step_count,
         stage = failure_stage,
         category = ?err_cat,
-        retryable = err_cat.is_retryable(),
+        retryable = err_cat.is_retryable() && !misconfiguration,
         context_capacity_failure,
         recovery_action = ?action,
         "Recovered turn after post-tool LLM phase failure"
@@ -542,9 +567,7 @@ pub(super) async fn complete_turn_after_failed_tool_free_recovery_with_events(
     // adaptive interview, so re-forcing the interview on the next turn makes
     // forward progress instead of dead-ending. We keep the planning session
     // alive and preserve the research gathered this turn.
-    let is_transient_error = err
-        .map(|e| vtcode_commons::classify_anyhow_error(e).is_retryable())
-        .unwrap_or(false);
+    let is_transient_error = err.is_some_and(is_transient_recovery_error);
     if let Some(plan_session) = plan_session {
         if plan_session.is_budget_exhausted()
             || plan_session.is_recovery_exhausted()
@@ -1026,6 +1049,27 @@ mod tests {
             message: "maximum context length is 114688 tokens".to_string(),
             metadata: None,
         })
+    }
+
+    #[test]
+    fn misconfiguration_network_error_is_not_transient_recovery() {
+        let err = anyhow::Error::new(LLMError::Network {
+            message: "network error: invalid endpoint in base_url".to_string(),
+            metadata: None,
+        });
+
+        assert!(!is_transient_recovery_error(&err));
+        assert!(is_transient_recovery_error(&transient_err()));
+    }
+
+    #[test]
+    fn guided_misconfiguration_is_not_reclassified_as_transient() {
+        let err = anyhow::anyhow!(
+            "Network error: invalid endpoint in base_url. Check settings/config first (base_url in vtcode.toml): fix it. Correct the configuration before retrying."
+        );
+
+        assert!(misconfiguration_guidance(&err).is_none(), "existing guidance must not be rendered twice");
+        assert!(!is_transient_recovery_error(&err));
     }
 
     // ---- Pure policy tests for `planning_finalize_notice` ----

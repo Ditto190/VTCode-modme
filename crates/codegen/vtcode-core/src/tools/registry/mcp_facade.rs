@@ -4,17 +4,21 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use tracing::{debug, warn};
-use vtcode_commons::{ErrorCategory, classify_anyhow_error};
 
 use crate::mcp::{McpClient, McpToolExecutor, McpToolInfo};
 use crate::tools::mcp::build_mcp_registration;
+use vtcode_commons::classify_anyhow_error;
 
 use super::ToolRegistry;
 use super::mcp_helpers::normalize_mcp_tool_identifier;
 use super::registration::ToolCatalogSource;
+
+fn mcp_refresh_retry_allowed(error: &anyhow::Error) -> bool {
+    vtcode_commons::detect_misconfiguration_in_anyhow(error).is_none()
+}
 
 impl ToolRegistry {
     /// Remove every MCP proxy registration from the inventory.
@@ -163,7 +167,15 @@ impl ToolRegistry {
                         break;
                     }
                     Err(err) => {
+                        let retry_allowed = mcp_refresh_retry_allowed(&err);
                         last_err = Some(err);
+                        if !retry_allowed {
+                            warn!(
+                                attempt = attempt + 1,
+                                "MCP tool refresh failed due to configuration; skipping retries"
+                            );
+                            break;
+                        }
                         let jitter = (attempt * 37) % 80;
                         let pow = 2_u64.saturating_pow(attempt.min(4) as u32); // cap exponent
                         let backoff = Duration::from_millis(200 * pow + jitter).min(Duration::from_secs(3));
@@ -180,18 +192,19 @@ impl ToolRegistry {
             let tools = match tools {
                 Some(list) => list,
                 None => {
-                    let error_for_log = last_err
-                        .as_ref()
-                        .map(|error| error.to_string())
-                        .unwrap_or_else(|| "unknown MCP error".to_string());
+                    let Some(error) = last_err else {
+                        warn!("Failed to refresh MCP tools without an error payload; keeping existing cache");
+                        return Ok(());
+                    };
+                    if let Some(guidance) = vtcode_commons::detect_misconfiguration_in_anyhow(&error) {
+                        return Err(anyhow!("{error:#}: {}", guidance.user_message()))
+                            .context("MCP tool refresh is blocked by configuration");
+                    }
                     warn!(
-                        error = %error_for_log,
+                        error = %error,
                         "Failed to refresh MCP tools after retries; keeping existing cache"
                     );
-                    let category = last_err
-                        .as_ref()
-                        .map(classify_anyhow_error)
-                        .unwrap_or(ErrorCategory::ExecutionError);
+                    let category = classify_anyhow_error(&error);
                     self.mcp_circuit_breaker.record_failure_category(category);
                     return Ok(());
                 }
@@ -281,5 +294,17 @@ impl ToolRegistry {
             self.sync_policy_catalog().await;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mcp_refresh_retry_allowed;
+    use anyhow::anyhow;
+
+    #[test]
+    fn mcp_refresh_skips_configuration_failures_but_retries_transient_errors() {
+        assert!(!mcp_refresh_retry_allowed(&anyhow!("MCP server URL invalid: endpoint must use https")));
+        assert!(mcp_refresh_retry_allowed(&anyhow!("MCP server connection reset by peer")));
     }
 }

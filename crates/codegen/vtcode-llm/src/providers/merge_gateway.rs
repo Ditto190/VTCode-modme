@@ -1085,7 +1085,7 @@ impl MergeGatewayProvider {
         // variants (`cache_read_tokens`, OpenRouter-style
         // `prompt_cache_read_tokens`, Anthropic-style
         // `cache_read_input_tokens`).
-        let cached_prompt_tokens = parse_cached_prompt_tokens_from_usage(usage, true);
+        let openai_cached_prompt_tokens = parse_cached_prompt_tokens_from_usage(usage, true);
         let cache_creation_tokens = parse_cache_write_tokens_from_usage(usage, true)
             .or_else(|| {
                 usage
@@ -1105,7 +1105,13 @@ impl MergeGatewayProvider {
             .or_else(|| usage.get("cache_read_input_tokens"))
             .and_then(Value::as_u64)
             .and_then(|value| u32::try_from(value).ok())
-            .or(cached_prompt_tokens);
+            .or(openai_cached_prompt_tokens);
+        // Merge native Responses often reports only Anthropic-style cache-read
+        // fields. Surface that count in `cached_prompt_tokens` so trajectory
+        // and status metrics are not misleading zeros when the gateway cached.
+        // Cost accounting already prefers `cache_read_tokens` via
+        // `Usage::billable_totals`; this mapping is observability only.
+        let cached_prompt_tokens = openai_cached_prompt_tokens.or(cache_read_tokens);
 
         Some(Usage {
             prompt_tokens,
@@ -2185,6 +2191,29 @@ mod tests {
 
         assert_eq!(usage.cache_read_tokens, Some(200));
         assert_eq!(usage.cache_creation_tokens, Some(30));
+        // Gateway-only cache-read fields must also populate the OpenAI-style
+        // cached field so trajectory metrics are not zero-filled.
+        assert_eq!(usage.cached_prompt_tokens, Some(200));
+    }
+
+    #[test]
+    fn native_usage_maps_anthropic_style_cache_fields_into_cached_prompt_tokens() {
+        // Merge Gateway native Responses reports Z.AI automatic cache activity
+        // as Anthropic-style fields. Trajectory logs lead with
+        // `cached_prompt_tokens`; without this mapping, healthy cache hits
+        // look like permanent zeros.
+        let usage = MergeGatewayProvider::parse_native_usage(Some(&json!({
+            "input_tokens": 10000,
+            "output_tokens": 400,
+            "total_tokens": 10400,
+            "cache_read_input_tokens": 9000,
+            "cache_creation_input_tokens": 200,
+        })))
+        .expect("usage");
+
+        assert_eq!(usage.cache_read_tokens, Some(9000));
+        assert_eq!(usage.cache_creation_tokens, Some(200));
+        assert_eq!(usage.cached_prompt_tokens, Some(9000));
     }
 
     #[tokio::test]

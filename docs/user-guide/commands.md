@@ -112,8 +112,8 @@ VT Code provides several quick actions directly in the chat input for faster wor
 
 | Action | Command | Result |
 | --- | --- | --- |
-| Open settings | `/config` (or `/settings`) | Browse categorized settings and effective values |
-| Open a section | `/config <path>` | Jump directly to a settings section |
+| Open settings | `/config` (or `/settings`) | Browse curated groups, or search the complete schema under Advanced settings |
+| Open a section or field | `/config <path>` | Jump directly to a group, Advanced index, or nested setting |
 | Reset the active layer | `/config reset` | Show the target file and request confirmation |
 | Generate configuration | `vtcode config` | Print a generated configuration document |
 | Reset workspace/explicit layer | `vtcode config reset` | Clear one workspace-layer file and reload the stack |

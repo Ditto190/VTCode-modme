@@ -1902,14 +1902,16 @@ impl ToolRegistry {
                 )
                 .with_tool_call_context(&tool_name_owned, &args_for_recording);
                 let error_category = error.category;
-                if let Some(breaker) = shared_circuit_breaker.as_ref() {
+                if error.circuit_breaker_impact
+                    && let Some(breaker) = shared_circuit_breaker.as_ref()
+                {
                     breaker.record_failure_category_for_tool(&tool_name_owned, error_category);
                 }
-                if is_mcp_tool {
+                if error.circuit_breaker_impact && is_mcp_tool {
                     self.mcp_circuit_breaker.record_failure_category(error_category);
                 }
 
-                let tripped = if error_category.should_trip_circuit_breaker() {
+                let tripped = if error.circuit_breaker_impact {
                     let tripped = self.record_tool_failure(timeout_category);
                     if tripped {
                         warn!(

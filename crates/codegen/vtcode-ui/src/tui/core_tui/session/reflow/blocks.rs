@@ -471,6 +471,52 @@ impl Session {
         self.pty_block_has_content_in(start, end)
     }
 
+    /// Whether the PTY line at `index` is a `│` continuation of a command
+    /// header (`• Ran ...` wrapped across `│` lines).
+    ///
+    /// Continuations render with the uniform header body style so a wrapped
+    /// multiline command matches single-line Tool headers instead of
+    /// inheriting shell token colors. The backward chain stops at output rows
+    /// so genuine `│`-prefixed program output keeps its PTY styling.
+    fn pty_is_header_continuation(&self, index: usize) -> bool {
+        let line = match self.lines.get(index) {
+            Some(line) if line.kind == InlineMessageKind::Pty => line,
+            _ => return false,
+        };
+        let mut text = String::new();
+        for segment in &line.segments {
+            text.push_str(&render::strip_ansi_codes(&segment.text));
+        }
+        // Header wrapping uses the exact `  │ ` prefix. A later program
+        // output row may itself begin with `│` after the four-space output
+        // gutter; accepting any trimmed pipe would misclassify that output
+        // when it follows a wrapped header.
+        if !text.starts_with("  │ ") {
+            return false;
+        }
+        let mut cursor = index;
+        loop {
+            cursor = match cursor.checked_sub(1) {
+                Some(previous) => previous,
+                None => return false,
+            };
+            let previous = match self.lines.get(cursor) {
+                Some(previous) if previous.kind == InlineMessageKind::Pty => previous,
+                _ => return false,
+            };
+            let mut previous_text = String::new();
+            for segment in &previous.segments {
+                previous_text.push_str(&render::strip_ansi_codes(&segment.text));
+            }
+            if parse_tool_call_prefix(&previous_text).is_some() {
+                return true;
+            }
+            if !previous_text.starts_with("  │ ") {
+                return false;
+            }
+        }
+    }
+
     /// Reflow PTY output lines with appropriate borders and formatting
     pub(crate) fn reflow_pty_lines(&self, index: usize, width: u16) -> Vec<TranscriptLine> {
         let Some(line) = self.lines.get(index) else {
@@ -515,69 +561,76 @@ impl Session {
         // and apply a consistent dimmed style for terminal output.
         let pty_fallback = self.text_fallback(InlineMessageKind::Pty).or(self.theme.foreground);
 
-        // Command header lines ("• Ran ...", "• Read ...", "• Write ...", etc.)
-        // use full-brightness tool-colored styling so the tool name and arguments
-        // are visually distinct from dimmed PTY body text.
+        // Command headers (`• Ran ...`) and their wrapped `│` continuations
+        // render like single-line Tool headers: status-colored bullet, bold
+        // verb, uniform non-bold body. Shell token colors never leak in, so a
+        // wrapped multiline command matches a single-line row instead of
+        // going bold on continuations.
         // Every PTY line can begin a new tool command. `is_start` only marks
         // the beginning of the surrounding PTY block, so using it here would
         // incorrectly dim commands that follow an earlier command's output.
         let is_command_header = parse_tool_call_prefix(&combined).is_some();
+        let is_header_continuation = !is_command_header && self.pty_is_header_continuation(index);
 
         let mut body_spans = Vec::with_capacity(line.segments.len() + 1);
-        for (i, segment) in line.segments.iter().enumerate() {
-            let stripped_text = render::strip_ansi_codes(&segment.text);
+        if is_command_header {
+            // A streamed header can arrive as one status-colored segment or
+            // as shell-highlighted `•`/verb/body segments. Split the full
+            // text once so the body is always uniform: keep the status color
+            // on the bullet only and never let it leak into the command.
+            let mut header_text = String::with_capacity(combined.len());
+            for segment in &line.segments {
+                header_text.push_str(&render::strip_ansi_codes(&segment.text));
+            }
+            if let Some((action, prefix)) = parse_tool_call_prefix(&header_text) {
+                let fg = self.theme.foreground.map(ratatui_color_from_ansi);
+                let bg = self.theme.background.map(ratatui_color_from_ansi);
 
-            if is_command_header && i == 0 {
-                if let Some((action, prefix)) = parse_tool_call_prefix(&stripped_text) {
-                    let fg = self.theme.foreground.map(ratatui_color_from_ansi);
-                    let bg = self.theme.background.map(ratatui_color_from_ansi);
-
-                    let mut bullet_style =
-                        ratatui_style_from_inline(&segment.style, pty_fallback).remove_modifier(Modifier::DIM);
-                    if bullet_style.fg.is_none() {
-                        if let Some(c) = fg {
-                            bullet_style = bullet_style.fg(c);
-                        }
+                let mut bullet_style = line
+                    .segments
+                    .first()
+                    .map(|segment| {
+                        ratatui_style_from_inline(&segment.style, pty_fallback).remove_modifier(Modifier::DIM)
+                    })
+                    .unwrap_or_default();
+                if bullet_style.fg.is_none() {
+                    if let Some(c) = fg {
+                        bullet_style = bullet_style.fg(c);
                     }
-                    if bullet_style.bg.is_none() {
-                        if let Some(c) = bg {
-                            bullet_style = bullet_style.bg(c);
-                        }
+                }
+                if bullet_style.bg.is_none() {
+                    if let Some(c) = bg {
+                        bullet_style = bullet_style.bg(c);
                     }
-                    let bullet = &prefix[..prefix.len() - action.len()];
-                    body_spans.push(Span::styled(bullet.to_owned(), bullet_style));
+                }
+                let bullet = &prefix[..prefix.len() - action.len()];
+                body_spans.push(Span::styled(bullet.to_owned(), bullet_style));
 
-                    body_spans.push(Span::styled(action.to_owned(), self.tool_header_action_style(action)));
+                body_spans.push(Span::styled(action.to_owned(), self.tool_header_action_style(action)));
 
-                    let rest = &stripped_text[prefix.len()..];
-                    if !rest.is_empty() {
-                        // A streamed header can arrive as one status-colored
-                        // segment. Keep that status color on the bullet only;
-                        // never let it leak into the command and arguments.
-                        body_spans.push(Span::styled(rest.to_owned(), self.tool_header_body_style()));
-                    }
-                    continue;
+                let rest = &header_text[prefix.len()..];
+                if !rest.is_empty() {
+                    body_spans.push(Span::styled(rest.to_owned(), self.tool_header_body_style()));
+                }
+            } else {
+                for segment in &line.segments {
+                    let stripped_text = render::strip_ansi_codes(&segment.text);
+                    body_spans.push(Span::styled(
+                        stripped_text.into_owned(),
+                        self.opaque_tool_header_text_style(ratatui_style_from_inline(&segment.style, pty_fallback)),
+                    ));
                 }
             }
-
-            if is_command_header && i == 0 && stripped_text == "• " {
-                body_spans.push(Span::styled(
-                    stripped_text.into_owned(),
-                    ratatui_style_from_inline(&segment.style, pty_fallback).remove_modifier(Modifier::DIM),
-                ));
-                continue;
+        } else {
+            let header_body = is_header_continuation.then(|| self.tool_header_body_style());
+            for segment in &line.segments {
+                let stripped_text = render::strip_ansi_codes(&segment.text);
+                let style = match header_body {
+                    Some(body) => body,
+                    None => ratatui_pty_style_from_inline(&segment.style, pty_fallback),
+                };
+                body_spans.push(Span::styled(stripped_text.into_owned(), style));
             }
-            if is_command_header && i == 1 && stripped_text == "Ran" {
-                body_spans.push(Span::styled(stripped_text.into_owned(), self.tool_header_action_style("Ran")));
-                continue;
-            }
-
-            let style = if is_command_header {
-                self.opaque_tool_header_text_style(ratatui_style_from_inline(&segment.style, pty_fallback))
-            } else {
-                ratatui_pty_style_from_inline(&segment.style, pty_fallback)
-            };
-            body_spans.push(Span::styled(stripped_text.into_owned(), style));
         }
 
         let body_prefix = ui::INLINE_PTY_BODY_GUTTER;

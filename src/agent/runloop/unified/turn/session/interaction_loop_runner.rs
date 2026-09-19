@@ -285,6 +285,13 @@ pub(super) async fn run_interaction_loop_impl(
                     &format!("Scheduled task {} ({}) is ready to run.", task.id, task.name),
                 )?;
             }
+            if !state.queued_inputs.is_empty() {
+                // Direct pushes bypass `InlineQueueState::sync_handle_queue`,
+                // so mirror the authoritative FIFO to the TUI overlay
+                // immediately instead of waiting for the next queue op.
+                ctx.handle
+                    .set_queued_inputs(state.queued_inputs.iter().map(|queued| queued.display_label()).collect());
+            }
         }
 
         let (mut submitted_input, process_slash_commands) =

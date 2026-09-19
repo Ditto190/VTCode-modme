@@ -40,6 +40,17 @@ written into a workspace `vtcode.toml` when a workspace-only setting changes.
 Provider definitions and endpoint/credential overrides are written to the
 canonical user layer unless the session selected an explicit config file.
 
+## Settings palette navigation
+
+The `/config` root intentionally contains only the seven curated task-oriented
+groups, Advanced settings, Reload configuration, and Reset configuration.
+Curated groups expose common fields with stable ordering and concise counts.
+Advanced settings keeps complete generated-schema coverage in a flat,
+search-first view; its search index includes paths, labels, descriptions,
+current values, and options. Direct nested paths remain supported so links and
+slash-command workflows do not lose access to uncommon or provider-specific
+settings.
+
 Normal startup and live reload also use a repair-capable loader for legacy
 repository files. If an otherwise parseable workspace or project file still
 contains protected provider definitions or endpoint/credential overrides from

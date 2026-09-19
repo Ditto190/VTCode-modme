@@ -10,7 +10,7 @@ The `editor-command` crate handles editor detection and invocation across all ma
 
 The guided setup is available from the TUI:
 
-- Run `/config`, then select `External Editor` from the root quick-access list.
+- Run `/config`, select **Tools & Integrations**, then choose `External Editor`.
 - Run `/config tools.editor` to jump straight into the same wizard.
 - The wizard configures `/edit`, `Ctrl+E` when the prompt is empty, and single-click file links in the TUI.
 - After saving editor settings, the flow can also take you to `/config file_opener` for ANSI hyperlink URI behavior.

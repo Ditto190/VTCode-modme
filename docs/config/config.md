@@ -37,10 +37,18 @@ Both the workspace `vtcode.toml` and the main `vtcode.toml` file support the fol
 
 ## Settings palette and reset
 
-In an interactive session, `/config` opens the settings palette. Settings are
-grouped into sections with human-readable labels, descriptions, effective
-values, and source/target information. Use `/config <path>` to open a section
+In an interactive session, `/config` opens a concise root with seven curated
+groups: Model & Provider, Agent & Automation, Approvals & Security, Tools &
+Integrations, Context & Memory, Interface & Terminal, and Performance &
+Diagnostics. Each group shows its purpose and editable-setting count, then
+opens only commonly used fields. The **Advanced settings** entry is a
+search-first index of the complete documented schema; search matches config
+paths, labels, descriptions, current values, and options. Use `/config <path>`
+to open a group, the Advanced index, or a specific nested field
 directly; nested selections are restored when returning to a parent view.
+
+The palette header shows the current write target and configuration source;
+individual setting rows keep their current value and description.
 
 The palette's **Reset configuration** action shows the exact target file and
 requires confirmation. `/config reset` opens the same confirmation view. A
@@ -547,7 +555,7 @@ If the selected editor is terminal-based (for example `vim`/`nvim`) and `suspend
 
 You can manage this feature without editing TOML directly:
 
-- `/config` shows an `External Editor` quick-access entry at the root.
+- `/config` → **Tools & Integrations** contains the `External Editor` setting.
 - `/config tools.editor` opens the dedicated editor setup wizard directly.
 - The guided flow can also take you to `/config file_opener` when you want to tune ANSI hyperlink URI handling separately.
 

@@ -10,6 +10,7 @@ pub(super) struct SectionHeading {
 }
 
 static ARRAY_INDEX_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[(\d+)\]").expect("valid regex"));
+static MAP_KEY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\[\"(?:\\.|[^\"\\])*\"\]"#).expect("valid regex"));
 
 static SECTION_HEADINGS: &[(&str, &str, &str)] = &[
     ("acp", "ACP Bridge", "IDE and Agent Client Protocol integrations."),
@@ -174,7 +175,8 @@ static SECTION_HEADINGS: &[(&str, &str, &str)] = &[
 ];
 
 pub(super) fn normalize_config_path(path: &str) -> String {
-    ARRAY_INDEX_RE.replace_all(path, "[]").to_string()
+    let path = MAP_KEY_RE.replace_all(path, ".*");
+    ARRAY_INDEX_RE.replace_all(&path, "[]").to_string()
 }
 
 pub(super) fn heading_for_path(path: &str) -> SectionHeading {
@@ -187,15 +189,17 @@ pub(super) fn heading_for_path(path: &str) -> SectionHeading {
     }
 
     if let Some(provider) = normalized_path.strip_prefix("prompt_cache.providers.") {
+        let provider = dynamic_map_key(path, "prompt_cache.providers").unwrap_or_else(|| provider.to_string());
         return SectionHeading {
-            title: Cow::Owned(format!("{} Prompt Cache", humanize_identifier(provider))),
+            title: Cow::Owned(format!("{} Prompt Cache", humanize_identifier(&provider))),
             summary: Cow::Borrowed("Provider-specific prompt cache overrides."),
         };
     }
 
     if let Some(provider) = normalized_path.strip_prefix("mcp.allowlist.providers.") {
+        let provider = dynamic_map_key(path, "mcp.allowlist.providers").unwrap_or_else(|| provider.to_string());
         return SectionHeading {
-            title: Cow::Owned(format!("{} Allowlist", humanize_identifier(provider))),
+            title: Cow::Owned(format!("{} Allowlist", humanize_identifier(&provider))),
             summary: Cow::Borrowed("MCP allowlist overrides for this provider."),
         };
     }
@@ -209,6 +213,24 @@ pub(super) fn heading_for_path(path: &str) -> SectionHeading {
         title: Cow::Owned(title),
         summary: Cow::Borrowed(""),
     }
+}
+
+fn dynamic_map_key(path: &str, parent: &str) -> Option<String> {
+    let suffix = path.strip_prefix(parent)?;
+    if let Some(key) = suffix.strip_prefix('.') {
+        return key.split(['.', '[']).next().filter(|key| !key.is_empty()).map(str::to_string);
+    }
+
+    let mut characters = suffix.strip_prefix("[\"")?.chars();
+    let mut key = String::new();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => key.push(characters.next()?),
+            '"' if characters.next() == Some(']') => return Some(key),
+            _ => key.push(character),
+        }
+    }
+    None
 }
 
 pub(super) fn humanize_identifier(value: &str) -> String {
@@ -282,6 +304,14 @@ mod tests {
     }
 
     #[test]
+    fn normalize_config_path_replaces_quoted_map_keys() {
+        assert_eq!(
+            normalize_config_path(r#"custom_providers[0].profiles["gpt-5.4"].temperature"#),
+            "custom_providers[].profiles.*.temperature"
+        );
+    }
+
+    #[test]
     fn humanize_identifier_preserves_acronyms_and_camel_case() {
         assert_eq!(humanize_identifier("askQuestions"), "Ask Questions");
         assert_eq!(humanize_identifier("mcp_ui"), "MCP UI");
@@ -294,5 +324,14 @@ mod tests {
         let heading = heading_for_path("prompt_cache.providers.openrouter");
         assert_eq!(heading.title, "OpenRouter Prompt Cache");
         assert_eq!(heading.summary, "Provider-specific prompt cache overrides.");
+    }
+
+    #[test]
+    fn heading_for_path_preserves_quoted_dynamic_provider_titles() {
+        let prompt_cache = heading_for_path(r#"prompt_cache.providers["provider.with.dot"]"#);
+        assert_eq!(prompt_cache.title, "Provider With Dot Prompt Cache");
+
+        let allowlist = heading_for_path(r#"mcp.allowlist.providers["provider.with.dot"]"#);
+        assert_eq!(allowlist.title, "Provider With Dot Allowlist");
     }
 }
