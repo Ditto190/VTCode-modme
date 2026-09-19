@@ -443,3 +443,58 @@ fn expanded_thinking_strips_leading_whitespace_for_consistent_indent() {
         assert!(!line.starts_with(' '), "body line must not have leading whitespace, got: {line:?}");
     }
 }
+
+#[test]
+fn thinking_block_uses_distinct_dimmed_italic_style() {
+    use ratatui::style::Modifier;
+
+    // Collapsed header must be distinct from regular output.
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    push_policy_lines(&mut session, &["reasoning step one", "reasoning step two"]);
+    let start = session.lines.len() - 2;
+    let collapsed = session.reflow_message_lines(start, 100, true);
+    let header_style = collapsed[0].line.spans[0].style;
+    assert!(
+        header_style.add_modifier.contains(Modifier::DIM),
+        "Thinking header should be dimmed, got: {header_style:?}"
+    );
+    assert!(
+        header_style.add_modifier.contains(Modifier::ITALIC),
+        "Thinking header should be italic, got: {header_style:?}"
+    );
+
+    // Expanded body must stay distinct even when source segments carry no effects.
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.appearance.thinking_display = ThinkingBlockState::Extended;
+    push_policy_lines(&mut session, &["reasoning step one"]);
+    let start = session.lines.len() - 1;
+    let expanded = session.reflow_message_lines(start, 100, true);
+    let body_has_reasoning_style = expanded.iter().skip(1).any(|line| {
+        line.line.spans.iter().any(|span| {
+            !span.content.trim().is_empty()
+                && span.style.add_modifier.contains(Modifier::DIM)
+                && span.style.add_modifier.contains(Modifier::ITALIC)
+        })
+    });
+    assert!(body_has_reasoning_style, "expanded reasoning body should be dimmed+italic");
+
+    // Asymmetric control: regular agent prose must not share the full reasoning treatment.
+    let mut session = Session::new(InlineTheme::default(), None, 24);
+    session.push_line(
+        InlineMessageKind::Agent,
+        vec![InlineSegment {
+            text: "answer".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        }],
+    );
+    let start = session.lines.len() - 1;
+    let agent = session.reflow_message_lines(start, 100, true);
+    let agent_uses_reasoning_style = agent.iter().any(|line| {
+        line.line.spans.iter().any(|span| {
+            !span.content.trim().is_empty()
+                && span.style.add_modifier.contains(Modifier::DIM)
+                && span.style.add_modifier.contains(Modifier::ITALIC)
+        })
+    });
+    assert!(!agent_uses_reasoning_style, "agent prose must remain visually distinct from reasoning");
+}

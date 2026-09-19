@@ -99,8 +99,13 @@ impl Session {
         let collapsed = self.thinking_collapsed(start);
         let run_len = self.thinking_run_len(start);
         let accent = ratatui_style_from_inline(&self.styles.accent_inline_style(), self.theme.foreground);
+        // Reasoning traces must stay visually distinct from regular agent output.
+        // Mirror `ThemeStyles::reasoning` (DIMMED+ITALIC) so the collapsed
+        // `Thinking` header never looks like a normal response, even when the
+        // upstream `Policy` segments carry no effects.
+        let header_style = accent.add_modifier(Modifier::DIM | Modifier::ITALIC);
 
-        let header = Line::from(Span::styled("Thinking", accent));
+        let header = Line::from(Span::styled("Thinking", header_style));
         let mut result = vec![transcript_line_with_detected_links(
             header,
             self.workspace_root.as_deref(),
@@ -137,6 +142,12 @@ impl Session {
             };
             for line in &mut wrapped {
                 trim_leading_whitespace(line);
+                // Enforce the distinct reasoning style on every body span so
+                // expanded traces stay dimmed+italic even when the source
+                // `Policy` segments were pushed without effects.
+                for span in &mut line.spans {
+                    span.style = span.style.add_modifier(Modifier::DIM | Modifier::ITALIC);
+                }
             }
             for line in wrapped {
                 result.push(transcript_line_with_detected_links(line, self.workspace_root.as_deref()));

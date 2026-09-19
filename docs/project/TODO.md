@@ -42,20 +42,6 @@ final extraction:
 
 ===
 
-idea: reference TUI table rendering style
-
-for minimal columns count '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-16 at 10.50.18.png'
-for maximal columns count '/Users/vinhnguyenxuan/Documents/vtcode-resources/idea/Screenshot 2026-09-16 at 11.45.20.png'
-
-NOTE:
-
-1. use deepwiki openai/codex and research how Codex implements table rendering and apply to VT Code.
-2. Double check existing adaptive table rendering engine for terminal width and adjust as necessary.
-3. Make sure text is properly aligned and formatted within the table cells. No truncation or misalignment should occur.
-4. remember to attribute appropriately.
-
-===
-
 help me check cache hit rate is too low. 8.3% hit rate
 
 Session 6m 15s | 431.9k in / 12.1k out | Cache 35.8k read (8.3% hit rate) | Code +37 / -0
