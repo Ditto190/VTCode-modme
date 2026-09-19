@@ -11,7 +11,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use unicode_width::UnicodeWidthStr;
-use vtcode_commons::ui_protocol::{CompactActivityMetadata, ToolOutputId};
+use vtcode_commons::ui_protocol::{CompactActivityMetadata, SlashCommandItem, ToolOutputId};
 
 use super::overlay::{
     AgentPaletteItem, AgentPaletteTransientRequest, FilePaletteTransientRequest, ListOverlayRequest,
@@ -199,6 +199,12 @@ pub enum InlineCommand {
     /// background) so the file palette's Search mode can match against it.
     UpdateFilePaletteSearch {
         files: Vec<String>,
+    },
+    /// Replace the slash-command palette after background prompt-template
+    /// discovery. Lets first paint spawn with built-ins only; templates merge
+    /// in without blocking `spawn_session_with_options`.
+    SetSlashCommands {
+        commands: Vec<SlashCommandItem>,
     },
     CloseTransient,
     ClearScreen,
@@ -662,6 +668,11 @@ impl InlineHandle {
     /// mode has a corpus to match against. Browse mode does not require it.
     pub fn set_file_palette_search_index(&self, files: Vec<String>) {
         self.send_command(InlineCommand::UpdateFilePaletteSearch { files });
+    }
+
+    /// Replace slash palette commands after background template discovery.
+    pub fn set_slash_commands(&self, commands: Vec<SlashCommandItem>) {
+        self.send_command(InlineCommand::SetSlashCommands { commands });
     }
 
     pub fn configure_agent_palette(&self, agents: Vec<AgentPaletteItem>) {

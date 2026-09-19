@@ -54,21 +54,7 @@ struct WorkspaceToolConfig {
 /// registration.
 fn load_workspace_tool_config(workspace_root: &Path) -> WorkspaceToolConfig {
     match ConfigManager::load_from_workspace(workspace_root) {
-        Ok(manager) => {
-            let config = manager.config();
-            let persistent_memory_enabled = config.persistent_memory_enabled();
-            let mut persistent_memory = config.agent.persistent_memory.clone();
-            persistent_memory.enabled = persistent_memory_enabled;
-            WorkspaceToolConfig {
-                tool: ToolConfigSnapshot {
-                    web_search: config.tools.web_search.clone(),
-                    web_fetch: config.tools.web_fetch.clone(),
-                },
-                spooler: spooler_config_from_dynamic_context(&config.context.dynamic),
-                persistent_memory,
-                persistent_memory_enabled,
-            }
-        }
+        Ok(manager) => workspace_tool_config_from_loaded(manager.config()),
         Err(err) => {
             tracing::warn!(
                 workspace = %workspace_root.display(),
@@ -80,9 +66,53 @@ fn load_workspace_tool_config(workspace_root: &Path) -> WorkspaceToolConfig {
     }
 }
 
+fn workspace_tool_config_from_loaded(config: &vtcode_config::loader::VTCodeConfig) -> WorkspaceToolConfig {
+    let persistent_memory_enabled = config.persistent_memory_enabled();
+    let mut persistent_memory = config.agent.persistent_memory.clone();
+    persistent_memory.enabled = persistent_memory_enabled;
+    WorkspaceToolConfig {
+        tool: ToolConfigSnapshot {
+            web_search: config.tools.web_search.clone(),
+            web_fetch: config.tools.web_fetch.clone(),
+        },
+        spooler: spooler_config_from_dynamic_context(&config.context.dynamic),
+        persistent_memory,
+        persistent_memory_enabled,
+    }
+}
+
 impl ToolRegistry {
     pub fn new(workspace_root: PathBuf) -> impl Future<Output = Self> {
         Self::build(workspace_root, PtyConfig::default())
+    }
+
+    /// Build a registry reusing an already-loaded session config snapshot.
+    ///
+    /// Interactive startup already owns the merged `VTCodeConfig`; passing it
+    /// here avoids a second `ConfigManager::load_from_workspace` file read +
+    /// TOML parse on the first-paint path. Falls back to defaults for any
+    /// field the snapshot does not carry, matching `load_workspace_tool_config`
+    /// behavior on parse failure.
+    pub fn new_with_loaded_config(
+        workspace_root: PathBuf,
+        config: &vtcode_config::loader::VTCodeConfig,
+    ) -> impl Future<Output = Self> {
+        let snapshot = workspace_tool_config_from_loaded(config);
+        Self::build_with_snapshot(workspace_root, PtyConfig::default(), None, true, snapshot)
+    }
+
+    /// Build a first-paint registry: reuses the loaded session config snapshot
+    /// and skips workspace policy file I/O.
+    ///
+    /// Policy evaluation fails open to tool metadata defaults until hydration
+    /// attaches the manager via `ensure_workspace_policy_manager`, which runs
+    /// before any tool executes.
+    pub fn new_for_first_paint_with_loaded_config(
+        workspace_root: PathBuf,
+        config: &vtcode_config::loader::VTCodeConfig,
+    ) -> impl Future<Output = Self> {
+        let snapshot = workspace_tool_config_from_loaded(config);
+        Self::build_with_snapshot(workspace_root, PtyConfig::default(), None, false, snapshot)
     }
 
     pub fn new_with_config(workspace_root: PathBuf, pty_config: PtyConfig) -> impl Future<Output = Self> {
@@ -133,6 +163,16 @@ impl ToolRegistry {
                     WorkspaceToolConfig::default()
                 }
             };
+        Self::build_with_snapshot(workspace_root, pty_config, policy_manager, initialize_policy, workspace_config).await
+    }
+
+    async fn build_with_snapshot(
+        workspace_root: PathBuf,
+        pty_config: PtyConfig,
+        policy_manager: Option<ToolPolicyManager>,
+        initialize_policy: bool,
+        workspace_config: WorkspaceToolConfig,
+    ) -> Self {
         let WorkspaceToolConfig {
             tool: tool_config,
             spooler: spooler_config,
@@ -300,5 +340,55 @@ tool_output_threshold = "oops"
         let _registry = ToolRegistry::new_for_schema(temp.path().to_path_buf()).await;
 
         assert!(!temp.path().join(".vtcode").exists());
+    }
+
+    #[tokio::test]
+    async fn loaded_config_registry_reuses_snapshot_without_workspace_parse() {
+        // Asymmetric: workspace file says 4096/7/12, loaded snapshot says
+        // 8192/3/99. The registry must reflect the snapshot, proving the
+        // first-paint path does not pay a second workspace TOML parse.
+        let temp = tempdir().expect("workspace");
+        std::fs::write(
+            temp.path().join("vtcode.toml"),
+            r#"[context.dynamic]
+enabled = true
+tool_output_threshold = 4096
+max_spooled_files = 7
+spool_max_age_secs = 12
+
+[workspace]
+use_root_config = true
+"#,
+        )
+        .expect("workspace config");
+
+        let mut loaded = vtcode_config::loader::VTCodeConfig::default();
+        loaded.context.dynamic.enabled = true;
+        loaded.context.dynamic.tool_output_threshold = 8192;
+        loaded.context.dynamic.max_spooled_files = 3;
+        loaded.context.dynamic.spool_max_age_secs = 99;
+
+        let registry = ToolRegistry::new_with_loaded_config(temp.path().to_path_buf(), &loaded).await;
+        let config = registry.output_spooler().config();
+
+        assert!(config.enabled);
+        assert_eq!(config.threshold_bytes, 8192);
+        assert_eq!(config.max_files, 3);
+        assert_eq!(config.max_age_secs, 99);
+    }
+
+    #[tokio::test]
+    async fn first_paint_registry_defers_policy_manager_until_ensure() {
+        let temp = tempdir().expect("workspace");
+        let loaded = vtcode_config::loader::VTCodeConfig::default();
+
+        let registry = ToolRegistry::new_for_first_paint_with_loaded_config(temp.path().to_path_buf(), &loaded).await;
+        assert!(!registry.has_policy_manager().await, "first-paint registry must skip policy file I/O");
+
+        registry.ensure_workspace_policy_manager(temp.path()).await;
+        assert!(
+            registry.has_policy_manager().await,
+            "hydration must attach the workspace policy manager before any tool runs"
+        );
     }
 }

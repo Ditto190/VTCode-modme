@@ -198,16 +198,14 @@ pub(crate) async fn initialize_session_ui(
     session_state.tool_registry.set_active_pty_sessions(pty_counter.clone());
 
     let visible_slash_commands: Vec<_> = visible_commands().into_iter().copied().collect();
-    let mut slash_command_items = to_tui_slash_commands(visible_slash_commands.as_slice());
-    let template_slash_commands = discover_prompt_templates(&config.workspace)
-        .await
-        .into_iter()
-        .filter(|template| !visible_slash_commands.iter().any(|cmd| cmd.name == template.name))
-        .map(|template| SlashCommandItem::new(template.name, template.description))
-        .collect::<Vec<_>>();
-    slash_command_items.extend(template_slash_commands);
+    // First paint spawns with built-in slash commands only. Prompt-template
+    // discovery (workspace filesystem scan) merges in via `SetSlashCommands`
+    // after spawn so it never blocks `spawn_session_with_options`.
+    let slash_command_items = to_tui_slash_commands(visible_slash_commands.as_slice());
 
-    // Load user keybindings from dot config (best-effort)
+    // Load user keybindings from dot config (best-effort). Fast path hits the
+    // in-memory startup snapshot; only embedded callers without normal CLI
+    // bootstrap pay the file fallback here.
     let user_dot_config = match take_startup_user_config() {
         Some(config) => Some(config),
         None => {
@@ -284,6 +282,29 @@ pub(crate) async fn initialize_session_ui(
     }
 
     let handle = session.clone_inline_handle();
+    // Merge prompt-template slash commands without blocking first paint.
+    // The session spawns with built-ins; this one-shot task appends workspace
+    // templates via `SetSlashCommands` before the user can open the palette.
+    {
+        let handle_for_templates = handle.clone();
+        let workspace_for_templates = config.workspace.clone();
+        let builtin_items = to_tui_slash_commands(visible_slash_commands.as_slice());
+        tokio::spawn(async move {
+            let discovered = discover_prompt_templates(&workspace_for_templates).await;
+            if discovered.is_empty() {
+                return;
+            }
+            let mut merged = builtin_items;
+            let visible: Vec<_> = visible_commands().into_iter().copied().collect();
+            merged.extend(
+                discovered
+                    .into_iter()
+                    .filter(|template| !visible.iter().any(|cmd| cmd.name == template.name))
+                    .map(|template| SlashCommandItem::new(template.name, template.description)),
+            );
+            handle_for_templates.set_slash_commands(merged);
+        });
+    }
     // Follow live terminal light/dark reports only when the user opted into
     // automatic color-scheme detection; forced Light/Dark modes must win.
     let color_scheme_auto = vt_cfg

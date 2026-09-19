@@ -110,6 +110,15 @@ impl SlashPalette {
         }
     }
 
+    /// Replace the full command set (background template merge). Clears cached
+    /// suggestions so the next `/` keystroke recomputes from the merged list.
+    pub(crate) fn set_commands(&mut self, commands: Vec<SlashCommandItem>) {
+        self.commands = commands;
+        self.suggestions.clear();
+        self.navigator.set_item_count(0);
+        self.filter_query = None;
+    }
+
     pub(crate) fn suggestions(&self) -> &[SlashPaletteSuggestion] {
         &self.suggestions
     }
@@ -435,6 +444,25 @@ mod tests {
         let mut palette = SlashPalette::with_commands(test_commands());
         let _ = palette.update(Some(""));
         palette
+    }
+
+    #[test]
+    fn set_commands_replaces_palette_and_clears_stale_suggestions() {
+        let mut palette = palette_with_commands();
+        assert!(!palette.suggestions().is_empty());
+
+        palette.set_commands(vec![SlashCommandItem::new("template-cmd", "Workspace template")]);
+        assert!(palette.suggestions().is_empty());
+
+        let update = palette.update(Some("template"));
+        assert!(matches!(update, SlashPaletteUpdate::Changed { .. }));
+        assert!(
+            palette.suggestions().iter().any(|suggestion| matches!(
+                suggestion,
+                SlashPaletteSuggestion::Static(item) if item.name == "template-cmd"
+            )),
+            "merged template must be suggestible after set_commands"
+        );
     }
 
     #[test]

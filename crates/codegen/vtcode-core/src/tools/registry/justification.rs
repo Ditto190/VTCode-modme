@@ -161,6 +161,21 @@ impl JustificationManager {
         cache_dir: PathBuf,
         legacy_pattern_files: impl IntoIterator<Item = PathBuf>,
     ) -> Self {
+        let manager = Self::new_without_load(cache_dir, legacy_pattern_files);
+        // Try to load existing patterns
+        let _ = manager.load_patterns();
+
+        manager
+    }
+
+    /// Create a manager without touching disk.
+    ///
+    /// First-paint path uses this so approval-pattern file reads move to
+    /// hydration; call [`Self::refresh_patterns`] there before the first turn.
+    pub(crate) fn new_without_load(
+        cache_dir: PathBuf,
+        legacy_pattern_files: impl IntoIterator<Item = PathBuf>,
+    ) -> Self {
         let canonical_pattern_file = cache_dir.join("approval_patterns.json");
         let mut legacy_pattern_files = legacy_pattern_files
             .into_iter()
@@ -169,12 +184,7 @@ impl JustificationManager {
         legacy_pattern_files.dedup();
 
         let patterns = std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
-        let manager = Self { cache_dir, legacy_pattern_files, patterns };
-
-        // Try to load existing patterns
-        let _ = manager.load_patterns();
-
-        manager
+        Self { cache_dir, legacy_pattern_files, patterns }
     }
 
     /// Load approval patterns from disk and merge into the in-memory map.

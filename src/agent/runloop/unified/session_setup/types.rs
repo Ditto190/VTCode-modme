@@ -65,6 +65,10 @@ pub(crate) struct SessionState {
     pub mcp_panel_state: mcp_events::McpPanelState,
     pub loaded_skills: Arc<RwLock<HashMap<String, vtcode_core::skills::types::Skill>>>,
     pub active_primary_agent: ActivePrimaryAgentState,
+    /// Plugin-aware discovery result from the critical path, reused by
+    /// hydration so `SubagentController` construction skips a second
+    /// workspace/plugin filesystem scan.
+    pub discovered_subagents: Option<vtcode_config::DiscoveredSubagents>,
 }
 
 pub(crate) struct SessionUISetup {

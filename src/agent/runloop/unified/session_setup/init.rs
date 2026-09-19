@@ -190,13 +190,21 @@ pub(crate) async fn initialize_session_critical(
     }
 
     let async_mcp_manager = create_async_mcp_manager_inner(vt_cfg, None, &config.workspace, false);
-    let (mcp_error, mut session_bootstrap, startup_update_check, release_highlights, conversation_history) = tokio::join!(
+    // First-paint path avoids all disk I/O except the cheap bootstrap and
+    // resume-history joins below. Update-cache and release-notes reads move
+    // to hydration (see `hydrate_session_runtime`); only the in-memory
+    // preflight notice (no I/O) is consulted here so an already-fetched
+    // update still surfaces without paying `Updater::new` on the critical
+    // path.
+    let (mcp_error, mut session_bootstrap, conversation_history) = tokio::join!(
         determine_mcp_bootstrap_error(async_mcp_manager.as_ref()),
         prepare_session_bootstrap_with_mode(config, vt_cfg, None, SessionBootstrapMode::Critical),
-        async { load_startup_update_check() },
-        load_release_highlights_for_startup(),
         build_conversation_history_from_resume(resume),
     );
+    let startup_update_check = crate::updater::get_preflight_notice()
+        .map(|notice| crate::updater::StartupUpdateCheck { cached_notice: Some(notice), should_refresh: false })
+        .unwrap_or_default();
+    let release_highlights = None;
     session_bootstrap.mcp_error = mcp_error;
     session_bootstrap.search_tools_notice = take_search_tools_bundle_notice().await;
     if let Some(notice) = startup_update_check.cached_notice.as_ref() {
@@ -219,7 +227,27 @@ pub(crate) async fn initialize_session_critical(
         mcp_events::McpPanelState::default()
     };
 
-    let tool_registry = ToolRegistry::new(config.workspace.clone()).await;
+    // Overlap the two heavy I/O builders on the critical path: registry
+    // construction (builtin packs, no policy file read) and workspace/plugin
+    // agent discovery. Both are required before first paint (lightweight
+    // registry + plugin-aware primary-agent selection), but they are
+    // independent of each other. The registry reuses the already-loaded
+    // session config so it does not pay a second workspace TOML parse on the
+    // paint path; the policy manager attaches in hydration.
+    let workspace_for_registry = config.workspace.clone();
+    let workspace_for_discovery = config.workspace.clone();
+    let vt_cfg_snapshot = vt_cfg.cloned();
+    let (tool_registry, discovered) = tokio::join!(
+        async move {
+            if let Some(snapshot) = vt_cfg_snapshot.as_ref() {
+                ToolRegistry::new_for_first_paint_with_loaded_config(workspace_for_registry, snapshot).await
+            } else {
+                ToolRegistry::new(workspace_for_registry).await
+            }
+        },
+        async move { vtcode_core::subagents::discover_controller_subagents(&workspace_for_discovery).await },
+    );
+    let tool_registry = tool_registry;
     tool_registry.set_harness_session(parent_session_id.to_string());
 
     // Archive metadata is authoritative when resuming an existing thread.
@@ -231,9 +259,8 @@ pub(crate) async fn initialize_session_critical(
     let resumed_primary_agent = resume
         .and_then(|r| r.snapshot().metadata.primary_agent.clone())
         .or_else(|| session_primary_agent_override.map(str::to_owned));
-    let discovered = vtcode_core::subagents::discover_controller_subagents(&config.workspace)
-        .await
-        .with_context(|| format!("Failed to discover primary agents in {}", config.workspace.display()))?;
+    let discovered =
+        discovered.with_context(|| format!("Failed to discover primary agents in {}", config.workspace.display()))?;
     let active_primary_agent = active_primary_agent_from_specs_for_mode(
         &discovered.effective,
         vt_cfg,
@@ -248,16 +275,21 @@ pub(crate) async fn initialize_session_critical(
 
     let tool_result_cache = Arc::new(RwLock::new(ToolResultCache::new(128)));
     let tool_permission_cache = Arc::new(RwLock::new(ToolPermissionCache::new()));
+    // First paint avoids approval-cache disk I/O: resolve paths (env + joins,
+    // no syscalls) and construct a deferred recorder without reading pattern
+    // files or creating directories. Hydration ensures the directory and loads
+    // patterns before the first model turn; writes self-ensure via
+    // `ensure_user_dir`, so paint correctness never depends on the mkdir.
     let paths = VtCodePaths::resolve().context("failed to resolve private VT Code approval cache")?;
     let cache_dir = paths
-        .ensure_cache_child_dir("approval")
-        .context("failed to create private VT Code approval cache")?;
+        .cache_path("approval")
+        .context("failed to resolve private VT Code approval cache")?;
     let legacy_cache_dirs = [
         paths.cache_dir().to_path_buf(),
         paths.config_dir().join("cache"),
         paths.legacy_dir().join("cache"),
     ];
-    let approval_recorder = Arc::new(ApprovalRecorder::new_with_legacy_cache_dirs(cache_dir, legacy_cache_dirs));
+    let approval_recorder = Arc::new(ApprovalRecorder::new_deferred(cache_dir, legacy_cache_dirs));
     let permissions_state = Arc::new(RwLock::new(vt_cfg.map(|cfg| cfg.permissions.clone()).unwrap_or_default()));
     let circuit_breaker = Arc::new(vtcode_core::tools::circuit_breaker::CircuitBreaker::with_metrics(
         vtcode_config_circuit_breaker_to_core(vt_cfg, config),
@@ -309,6 +341,7 @@ pub(crate) async fn initialize_session_critical(
         mcp_panel_state,
         loaded_skills: skill_setup.active_skills_map,
         active_primary_agent,
+        discovered_subagents: Some(discovered),
     })
 }
 
@@ -344,9 +377,49 @@ pub(crate) async fn hydrate_session_runtime(
         session_state.session_bootstrap.placeholder = full_bootstrap.placeholder;
     }
 
+    // Deferred post-paint maintenance reads: update-cache and release-notes
+    // file I/O moved off the first-paint path. Merge here so hydrated UI
+    // (header highlights, update prompt, release notes) matches the prior
+    // pre-paint behavior before the first model turn.
+    // Join with nothing else here yet; both are local cache reads and cheap
+    // relative to tool-registry init below, but keeping them out of
+    // `initialize_session_critical` saves ~10-50ms on cold caches.
+    if session_state.startup_update_check.cached_notice.is_none() {
+        let deferred_check = load_startup_update_check();
+        if let Some(notice) = deferred_check.cached_notice.as_ref() {
+            append_notice_highlight(&mut session_state.session_bootstrap.header_highlights, notice);
+        }
+        // Preserve a background refresh request from the deferred check.
+        if deferred_check.should_refresh {
+            session_state.startup_update_check.should_refresh = true;
+        }
+        if session_state.startup_update_check.cached_notice.is_none() {
+            session_state.startup_update_check.cached_notice = deferred_check.cached_notice;
+        }
+    }
+    if session_state.session_bootstrap.release_highlights.is_none() {
+        session_state.session_bootstrap.release_highlights = load_release_highlights_for_startup().await;
+    }
+
+    // Finish deferred approval-cache setup off the paint path: create the
+    // directory and load persisted patterns before the first model turn so
+    // auto-approval history matches the prior pre-paint behavior. Fail-open:
+    // an empty in-memory map is safe, writes self-ensure later.
+    if let Ok(paths) = VtCodePaths::resolve() {
+        if let Err(err) = paths.ensure_cache_child_dir("approval") {
+            warn!("Failed to create approval cache directory during hydration: {err:#}");
+        }
+    } else {
+        warn!("Failed to resolve approval cache paths during hydration");
+    }
+    session_state.execution.approval_recorder.reload().await;
+
     let deferred_tool_policy = active_deferred_tool_policy(config, vt_cfg, &*session_state.provider_client);
 
     let tool_registry = &mut session_state.tool_registry;
+    // Attach the workspace policy manager skipped on the paint path before any
+    // tool runs; evaluation fails open to metadata defaults until then.
+    tool_registry.ensure_workspace_policy_manager(&config.workspace).await;
     tool_registry.initialize_async().await?;
     if let Some(cfg) = vt_cfg {
         if let Err(err) = tool_registry
@@ -375,7 +448,7 @@ pub(crate) async fn hydrate_session_runtime(
                 .active_primary_agent
                 .active()
                 .contributes_workspace_controlled_hooks();
-        match SubagentController::new(SubagentControllerConfig {
+        let controller_config = SubagentControllerConfig {
             workspace_root: config.workspace.clone(),
             parent_session_id: parent_session_id.to_string(),
             parent_model: config.model.clone(),
@@ -389,9 +462,16 @@ pub(crate) async fn hydrate_session_runtime(
             exec_sessions: tool_registry.exec_session_manager(),
             pty_manager: tool_registry.pty_manager().clone(),
             managed_background_runtime: false,
-        })
-        .await
-        {
+        };
+        // Reuse the critical-path discovery result when available so hydration
+        // skips a second workspace/plugin scan; fall back to full discovery
+        // for embedded callers without critical-path state.
+        let controller_result = if let Some(discovered) = session_state.discovered_subagents.clone() {
+            SubagentController::new_with_discovered(controller_config, discovered).await
+        } else {
+            SubagentController::new(controller_config).await
+        };
+        match controller_result {
             Ok(controller) => {
                 controller.set_parent_messages(&session_state.conversation_history).await;
                 let controller = Arc::new(controller);
@@ -1110,6 +1190,194 @@ mod tests {
             critical.base_system_prompt, seed_prompt,
             "hydration must replace the seed system prompt with the composed workspace prompt"
         );
+    }
+
+    #[tokio::test]
+    async fn hydrate_reuses_critical_discovery_for_controller() {
+        let temp = TempDir::new().expect("temp dir");
+        let cfg = VTCodeConfig::default();
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &cfg,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        let mut critical =
+            initialize_session_critical(&runtime_config, Some(&cfg), false, false, None, "test-reuse", None)
+                .await
+                .expect("critical session");
+        let critical_names = critical
+            .discovered_subagents
+            .as_ref()
+            .expect("critical must cache discovery")
+            .effective
+            .iter()
+            .map(|spec| spec.name.clone())
+            .collect::<Vec<_>>();
+
+        let mut context_manager = ContextManager::new(
+            critical.base_system_prompt.clone(),
+            (),
+            critical.loaded_skills.clone(),
+            Some(cfg.agent.clone()),
+        );
+        context_manager.set_workspace_root(&runtime_config.workspace);
+        hydrate_session_runtime(
+            &mut critical,
+            &mut context_manager,
+            &runtime_config,
+            Some(&cfg),
+            false,
+            false,
+            None,
+            "test-reuse",
+            None,
+        )
+        .await
+        .expect("hydrate session");
+
+        let controller = critical
+            .tool_registry
+            .subagent_controller()
+            .expect("controller when subagents enabled");
+        let controller_names = controller
+            .effective_specs()
+            .await
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>();
+        for name in critical_names {
+            assert!(
+                controller_names.contains(&name),
+                "hydrated controller must reuse critical discovery, missing {name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn critical_path_defers_policy_manager_to_hydrate() {
+        let temp = TempDir::new().expect("temp dir");
+        let cfg = VTCodeConfig::default();
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &cfg,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        let mut critical =
+            initialize_session_critical(&runtime_config, Some(&cfg), false, false, None, "test-defer-policy", None)
+                .await
+                .expect("critical session");
+        assert!(!critical.tool_registry.has_policy_manager().await, "critical path must skip policy file I/O");
+
+        let mut context_manager = ContextManager::new(
+            critical.base_system_prompt.clone(),
+            (),
+            critical.loaded_skills.clone(),
+            Some(cfg.agent.clone()),
+        );
+        context_manager.set_workspace_root(&runtime_config.workspace);
+        hydrate_session_runtime(
+            &mut critical,
+            &mut context_manager,
+            &runtime_config,
+            Some(&cfg),
+            false,
+            false,
+            None,
+            "test-defer-policy",
+            None,
+        )
+        .await
+        .expect("hydrate session");
+        assert!(
+            critical.tool_registry.has_policy_manager().await,
+            "hydration must attach the policy manager before the first turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn critical_path_defers_update_and_release_notes_to_hydrate() {
+        let temp = TempDir::new().expect("temp dir");
+        let cfg = VTCodeConfig::default();
+        let cli = Cli::parse_from(["vtcode"]);
+        let runtime_config = build_runtime_agent_config(
+            &cli,
+            &cfg,
+            temp.path().to_path_buf(),
+            RuntimeModelSelection {
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+                model_source: ModelSelectionSource::WorkspaceConfig,
+            },
+            "test-key".to_string(),
+            vtcode_core::ui::theme::DEFAULT_THEME_ID.to_string(),
+        );
+
+        let mut critical =
+            initialize_session_critical(&runtime_config, Some(&cfg), false, false, None, "test-defer-update", None)
+                .await
+                .expect("critical session");
+        // First-paint path must not pay update-cache / release-notes file I/O.
+        // Only an in-memory preflight notice (if present) may appear here.
+        let preflight = crate::updater::get_preflight_notice();
+        assert_eq!(
+            critical.startup_update_check.cached_notice, preflight,
+            "critical update check must be preflight-only, no disk read"
+        );
+        assert!(
+            critical.session_bootstrap.release_highlights.is_none(),
+            "critical path must defer release-notes read to hydration"
+        );
+
+        let mut context_manager = ContextManager::new(
+            critical.base_system_prompt.clone(),
+            (),
+            critical.loaded_skills.clone(),
+            Some(cfg.agent.clone()),
+        );
+        context_manager.set_workspace_root(&runtime_config.workspace);
+        hydrate_session_runtime(
+            &mut critical,
+            &mut context_manager,
+            &runtime_config,
+            Some(&cfg),
+            false,
+            false,
+            None,
+            "test-defer-update",
+            None,
+        )
+        .await
+        .expect("hydrate session");
+        // Hydration completes the deferred reads without breaking parity:
+        // cached notice (if any) must have a matching header highlight.
+        if let Some(notice) = critical.startup_update_check.cached_notice.as_ref() {
+            assert!(
+                !critical.session_bootstrap.header_highlights.is_empty(),
+                "hydrated update notice must surface a header highlight"
+            );
+            let _ = notice;
+        }
     }
 
     #[tokio::test]

@@ -33,6 +33,26 @@ impl ApprovalRecorder {
         let manager = JustificationManager::new_with_legacy_pattern_files(cache_dir, legacy_pattern_files);
         Self { manager: Arc::new(RwLock::new(manager)) }
     }
+
+    /// Create a recorder without reading approval-pattern files.
+    ///
+    /// First-paint path uses this; hydration must call [`Self::reload`] before
+    /// the first model turn so auto-approval history matches prior behavior.
+    pub fn new_deferred(cache_dir: PathBuf, legacy_cache_dirs: impl IntoIterator<Item = PathBuf>) -> Self {
+        let legacy_pattern_files = legacy_cache_dirs
+            .into_iter()
+            .map(|directory| directory.join("approval_patterns.json"));
+        let manager = JustificationManager::new_without_load(cache_dir, legacy_pattern_files);
+        Self { manager: Arc::new(RwLock::new(manager)) }
+    }
+
+    /// Load (or re-load) approval patterns from disk, merging with in-memory state.
+    pub async fn reload(&self) {
+        let manager = self.manager.read().await;
+        if let Err(err) = manager.refresh_patterns() {
+            tracing::debug!(error = %err, "Failed to load approval patterns during hydration");
+        }
+    }
 }
 
 impl Default for ApprovalRecorder {
@@ -375,6 +395,42 @@ mod tests {
 
         assert_eq!(recorder.get_approval_count("run_command").await, 3);
         assert_eq!(std::fs::read(canonical_file).expect("read canonical patterns"), b"not json");
+    }
+
+    #[tokio::test]
+    async fn deferred_recorder_skips_disk_read_until_reload() {
+        let temp_dir = temp_cache_dir();
+        let canonical_dir = temp_dir.path().join("cache/approval");
+        std::fs::create_dir_all(&canonical_dir).expect("canonical cache directory");
+
+        let mut patterns = HashMap::new();
+        patterns.insert(
+            "run_command".to_string(),
+            ApprovalPattern {
+                tool_name: "run_command".to_string(),
+                display_name: Some("Run Command".to_string()),
+                approve_count: 3,
+                deny_count: 0,
+                last_decision: Some(true),
+                recent_reason: None,
+            },
+        );
+        std::fs::write(
+            canonical_dir.join("approval_patterns.json"),
+            serde_json::to_vec(&patterns).expect("serialize patterns"),
+        )
+        .expect("write patterns");
+
+        let recorder = ApprovalRecorder::new_deferred(canonical_dir, Vec::<PathBuf>::new());
+        assert_eq!(
+            recorder.get_approval_count("run_command").await,
+            0,
+            "deferred recorder must not touch disk on the paint path"
+        );
+
+        recorder.reload().await;
+        assert_eq!(recorder.get_approval_count("run_command").await, 3);
+        assert!(recorder.has_high_approval_rate("run_command").await);
     }
 
     #[tokio::test]

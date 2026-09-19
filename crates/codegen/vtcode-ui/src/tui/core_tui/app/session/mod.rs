@@ -1090,6 +1090,9 @@ impl AppSession {
                     palette.set_search_index(files);
                 }
             }
+            InlineCommand::SetSlashCommands { commands } => {
+                self.slash_palette.set_commands(commands);
+            }
             _ => {
                 if let Some(core_cmd) = to_core_command(&command) {
                     self.handle_core_command(core_cmd);
@@ -1210,6 +1213,7 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
         InlineCommand::SetLocalAgents { .. } => return None,
         InlineCommand::SetArchivedHistory { .. } => return None,
         InlineCommand::UpdateFilePaletteSearch { .. } => return None,
+        InlineCommand::SetSlashCommands { .. } => return None,
         InlineCommand::SetPrimaryAgent { name, color } => {
             CoreCommand::SetPrimaryAgent { name: name.clone(), color: color.clone() }
         }

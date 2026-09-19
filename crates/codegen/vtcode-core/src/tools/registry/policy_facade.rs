@@ -155,6 +155,31 @@ impl ToolRegistry {
         self.sync_policy_catalog().await;
     }
 
+    /// Whether the registry owns a workspace policy manager.
+    ///
+    /// First-paint registries skip policy file I/O; hydration attaches the
+    /// manager via [`Self::ensure_workspace_policy_manager`] before any tool runs.
+    pub async fn has_policy_manager(&self) -> bool {
+        self.policy_gateway.has_policy_manager().await
+    }
+
+    /// Attach the workspace policy manager unless one is already present.
+    ///
+    /// Reads (and may create) the workspace policy file, so it belongs in
+    /// hydration, not on the paint path. Fail-open: without a manager,
+    /// evaluation falls back to tool metadata defaults.
+    pub async fn ensure_workspace_policy_manager(&self, workspace_root: &std::path::Path) {
+        if self.policy_gateway.has_policy_manager().await {
+            return;
+        }
+        match ToolPolicyManager::new_with_workspace(workspace_root).await {
+            Ok(manager) => self.set_policy_manager(manager).await,
+            Err(err) => {
+                tracing::warn!(%err, "Failed to initialize tool policy manager during hydration");
+            }
+        }
+    }
+
     pub async fn set_tool_policy(&self, tool_name: &str, policy: ToolPolicy) -> Result<()> {
         let normalized_name = self.resolve_runtime_policy_name(tool_name);
         self.policy_gateway.set_tool_policy(&normalized_name, policy).await

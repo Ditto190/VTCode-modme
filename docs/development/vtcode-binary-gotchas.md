@@ -87,15 +87,26 @@ Interactive launches split session bootstrap so first paint does not wait on the
 full agent runtime:
 
 1. `initialize_session_critical` — provider, one plugin-aware primary-agent
-   discovery pass (`discover_controller_subagents`), lightweight `ToolRegistry`,
-   resume history, cheap `SessionBootstrap` (workspace language/guideline scans
-   skipped), seed system prompt. MCP manager is created but background
-   initialization is deferred.
-2. `initialize_session_ui` — spawn TUI / first frame. Hook approval prompts may
+   discovery pass (`discover_controller_subagents`) joined with lightweight
+   `ToolRegistry` (`new_with_loaded_config` reuses the session config, no
+   second workspace parse), resume history, cheap `SessionBootstrap`
+   (workspace language/guideline scans skipped), seed system prompt, preflight-only
+   update notice (no `Updater::new` disk read, no release-notes read), deferred
+   approval recorder (paths only, no `mkdir`, no pattern reads), first-paint
+   `ToolRegistry` (no workspace TOML re-parse, no policy file read/create).
+   Discovery result
+   is cached in `SessionState.discovered_subagents`. MCP manager
+   is created but background initialization is deferred.
+2. `initialize_session_ui` — spawn TUI / first frame with built-in slash commands;
+   prompt templates merge post-paint via `SetSlashCommands`. Hook approval prompts may
    run here; session-start hooks do not.
-3. `hydrate_session_runtime` — tool registry async init + policy + CGP +
+3. `hydrate_session_runtime` — deferred update-cache + release-notes reads (merged
+   into header highlights), approval-cache dir ensure + pattern reload,
+   workspace policy manager attach,
+   tool registry async init + policy + CGP +
    model-tool projection + skill tools, system-prompt composition into
-   `ContextManager`, subagent controller, trajectory, dynamic context, MCP
+   `ContextManager`, subagent controller via `new_with_discovered` (no second
+   scan), trajectory, dynamic context, MCP
    reconfigure/restart (first MCP init starts here).
 4. `apply_post_hydration_ui` + `run_session_start_hooks` — re-drive agent
    palette/refresh/header/full-auto banner/budget warning, then execute

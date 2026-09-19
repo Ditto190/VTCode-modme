@@ -61,8 +61,16 @@ pub(crate) fn build_augmented_cli_command() -> clap::Command {
     cmd = cmd.styles(clap_help_styles());
     cmd = cmd.before_help(QUICK_START_HELP);
 
-    let version_info = vtcode_core::cli::args::long_version();
-    let version_leak: &'static str = Box::leak(version_info.into_boxed_str());
+    // `long_version()` resolves storage paths and formats environment state —
+    // pure overhead for interactive launches that never print `--version`.
+    // Compute the full diagnostics string only when a version flag is present;
+    // otherwise expose the cheap crate version. Both branches are `'static`
+    // without per-launch `Box::leak` churn on the hot path.
+    let version_leak: &'static str = if argv_requests_version() {
+        Box::leak(vtcode_core::cli::args::long_version().into_boxed_str())
+    } else {
+        env!("CARGO_PKG_VERSION")
+    };
     cmd = cmd.long_version(version_leak);
 
     let after_help = "\nSlash commands (type / in chat):\n  /init     - Guided AGENTS.md + workspace setup\n  /config   - Browse settings sections\n  /status   - Show current configuration\n  /checkup  - Diagnose setup & clean the workspace (alias: /doctor)\n  /update   - Check for VT Code updates, or run `vtcode update` from the CLI (use --list, --pin, --channel)\n  /plan     - Start or finish the Planning workflow\n  /theme    - Switch UI theme\n  /title    - Configure terminal title items\n  /history  - Open command history picker\n  /help     - Show all slash commands\n\nTips:\n  Mistyped commands show suggestions (e.g., vtcode ch -> chat).\n  Use --continue to resume the most recent session.\n  Use --resume to pick a session interactively.";
@@ -118,6 +126,23 @@ fn parse_help_color_choice(value: &str) -> Option<CliColorChoice> {
         "never" => Some(CliColorChoice::Never),
         _ => None,
     }
+}
+
+fn argv_requests_version() -> bool {
+    args_request_version(std::env::args_os().skip(1))
+}
+
+fn args_request_version(args: impl IntoIterator<Item = std::ffi::OsString>) -> bool {
+    args.into_iter().any(|arg| {
+        let text = arg.to_string_lossy();
+        // Cover `-V`, `--version`, and combined short flags like `-VV`.
+        // Values after `=` (e.g. `--version=x`) still count as a version request
+        // so diagnostics stay complete whenever clap would print them.
+        text == "-V"
+            || text == "--version"
+            || text.starts_with("--version=")
+            || (text.starts_with('-') && !text.starts_with("--") && text.contains('V'))
+    })
 }
 
 pub(crate) async fn resolve_startup_context(args: &Cli) -> Result<StartupContext> {
@@ -349,8 +374,8 @@ fn extract_workspace_invalid_value(err_text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_augmented_cli_command, cached_candidates, extract_workspace_invalid_value, similarity_score,
-        suggest_similar_commands, try_enhance_clap_error,
+        args_request_version, build_augmented_cli_command, cached_candidates, extract_workspace_invalid_value,
+        similarity_score, suggest_similar_commands, try_enhance_clap_error,
     };
     use clap::Parser;
     use vtcode_core::cli::args::Cli;
@@ -461,5 +486,34 @@ mod tests {
     fn try_enhance_clap_error_returns_none_for_non_workspace_error() {
         let err = "some other clap error";
         assert!(try_enhance_clap_error(err).is_none());
+    }
+
+    #[test]
+    fn version_flag_detection_is_asymmetric() {
+        use std::ffi::OsString;
+        let version_cases = [
+            vec!["--version"],
+            vec!["-V"],
+            vec!["chat", "--version"],
+            vec!["-VV"],
+            vec!["--version=json"],
+        ];
+        for args in version_cases {
+            let owned = args.into_iter().map(OsString::from).collect::<Vec<_>>();
+            assert!(args_request_version(owned), "version flag must be detected");
+        }
+
+        let non_version_cases: Vec<Vec<&str>> = vec![
+            vec![],
+            vec!["chat"],
+            vec!["--help"],
+            vec!["--verbose"],
+            vec!["--versioned"],
+            vec!["-v"],
+        ];
+        for args in non_version_cases {
+            let owned = args.into_iter().map(OsString::from).collect::<Vec<_>>();
+            assert!(!args_request_version(owned), "non-version args must skip full diagnostics");
+        }
     }
 }

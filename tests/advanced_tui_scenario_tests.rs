@@ -70,6 +70,7 @@ fn inline_command_variant_name(command: &InlineCommand) -> &'static str {
         InlineCommand::RestoreInputDraft(_) => "RestoreInputDraft",
         InlineCommand::UpdateFilePaletteSearch { .. } => "UpdateFilePaletteSearch",
         InlineCommand::SetKeyBindings { .. } => "SetKeyBindings",
+        InlineCommand::SetSlashCommands { .. } => "SetSlashCommands",
     }
 }
 

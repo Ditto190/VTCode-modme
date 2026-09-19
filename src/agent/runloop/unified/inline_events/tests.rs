@@ -1178,5 +1178,6 @@ fn other_name(command: &InlineCommand) -> &'static str {
         InlineCommand::StopEventStream => "StopEventStream",
         InlineCommand::StartEventStream => "StartEventStream",
         InlineCommand::UpdateFilePaletteSearch { .. } => "UpdateFilePaletteSearch",
+        InlineCommand::SetSlashCommands { .. } => "SetSlashCommands",
     }
 }

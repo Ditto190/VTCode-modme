@@ -165,6 +165,21 @@ impl SubagentController {
     /// Creates a new controller, discovering subagent specs and loading persisted background state.
     pub async fn new(config: SubagentControllerConfig) -> Result<Self> {
         let discovered = discover_controller_subagents(&config.workspace_root).await?;
+        // Box the inner constructor: it carries `VTCodeConfig` + spec state
+        // across awaits, which would otherwise bloat every `new` caller's
+        // async frame past the `large_futures` budget (denied in test builds).
+        Box::pin(Self::new_with_discovered(config, discovered)).await
+    }
+
+    /// Creates a new controller reusing an already-discovered spec set.
+    ///
+    /// Interactive startup discovers specs once on the first-paint path;
+    /// hydration passes that result here to skip a second workspace/plugin
+    /// filesystem scan. Behavior matches [`Self::new`] otherwise.
+    pub async fn new_with_discovered(
+        config: SubagentControllerConfig,
+        discovered: vtcode_config::DiscoveredSubagents,
+    ) -> Result<Self> {
         let workspace_gated = config.workspace_gated;
         let lifecycle_hooks = LifecycleHookEngine::new_with_session_gated(
             config.workspace_root.clone(),

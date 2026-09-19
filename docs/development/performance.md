@@ -224,6 +224,32 @@ early startup work is observable without adding work to normal launches.
   before the interaction loop dispatches the first model turn. Opt-in phases:
   `session_setup_critical`, `session_setup_ui`, `session_setup_hydrate`,
   `session_setup`, `first_ui_render`.
+- **Keep update/release I/O off first paint.** The critical path consults only
+  the in-memory preflight notice; `Updater::new` + cache reads and release-notes
+  reads run in hydration and merge header highlights there.
+- **Reuse the loaded session config.** `ToolRegistry::new_with_loaded_config`
+  reuses the merged `VTCodeConfig` snapshot instead of a second
+  `ConfigManager::load_from_workspace` parse; `ToolRegistry::new` remains for
+  paths without a loaded config.
+- **Join pre-paint builders.** `ToolRegistry` construction overlaps
+  `discover_controller_subagents`, and prompt-template discovery overlaps the
+  dot-config load, via `tokio::join!`.
+- **Lazy `--version` diagnostics.** `build_augmented_cli_command` only formats
+  `long_version()` (storage paths + env dump) when argv contains a version flag;
+  interactive launches use the static crate version.
+- **Reuse subagent discovery.** Critical path caches `DiscoveredSubagents` in
+  `SessionState`; hydration builds via `SubagentController::new_with_discovered`
+  instead of a second workspace/plugin scan.
+- **Skeleton-first slash palette.** TUI spawns with built-ins only; workspace
+  templates merge post-paint via app-level `InlineCommand::SetSlashCommands`.
+- **Defer approval-pattern I/O.** Critical path builds the recorder via
+  `ApprovalRecorder::new_deferred` (path resolution only, no `mkdir`, no pattern
+  file reads); hydration ensures the cache dir and calls `reload()` before the
+  first turn. Writes were already self-ensuring.
+- **Defer policy file I/O.** First paint builds the registry via
+  `new_for_first_paint_with_loaded_config` (no policy file read/create);
+  hydration attaches it with `ensure_workspace_policy_manager` before any tool
+  runs. Evaluation fails open to metadata defaults until then.
 
 ### Release artifact assumptions
 
