@@ -1701,12 +1701,17 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         None
                     };
                     // Progress-reset: any newly completed tracker step restores
-                    // the cross-turn auto-continue episode budget.
+                    // the cross-turn auto-continue episode budget plus the
+                    // verification auto-recovery turn budget (failures preserved
+                    // so a never-passing suite still escalates). Long-running
+                    // work that keeps completing steps must not stall on stale
+                    // verification misses for new work.
                     if tracker_kill_switch
                         && let Some(completed) = tracker_continue::tracker_completed_count(&tool_registry).await
                         && session_stats.note_tracker_completed_count(completed)
                     {
                         session_stats.reset_tracker_continuation_budget();
+                        session_stats.reset_verification_auto_recovery_turns();
                     }
                     let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
                     let final_text = latest_assistant_result_text(&runtime.state.messages);
@@ -1948,14 +1953,27 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             config.workspace.as_path(),
                         );
                         let command = verifier.as_deref().unwrap_or("cargo check --locked");
+                        let attempt = session_stats.verification_auto_recovery_turns();
+                        let max = verification_gate::verification_cross_turn_turns(vt_cfg.as_ref());
+                        // `max == 0` disables cross-turn recovery via config: report
+                        // it as disabled rather than the confusing `0/0 turns`.
+                        let recovery_note = if max == 0 {
+                            format!(
+                                "with cross-turn auto-recovery disabled (harness auto-verification already tried `{command}`)"
+                            )
+                        } else {
+                            format!(
+                                "after {attempt}/{max} auto-recovery turns (harness auto-verification already tried `{command}`)"
+                            )
+                        };
                         match (escalated, session_stats.last_verification_failure()) {
                             (true, Some(failure)) => format!(
-                                "{base} The harness auto-verification `{}` failed {} time(s) consecutively, so autonomous recovery stopped. Last output tail:\n{}\nFix the reported failure, then run `{}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0 before typing `continue`.",
+                                "{base} The harness auto-verification `{}` failed {} time(s) consecutively, so autonomous recovery stopped. Last output tail:\n{}\nFix the reported failure, then run `{}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0 before typing `continue` to resume with the gate preserved.",
                                 failure.command, failure.consecutive_failures, failure.excerpt_tail, failure.command,
                             ),
                             _ => format!(
-                                "{base} Autonomous verification recovery was exhausted without a passing verifier. \
-                                Run `{command}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0, then type `continue`."
+                                "{base} Autonomous verification recovery was exhausted {recovery_note}. \
+                                Run `{command}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0, then type `continue` to resume with the gate preserved."
                             ),
                         }
                     } else {

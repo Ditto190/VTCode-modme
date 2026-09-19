@@ -530,8 +530,16 @@ pub(super) async fn run_interaction_loop_impl(
                 // generic stuck turn: concluding would abandon unverified work
                 // the user asked to continue. Resume verifier-first with the
                 // configured-or-detected project command instead of the
-                // generic conclude-oriented directive.
-                let verification_stalled = ctx.session_stats.verification_snapshot().0;
+                // generic conclude-oriented directive. Check both the live
+                // snapshot and the stall reason text: the snapshot can be
+                // lost across compaction/model-switch while the blocked
+                // reason still names the pending gate — fail closed toward
+                // verifier-first recovery rather than conclusion. Match the
+                // existing helper convention (lowercase `contains` in
+                // `tracker_auto_continue_is_recoverable_block`): stall reasons
+                // may be compound/enriched with varying case.
+                let verification_stalled = ctx.session_stats.verification_snapshot().0
+                    || stall_reason.to_ascii_lowercase().contains("verification is still pending");
                 if verification_stalled {
                     let verifier =
                         crate::agent::runloop::unified::turn::tool_outcomes::helpers::resolve_harness_verifier_command(

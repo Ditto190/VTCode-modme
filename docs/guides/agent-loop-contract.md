@@ -336,9 +336,17 @@ its output tail. If the turn still blocks on verification, the session loop
 schedules up to the configured cross-turn recovery turns (default 2; skipped
 once escalated) as system directive + queued follow-up with no blocked
 handoff and input staying enabled, before writing
-`.vtcode/tasks/current_blocked.md` and requiring manual `continue`. A user-typed
+`.vtcode/tasks/current_blocked.md` and requiring manual `continue`. Tracker
+progress restores the verification turn budget without clearing the failure
+escalation counter, so long-running work that keeps completing tracker steps
+gets fresh bounded recovery for new edits while a never-passing suite still
+escalates. The exhausted handoff names the `attempt/max` recovery count and
+the exact verifier to re-run standalone, and the transcript banner leads with
+that verifier-first step instead of the generic `continue` nudge. A user-typed
 `continue` after a verification stall resumes verifier-first with the detected
-project command instead of the generic conclude-oriented recovery. A
+project command instead of the generic conclude-oriented recovery; stalled
+follow-up treats a stall reason naming the pending gate as verification-stalled
+even when the snapshot was lost across compaction or model switch. A
 context-capacity response explains that
 bounded compaction could not reduce the request, retains completed tool outputs,
 and directs the operator to resume after reducing context or switching models.

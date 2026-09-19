@@ -252,11 +252,25 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             let full_reason_path = artifacts.current_path.display().to_string();
             let transcript_reason = truncated_block_reason(blocker_summary, &full_reason_path);
             let _ = renderer.line(MessageStyle::Warning, &format!("Turn blocked: {transcript_reason}"));
-            let _ = renderer.line(MessageStyle::Info, "What you can do:");
-            let _ = renderer.line(
-                MessageStyle::Info,
-                "  • In this session: Type 'continue' to resume, or describe alternative instructions",
-            );
+            // Verification blocks already name the exact verifier in the summary and
+            // attempted harness auto-verification: lead with the actionable
+            // verifier-first step instead of the generic `continue` nudge so
+            // long-running work can resume without re-reading handoff files.
+            // Lowercase match follows the helper convention for compound reasons.
+            let is_verification_block = blocker_summary.to_ascii_lowercase().contains("verification is still pending");
+            if is_verification_block {
+                let _ = renderer.line(MessageStyle::Info, "What to do now (verification gate still pending):");
+                let _ = renderer.line(
+                    MessageStyle::Info,
+                    "  • Run the verifier standalone (no pipes; cap with `max_output_tokens`), let it exit 0, then type 'continue' — harness auto-verification already tried.",
+                );
+            } else {
+                let _ = renderer.line(MessageStyle::Info, "What you can do:");
+                let _ = renderer.line(
+                    MessageStyle::Info,
+                    "  • In this session: Type 'continue' to resume, or describe alternative instructions",
+                );
+            }
             match resume {
                 BlockedHandoffResume::Available(id) => {
                     let _ = renderer

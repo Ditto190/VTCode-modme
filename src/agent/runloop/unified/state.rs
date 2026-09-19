@@ -720,6 +720,15 @@ impl SessionStats {
         // silently restore full tracker auto-continue budgets).
     }
 
+    /// Reset only the cross-turn auto-recovery turn budget, preserving the
+    /// consecutive-failure escalation counter. Called when tracker progress
+    /// proves long-running work is advancing: fresh verification misses for
+    /// new work get a new bounded recovery episode, while a genuinely
+    /// never-passing suite still escalates via the preserved failure count.
+    pub(crate) fn reset_verification_auto_recovery_turns(&mut self) {
+        self.verification_auto_recovery_turns = 0;
+    }
+
     #[cfg(test)]
     fn turn_stalled(&self) -> bool {
         self.turn_stalled
@@ -1562,6 +1571,27 @@ mod tests {
         assert_eq!(stats.verification_consecutive_failures(), 0);
         assert_eq!(stats.verification_auto_recovery_turns(), 0);
         assert!(stats.last_verification_failure().is_none());
+    }
+
+    #[test]
+    fn verification_turn_reset_on_tracker_progress_preserves_failure_escalation() {
+        use crate::agent::runloop::unified::turn::tool_outcomes::helpers::MAX_VERIFICATION_AUTO_RECOVERY_TURNS;
+
+        let mut stats = SessionStats::default();
+        // Exhaust the cross-turn budget with one consecutive failure recorded.
+        for _ in 0..MAX_VERIFICATION_AUTO_RECOVERY_TURNS {
+            assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+        }
+        assert!(!stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
+        stats.record_verification_auto_failure("cargo check --locked".to_string(), "boom");
+
+        // Tracker progress grants a fresh turn budget for new work but must
+        // not hide a never-passing suite: failures survive.
+        stats.reset_verification_auto_recovery_turns();
+        assert_eq!(stats.verification_auto_recovery_turns(), 0);
+        assert_eq!(stats.verification_consecutive_failures(), 1);
+        assert!(stats.last_verification_failure().is_some());
+        assert!(stats.record_verification_auto_recovery_turn_with_limit(MAX_VERIFICATION_AUTO_RECOVERY_TURNS));
     }
 
     #[test]

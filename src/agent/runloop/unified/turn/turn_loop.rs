@@ -118,11 +118,10 @@ pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
     "Turn blocked after repeated unverified assistant responses; verification is still pending.";
 const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending \
-    after bounded autonomous recovery. \
-    Inspection-only checks do not clear the verification gate; run a verification command — your project's \
-    build/test/lint tool, e.g. `cargo check --locked`, `go test`, or `cargo nextest run` (standalone or as a pure \
-    `&&` chain, no `| head` pipes and no `;`/`||`/`|` joins; cap output with `max_output_tokens`) — to exit 0, \
-    then type `continue` to resume with the gate preserved. \
+    after bounded autonomous recovery (harness auto-verification already tried). \
+    Inspection-only checks do not clear the verification gate; run your project's verifier standalone — e.g. \
+    `cargo check --locked`, `go test`, or `cargo nextest run` — or as a pure `&&` chain (no `|`, `;`, `||`; \
+    cap output with `max_output_tokens`) and let it exit 0, then type `continue` to resume with the gate preserved. \
     A failed verifier grants ";
 const PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX: &str = " fix-up edits before re-verify is required.";
 
