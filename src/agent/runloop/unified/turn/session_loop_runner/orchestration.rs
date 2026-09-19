@@ -1679,7 +1679,6 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         plan_auto_continue_enabled,
                         planning_active,
                         plan_ready_for_approval,
-                        false,
                         turn_completed,
                         blocked_reason,
                         is_verification_block,
@@ -1713,6 +1712,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                         %err,
                                         "Plan-mode auto-continue queue full; falling through to turn end"
                                     );
+                                    let _ = renderer.line(
+                                        MessageStyle::Info,
+                                        "[i] Plan-mode auto-continue queue full; planning remains active. Type `continue` to resume planning.",
+                                    );
                                     false
                                 }
                             };
@@ -1721,6 +1724,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 break;
                             }
                             continue;
+                        }
+                        if !budget_remaining {
+                            let _ = renderer.line(
+                                MessageStyle::Info,
+                                "[i] Plan-mode auto-continue budget exhausted; planning remains active. Type `continue` to resume planning.",
+                            );
+                        }
+                        if planning_active && !plan_ready_for_approval {
+                            let _ = renderer
+                                .line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
                         }
                     } else if should_queue {
                         let incomplete = incomplete.unwrap_or_default();
@@ -1750,9 +1763,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     true
                                 }
                                 Err(err) => {
-                                    tracing::warn!(
-                                        %err,
-                                        "Tracker auto-continue queue full; falling through to turn end"
+                                    tracing::warn!(%err, "Tracker auto-continue queue full; falling through to turn end");
+                                    let _ = renderer.line(
+                                        MessageStyle::Info,
+                                        "[i] Tracker auto-continue queue full; incomplete tracker steps remain. Type `continue` to resume.",
                                     );
                                     false
                                 }
@@ -1769,12 +1783,17 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume.",
                             );
                         }
-                    } else if planning_active && !plan_ready_for_approval && !should_queue_plan {
-                        // User-facing plan progress (title + phase only; no internal dump).
+                    } else if planning_active && plan_ready_for_approval && turn_completed {
+                        let _ =
+                            renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", true, 0, 0));
+                    } else if planning_active && !plan_ready_for_approval && !turn_completed && !should_queue_plan {
+                        // Blocked planning without auto-queue: compact status only.
                         let _ =
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
-                    } else if incomplete.as_ref().is_none_or(|items| items.is_empty()) {
-                        // Tracker work cleared (or none): reset the episode budget.
+                    } else if !planning_active && incomplete.as_ref().is_none_or(|items| items.is_empty()) {
+                        // Tracker work cleared (or none) outside planning: reset the
+                        // episode budget. Planning ends must not silently restore the
+                        // shared plan/tracker continuation budget.
                         session_stats.reset_tracker_continuation_budget();
                     }
                 }

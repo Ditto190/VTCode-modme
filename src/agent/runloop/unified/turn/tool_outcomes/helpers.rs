@@ -265,15 +265,14 @@ pub(crate) fn should_queue_tracker_resume_continuation(
 
 /// Pure gate for plan-mode outer auto-continue.
 ///
-/// Continues incomplete planning only on recoverable **blocked** ends when no
-/// user decision/approval is required and the plan is not yet ready for
-/// approval. Ordinary completed planning turns are never auto-continued.
-/// Never auto-approves.
+/// Continues incomplete planning only on recoverable **blocked** ends when the
+/// plan is not yet ready for approval. Ordinary completed planning turns are
+/// never auto-continued (they may be interview or approval handoffs). Never
+/// auto-approves.
 pub(crate) fn should_queue_plan_mode_auto_continue(
     auto_continue_enabled: bool,
     planning_active: bool,
     plan_ready_for_approval: bool,
-    awaiting_user_decision: bool,
     turn_completed: bool,
     blocked_reason: Option<&str>,
     is_verification_block: bool,
@@ -282,7 +281,7 @@ pub(crate) fn should_queue_plan_mode_auto_continue(
     if !auto_continue_enabled || !planning_active || cross_turn_turns == 0 {
         return false;
     }
-    if plan_ready_for_approval || awaiting_user_decision || is_verification_block || turn_completed {
+    if plan_ready_for_approval || is_verification_block || turn_completed {
         return false;
     }
     blocked_reason.is_some_and(plan_mode_recoverable_block)
@@ -291,12 +290,15 @@ pub(crate) fn should_queue_plan_mode_auto_continue(
 /// Recoverable planning blocked-reason classifier.
 ///
 /// `None` / completed turns are **not** recoverable. Planning handoff
-/// constants stay denied so interview/approval waits are safe.
+/// constants stay denied so interview/approval waits are safe. Deny tokens are
+/// narrow (`request_user_input`, not bare `request`) so production recovery
+/// reasons like "the requested work was not confirmed" can still match the
+/// allow-list when appropriate.
 pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
     let reason = reason.to_ascii_lowercase();
     if reason.contains("planning turn ended")
         || reason.contains("approval-ready plan")
-        || reason.contains("request")
+        || reason.contains("request_user_input")
         || reason.contains("permission")
         || reason.contains("user input")
         || reason.contains("awaiting")
@@ -324,8 +326,10 @@ pub(crate) fn plan_progress_line(
     let name = if label.is_empty() { None } else { Some(label) };
     if ready_for_approval {
         return match name {
-            Some(name) => format!("• Plan {name} — ready for approval ({step_count} steps)"),
-            None => format!("• Plan — ready for approval ({step_count} steps)"),
+            Some(name) if step_count > 0 => format!("• Plan {name} — ready for approval ({step_count} steps)"),
+            Some(name) => format!("• Plan {name} — ready for approval"),
+            None if step_count > 0 => format!("• Plan — ready for approval ({step_count} steps)"),
+            None => "• Plan — ready for approval".to_string(),
         };
     }
     if open_decisions > 0 {
@@ -383,17 +387,14 @@ mod tracker_continue_tests {
 
     #[test]
     fn plan_mode_auto_continue_gate_respects_user_gates_and_budget() {
-        // Approval/interview waits are terminal — never auto-continue.
-        assert!(!should_queue_plan_mode_auto_continue(true, true, false, true, true, None, false, 8));
         // Ready-for-approval is a user gate.
-        assert!(!should_queue_plan_mode_auto_continue(true, true, true, false, true, None, false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, true, true, None, false, 8));
         // Ordinary completed planning turns never auto-continue (interview risk).
-        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, true, None, false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, true, None, false, 8));
         // Recoverable blocked planning continues.
         assert!(should_queue_plan_mode_auto_continue(
             true,
             true,
-            false,
             false,
             false,
             Some("reached the safety cap"),
@@ -404,7 +405,6 @@ mod tracker_continue_tests {
         assert!(!should_queue_plan_mode_auto_continue(
             true,
             true,
-            false,
             false,
             false,
             Some(
@@ -418,43 +418,15 @@ mod tracker_continue_tests {
             true,
             false,
             false,
-            false,
             Some("pending verification"),
             true,
             8
         ));
-        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, false, None, false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, None, false, 8));
         // Kill-switch / zero budget / inactive planning stay off.
-        assert!(!should_queue_plan_mode_auto_continue(
-            false,
-            true,
-            false,
-            false,
-            false,
-            Some("turn budget"),
-            false,
-            8
-        ));
-        assert!(!should_queue_plan_mode_auto_continue(
-            true,
-            true,
-            false,
-            false,
-            false,
-            Some("turn budget"),
-            false,
-            0
-        ));
-        assert!(!should_queue_plan_mode_auto_continue(
-            true,
-            false,
-            false,
-            false,
-            false,
-            Some("turn budget"),
-            false,
-            8
-        ));
+        assert!(!should_queue_plan_mode_auto_continue(false, true, false, false, Some("turn budget"), false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, Some("turn budget"), false, 0));
+        assert!(!should_queue_plan_mode_auto_continue(true, false, false, false, Some("turn budget"), false, 8));
     }
 
     #[test]
@@ -462,6 +434,9 @@ mod tracker_continue_tests {
         assert!(plan_mode_recoverable_block("turn budget exhausted"));
         assert!(plan_mode_recoverable_block("reached the safety cap"));
         assert!(plan_mode_recoverable_block("tool-free recovery after safety cap"));
+        assert!(plan_mode_recoverable_block(
+            "Turn ended with a recovery fallback; the requested work was not confirmed."
+        ));
         assert!(!plan_mode_recoverable_block(
             "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
         ));
@@ -474,6 +449,8 @@ mod tracker_continue_tests {
         assert_eq!(plan_progress_line("Release", false, 0, 0), "• Plan Release — research/synthesis");
         assert_eq!(plan_progress_line("Release", false, 2, 4), "• Plan Release — open decisions: 2");
         assert_eq!(plan_progress_line("Release", true, 0, 4), "• Plan Release — ready for approval (4 steps)");
+        assert_eq!(plan_progress_line("Release", true, 0, 0), "• Plan Release — ready for approval");
+        assert_eq!(plan_progress_line("", true, 0, 0), "• Plan — ready for approval");
         assert_eq!(plan_progress_line("", false, 0, 0), "• Plan — research/synthesis");
         assert_eq!(plan_progress_line("", true, 0, 4), "• Plan — ready for approval (4 steps)");
         assert_eq!(plan_progress_line("", false, 1, 0), "• Plan — open decisions: 1");
