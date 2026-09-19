@@ -81,6 +81,8 @@ For real file opens, VT Code launches GUI editors immediately and returns withou
 
 If your selected editor is terminal-based (for example `vim`/`nvim`) and `suspend_tui = true`, VT Code uses the serialized suspend-and-wait path and resumes the TUI after the editor closes. Temporary-file `/edit` flows still wait because VT Code has to read edited content back into the composer.
 
+When a launch must wait for the edited content (temporary-file and plan-file flows), VT Code injects the editor's wait flag if your configured command omitted it — `code` becomes `code --wait`, `zed`/`subl`/`mate` become `--wait`, and `open -a …` becomes `open -W`. This keeps read-back accurate even when `preferred_editor` does not include `--wait`. Non-waiting real-file opens strip those flags so they return immediately.
+
 Single-clicking a file path in the transcript or a modal uses the same editor workflow and respects configured line and column targets when the selected editor supports them.
 
 ### Edit relative paths

@@ -245,7 +245,7 @@ impl TerminalAppLauncher {
         let (program, args) = tokens.split_first().ok_or_else(|| anyhow!("editor command cannot be empty"))?;
         let adapter = EditorAdapter::from_program(program);
         let mut cmd = Command::new(program);
-        cmd.args(filtered_editor_args(adapter, args, wait_for_editor));
+        cmd.args(editor_args_with_wait_policy(adapter, args, wait_for_editor));
         if reuse_existing_window
             && matches!(adapter, EditorAdapter::Vscode)
             && !args.iter().any(|arg| arg == "--reuse-window")
@@ -541,14 +541,46 @@ impl EditorAdapter {
             _ => Self::Plain,
         }
     }
-}
 
-fn filtered_editor_args(adapter: EditorAdapter, args: &[String], wait_for_editor: bool) -> Vec<String> {
-    if wait_for_editor {
-        return args.to_vec();
+    /// Flags that make this adapter block until the edited document is saved.
+    ///
+    /// Terminal editors block inherently and unknown commands have no known
+    /// wait protocol, so both report an empty set.
+    fn wait_flags(self) -> &'static [&'static str] {
+        match self {
+            EditorAdapter::Vscode | EditorAdapter::ColonLocation | EditorAdapter::Mate => &["--wait", "-w"],
+            EditorAdapter::MacOpen => &["-W"],
+            EditorAdapter::Plain | EditorAdapter::Vim => &[],
+        }
     }
 
-    args.iter().filter(|arg| !matches_wait_flag(adapter, arg)).cloned().collect()
+    /// Flag appended when a waiting launch is requested but the user's command
+    /// omitted it. VS Code and other editor CLIs default to a detached window,
+    /// so `code` without `--wait` would return before the buffer is saved and
+    /// the launcher's read-back would see stale (or empty) content.
+    fn default_wait_flag(self) -> Option<&'static str> {
+        self.wait_flags().first().copied()
+    }
+}
+
+/// Build the editor arguments honoring the caller's wait policy.
+///
+/// When `wait_for_editor` is set, GUI adapters that launch detached windows
+/// receive their canonical wait flag if the user's command omitted it, so the
+/// launcher blocks until the buffer is saved and the read-back is accurate.
+/// When it is unset, wait flags are stripped so the open returns immediately.
+fn editor_args_with_wait_policy(adapter: EditorAdapter, args: &[String], wait_for_editor: bool) -> Vec<String> {
+    if !wait_for_editor {
+        return args.iter().filter(|arg| !matches_wait_flag(adapter, arg)).cloned().collect();
+    }
+
+    let mut effective = args.to_vec();
+    if !args.iter().any(|arg| matches_wait_flag(adapter, arg))
+        && let Some(flag) = adapter.default_wait_flag()
+    {
+        effective.push(flag.to_string());
+    }
+    effective
 }
 
 fn common_editor_candidates() -> &'static [&'static str] {
@@ -600,12 +632,7 @@ fn common_editor_candidates() -> &'static [&'static str] {
 }
 
 fn matches_wait_flag(adapter: EditorAdapter, arg: &str) -> bool {
-    match adapter {
-        EditorAdapter::Vscode => arg == "--wait",
-        EditorAdapter::ColonLocation | EditorAdapter::Mate => arg == "--wait" || arg == "-w",
-        EditorAdapter::MacOpen => arg == "-W",
-        EditorAdapter::Plain | EditorAdapter::Vim => false,
-    }
+    adapter.wait_flags().contains(&arg)
 }
 
 fn format_location_arg(path: &Path, line: usize, column: Option<usize>) -> String {
@@ -672,7 +699,9 @@ mod tests {
         .expect("command should parse");
         let args: Vec<String> = command.get_args().map(|value| value.to_string_lossy().to_string()).collect();
 
-        assert_eq!(args, vec!["/tmp/test.rs:12:1".to_string()]);
+        // A waiting launch injects the adapter's wait flag so read-back blocks
+        // until the buffer is saved.
+        assert_eq!(args, vec!["--wait".to_string(), "/tmp/test.rs:12:1".to_string()]);
     }
 
     #[test]
@@ -712,6 +741,45 @@ mod tests {
         let args: Vec<String> = command.get_args().map(|value| value.to_string_lossy().to_string()).collect();
 
         assert_eq!(args, vec!["-g".to_string(), "/tmp/test.rs:12:4".to_string()]);
+    }
+
+    #[test]
+    fn test_build_editor_command_injects_wait_flag_for_bare_vscode() {
+        let command = TerminalAppLauncher::build_editor_command_from_string(
+            "code",
+            &EditorTarget::new(PathBuf::from("/tmp/test.rs"), None),
+            true,
+        )
+        .expect("command should parse");
+        let args: Vec<String> = command.get_args().map(|value| value.to_string_lossy().to_string()).collect();
+
+        assert_eq!(args, vec!["--wait".to_string(), "/tmp/test.rs".to_string()]);
+    }
+
+    #[test]
+    fn test_build_editor_command_keeps_short_wait_flag_without_duplicating() {
+        let command = TerminalAppLauncher::build_editor_command_from_string(
+            "code -w",
+            &EditorTarget::new(PathBuf::from("/tmp/test.rs"), None),
+            true,
+        )
+        .expect("command should parse");
+        let args: Vec<String> = command.get_args().map(|value| value.to_string_lossy().to_string()).collect();
+
+        assert_eq!(args, vec!["-w".to_string(), "/tmp/test.rs".to_string()]);
+    }
+
+    #[test]
+    fn test_build_editor_command_strips_short_wait_flag_when_not_waiting() {
+        let command = TerminalAppLauncher::build_editor_command_from_string(
+            "code -w",
+            &EditorTarget::new(PathBuf::from("/tmp/test.rs"), None),
+            false,
+        )
+        .expect("command should parse");
+        let args: Vec<String> = command.get_args().map(|value| value.to_string_lossy().to_string()).collect();
+
+        assert_eq!(args, vec!["/tmp/test.rs".to_string()]);
     }
 
     #[test]

@@ -541,7 +541,7 @@ suspend_tui = true
 
 For real file opens, VT Code launches GUI editors immediately and returns to the session without waiting, including when an agent turn is active. Transcript and modal file links use an out-of-band bounded request queue; they do not submit `/edit` input. VS Code reuses the current window when supported and preserves line/column targets. Duplicate pending requests for the same target are coalesced.
 
-If the selected editor is terminal-based (for example `vim`/`nvim`) and `suspend_tui = true`, VT Code suspends the TUI and waits for the editor to close through the serialized terminal-editor path. Temporary-file `/edit` flows still wait so VT Code can read edited content back into the composer.
+If the selected editor is terminal-based (for example `vim`/`nvim`) and `suspend_tui = true`, VT Code suspends the TUI and waits for the editor to close through the serialized terminal-editor path. Temporary-file `/edit` flows still wait so VT Code can read edited content back into the composer. When a launch waits for edited content, VT Code injects the editor's wait flag if the configured command omitted it (`code` → `code --wait`, `zed`/`subl`/`mate` → `--wait`, `open -a …` → `open -W`); non-waiting real-file opens strip those flags.
 
 ### Interactive controls
 
