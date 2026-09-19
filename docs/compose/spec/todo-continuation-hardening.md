@@ -1,9 +1,8 @@
 ---
 feature: todo-continuation-hardening
-status: delivered
+status: in-progress
 updated: 2026-09-19
-branch: fix/todo-continuation-gaps
-commits: 326810f14..fc5e3851d
+branch: fix/todo-continuation-review
 ---
 
 # TODO Continuation Hardening (Residual)
@@ -84,27 +83,31 @@ User-confirmed decisions (2026-09-19):
 
 ### B. In-turn override wiring
 
-- Applies on **tool-free recovery** status text when tracker is incomplete.
-- Gated on `auto_continue_tracker` only.
-- `TrackerProbeOutcome` live probe: Incomplete replaces cache, **Complete clears**, Unavailable keeps last.
+- **Tool-free recovery stays terminal in-turn** (`!tool_free_recovery_pass`). Forcing continue there would call `finish_recovery_pass()`, re-enable tools, and can re-enter recovery. Outer auto-queue after a Completed recovery end schedules the next tracker turn instead.
+- Gated on `auto_continue_tracker` only (`cross_turn_turns == 0` disables only outer auto-queue — intentional).
+- `TrackerProbeOutcome` live probe: Incomplete replaces cache, **Complete clears**, Unavailable keeps last. Malformed checklist without `items` is **Unavailable**, not Complete.
+- True-handoff filter: trailing `?` or clause-start/strong interview phrases; mid-text status prose that merely mentions “can you” / “need your” continues.
 
 ### C. Outer queue + budget
 
 ```toml
 [agent.harness.continuation]
 auto_continue_tracker = true   # unchanged default
-cross_turn_turns = 32          # default (was 8); progress-resets on tracker step completion
+cross_turn_turns = 32          # default (was 8); progress-resets on tracker step completion OR checklist recreate
 ```
 
-- Progress-reset via `SessionStats::note_tracker_completed_count` + `reset_tracker_continuation_budget`.
+- Progress-reset via `SessionStats::note_tracker_completed_count` when completed count **changes** (up or down — tracker recreate restores the episode).
 - Queue-first then record budget. Queue-full / truly exhausted budget may mention `continue` only when nothing was queued.
-- True-handoff stop list as in S2 decisions.
+- **Completed ends also require** `!final_text_requires_user_input` (shared `completion::tracker_final_text_requires_user_input`) so genuine questions are not auto-queued past.
+- `tracker_final_text_is_safety_handoff` evaluates permission/policy denials **first**; pure budget recaps are not handoffs.
 
 ### D. Planning path + resume
 
 - Recoverable blocked planning ends auto-queue `plan_mode_continue_follow_up()`.
-- Resume: plan-recoverable blocked handoff + planning active + no approval-ready plan → auto-queue plan continuation.
-- Tracker resume path unchanged aside from classifier/budget/probe fixes.
+- `plan_mode_recoverable_block`: **true handoffs deny first** (permission/interview/user input/contract violation) even if recovery tokens appear; then recovery allow-list (incl. `PLANNING_COMPLETED_TURN_FALLBACK_REASON`); then remaining planning handoffs deny.
+- Resume plan path requires planning-active + recoverable summary that contains `"planning"`.
+- Resume tracker path requires `!planning_active`.
+- Never auto-approves.
 
 ### E. UX + shipped guidance
 
@@ -132,9 +135,9 @@ End turn and wait for the user when tracker work remains **only if**:
 
 ## Tasks
 
-- [x] T1: Expand recoverable classifiers (in-turn phrasing, outer allow-list, safety-handoff `budget_like` + narrow `"tool policy"`, plan-mode allow-list-first for recovery fallback) — acceptance: unit tests for production constants including planning fallback, tool-loop/tool-call budget, and deny cases still denied (covers: S2A)
-- [x] T2: In-turn override — tool-free recovery path, `auto_continue_tracker`-only gate, trailing-question handoff filter while tracker incomplete, probe/cached incomplete-items fallback — acceptance: pure tests for each gate; Complete probe clears cache (covers: S2B; depends: T1)
-- [x] T3: Progress-resetting cross-turn budget + default `cross_turn_turns=32` — acceptance: config default test; `SessionStats` resets episode when completed tracker count increases; queue-full still falls through to handoff text only when nothing queued (covers: S2C; depends: T1)
-- [x] T4: Planning recoverable-block + resume auto-queue; suppress “Type continue” whenever a continuation turn was queued — acceptance: planning fallback constant auto-queues; resume plan path present; no nudge string on successful queue paths (covers: S2D,S2E; depends: T1)
-- [x] T5: Runtime guidance + docs (agent-loop-contract, CONFIG_FIELD_REFERENCE) — acceptance: presence test for strengthened guidance; docs mention default 32, progress-reset, true-handoff stop list (covers: S2E; depends: T3)
-- [x] T6: Integration/pure gate regression suite + `./scripts/check-dev.sh` — acceptance: targeted nextest filters pass; check-dev PASS on this worktree; review critical B1 fixed and re-verified (covers: S2; depends: T1–T5)
+- [x] T1: Expand recoverable classifiers — acceptance: production constants + deny cases (covers: S2A)
+- [x] T2: In-turn override + probe cache — acceptance: Complete clears cache; tool-free recovery stays terminal (covers: S2B)
+- [x] T3: Progress-reset + default 32 — acceptance: completed-count **change** (up or down) resets episode (covers: S2C)
+- [x] T4: Planning resume + no Type-continue on successful queue — acceptance: compound handoffs deny; planning context required on resume (covers: S2D,S2E)
+- [x] T5: Runtime guidance + docs — acceptance: presence tests; docs describe true-handoff stop list (covers: S2E)
+- [x] T6: Review-cycle fixes — acceptance: outer Completed respects `final_text_requires_user_input`; safety-handoff order; plan-mode deny-first true handoffs; stale plan-mode gate test updated; resume tracker gated on `!planning_active`; malformed checklist → Unavailable (covers: S2; review findings)

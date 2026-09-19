@@ -210,7 +210,9 @@ fn recoverable_tracker_budget_phrasing(lower: &str) -> bool {
 /// Mid-text `?` in status sections and optional-offer closers (`happy to`,
 /// `let me know if`, `if you want me to`) are **not** handoffs — only a
 /// trailing clarifying question or strong interview/permission phrases end the
-/// turn while TODO work remains.
+/// turn while TODO work remains. Broad mid-text fragments like "can you" /
+/// "need your" are omitted so status recaps that mention code or config are
+/// not treated as user asks.
 fn tracker_incomplete_text_is_user_handoff(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -222,21 +224,22 @@ fn tracker_incomplete_text_is_user_handoff(text: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     const STRONG_HANDOFF: &[&str] = &[
         "please provide",
-        "need your",
-        "need you to",
         "please confirm",
+        "please approve",
+        "need your approval",
+        "need your permission",
+        "need your decision",
+        "need you to choose",
+        "need you to confirm",
         "waiting for your",
         "awaiting your",
         "your choice",
         "your decision",
         "need approval",
-        "need your approval",
         "requires approval",
         "require approval",
         "approval is required",
-        "please approve",
         "need permission",
-        "need your permission",
         "requires permission",
         "require permission",
         "permission is required",
@@ -247,17 +250,20 @@ fn tracker_incomplete_text_is_user_handoff(text: &str) -> bool {
         "waiting for input",
         "awaiting input",
         "waiting on you",
-        "could you",
-        "can you",
         "how should i proceed",
         "what should i do",
         "what would you like",
         "how would you like",
-        "shall i ",
-        "should i ",
         "do you want me to",
     ];
-    STRONG_HANDOFF.iter().any(|pattern| lower.contains(pattern))
+    // Clause-start interview asks (not bare mid-text "can you" in status prose).
+    const CLAUSE_START_HANDOFF: &[&str] = &["could you ", "can you ", "shall i ", "should i "];
+    if STRONG_HANDOFF.iter().any(|pattern| lower.contains(pattern)) {
+        return true;
+    }
+    CLAUSE_START_HANDOFF
+        .iter()
+        .any(|pattern| lower.trim_start().starts_with(pattern) || lower.contains(&format!("\n{pattern}")))
 }
 
 /// Tracker-aware override: when `task_tracker` still has incomplete steps,
@@ -1711,6 +1717,27 @@ mod tests {
             status_question,
         );
         assert!(s_over.should_continue, "mid-text question in status recap must continue");
+
+        // Broad mid-text "can you" / "need your" in status prose is not a handoff.
+        let status_prose =
+            "## Status\nNext we need your workspace-relative path in CONFIG; can you see it in the dump? Patching now.";
+        let prose_over = apply_tracker_continuation_override(
+            evaluate_interim_text_continuation(true, false, &history, status_prose, 0),
+            true,
+            false,
+            status_prose,
+        );
+        assert!(prose_over.should_continue, "status prose mentioning need-your/can-you must continue");
+
+        // Clause-start interview ask without a trailing `?` still ends the turn.
+        let clause_ask = "Can you confirm which migration path to take before I edit the schema.";
+        let c_over = apply_tracker_continuation_override(
+            evaluate_interim_text_continuation(true, false, &history, clause_ask, 0),
+            true,
+            false,
+            clause_ask,
+        );
+        assert!(!c_over.should_continue);
 
         // Trailing `?` stays terminal.
         let trailing_q = "Should I proceed with the remaining steps?";

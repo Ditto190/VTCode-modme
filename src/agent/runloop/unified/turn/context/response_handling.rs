@@ -679,14 +679,19 @@ impl<'a> TurnProcessingContext<'a> {
 
         // Tracker-aware override (shipped runloop surface): when task_tracker
         // still has incomplete steps, status recaps must continue instead of
-        // ending the turn and nudging the user. Applies on tool-free recovery
-        // status text as well (tools are disabled; a recap must not strand the
-        // session). Completed-plan branches above stay terminal in-turn.
+        // ending the turn and nudging the user.
+        //
+        // Tool-free recovery stays terminal in-turn: finish_recovery_pass()
+        // would re-enable tools and can re-enter recovery (see the
+        // `tool_free_recovery_terminal` branch above). Outer auto-queue after
+        // a Completed recovery end schedules the next tracker turn instead.
+        // Completed-plan branches stay terminal in-turn as well.
         // In-turn override is gated on `auto_continue_tracker` only —
         // `cross_turn_turns == 0` disables only the outer auto-queue.
         // Complete probes clear the cache so auto-continue stops when the
         // tracker finishes; Unavailable keeps the last known incomplete set.
         let live_probe = if !continuation_decision.should_continue
+            && !tool_free_recovery_pass
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
@@ -699,6 +704,7 @@ impl<'a> TurnProcessingContext<'a> {
         let effective_incomplete = self.harness_state.apply_tracker_probe(live_probe);
         let tracker_incomplete = effective_incomplete.is_some_and(|items| !items.is_empty());
         let continuation_decision = if !continuation_decision.should_continue
+            && !tool_free_recovery_pass
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
