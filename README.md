@@ -101,7 +101,7 @@ In practice, that means:
 | **Setup and teardown stay manual**       | Lifecycle hooks run shell commands on session and tool events; workspace hooks need explicit approval first. [Hooks guide](./docs/guides/hooks-guide.md)                                                                                                                                        |
 | **Edits drift from project conventions** | Project instructions (`AGENTS.md`) are loaded into every turn, so the agent codes to your rules instead of rediscovering them. [Getting started](./docs/user-guide/getting-started.md)                                                                                                          |
 | **Interactive only is not enough**       | Headless `vtcode exec` with JSON events, scheduled tasks via `vtcode schedule`, and isolated eval worktrees support CI, cron, and agent-to-agent flows. [Full automation](./docs/guides/full-automation.md)                                                                                     |
-| **One provider locks you in**            | Built-in adapters for Gemini, OpenAI, Anthropic, DeepSeek, xAI, Meta, NVIDIA NIM, and more — plus OpenAI-compatible custom providers, local inference via Ollama, LM Studio, and llama.cpp, and a `providers_whitelist` for air-gapped setups. [Providers](./docs/providers/PROVIDER_GUIDES.md) |
+| **One provider locks you in**            | Built-in adapters for Gemini, OpenAI, Anthropic, DeepSeek, xAI, Meta, NVIDIA NIM, and more — plus gateways such as OpenRouter and GitHub Copilot, OpenAI-compatible custom providers, local inference via Ollama, LM Studio, and llama.cpp, and a `providers_whitelist` for air-gapped setups. [Providers](./docs/providers/PROVIDER_GUIDES.md) |
 
 The result is a terminal-native workflow that is:
 
@@ -175,7 +175,7 @@ see the [Architecture guide](./docs/ARCHITECTURE.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
-# or: brew install vinhnx/tap/vtcode
+# or: brew trust vinhnx/tap && brew install vinhnx/tap/vtcode
 # or: cargo install vtcode
 ```
 
@@ -256,7 +256,9 @@ A second tier handles session lifecycle and day-to-day operations:
 
 `vtcode analyze`, `vtcode check`, `vtcode schema tools`, `vtcode dependencies`
 (alias `deps`), `vtcode config`, `vtcode man`, and `vtcode update` round out
-the operator surface. See `vtcode --help` for the full list.
+the operator surface, with editor/agent bridges (`vtcode acp`, `vtcode a2a`,
+`vtcode webmcp`) and the state store (`vtcode session-store`) alongside. See
+`vtcode --help` for the full list.
 
 ### Everyday recipes
 
@@ -298,7 +300,11 @@ bridge; deployment details live in the
 
 ```mermaid
 graph LR
-    types --> config --> core --> tools --> agent --> TUI
+    BIN[vtcode binary] --> CORE[vtcode-core harness]
+    CORE --> LLM[vtcode-llm]
+    CORE --> SAFETY[vtcode-safety]
+    CORE --> EVENTS[vtcode-exec-events]
+    CORE --> UI[vtcode-ui]
 ```
 
 Rust stable, edition 2024, MSRV 1.93. Clone and run the fast gate:
