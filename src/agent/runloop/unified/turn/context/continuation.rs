@@ -204,8 +204,22 @@ pub(super) fn apply_tracker_continuation_override(
     if text.contains('?') || contains_user_input_request(&lower) {
         return decision;
     }
-    // Explicit blocked-handoff phrases that require the user (not budget).
-    if lower.contains("requires manual intervention") || lower.contains("missing credentials") {
+    // Recoverable budget/recovery phrasing still continues when tracker work
+    // remains ("blocked by turn budget", "preview budget", etc.).
+    let recoverable_budget_phrasing = lower.contains("turn budget")
+        || lower.contains("preview budget")
+        || lower.contains("wall clock")
+        || lower.contains("safety cap")
+        || lower.contains("recovery fallback");
+    // Permission/safety/manual handoffs must end the turn for the user.
+    // Reuse full-auto blocker vocabulary, except budget-like "blocked by …".
+    let explicit_safety_handoff = lower.contains("safety fuse")
+        || lower.contains("permission denied")
+        || lower.contains("access denied")
+        || lower.contains("requires manual intervention")
+        || lower.contains("missing credentials")
+        || lower.contains("credentials are missing");
+    if !recoverable_budget_phrasing && (explicit_safety_handoff || has_explicit_blocker(&lower)) {
         return decision;
     }
     decision.should_continue = true;
@@ -376,6 +390,9 @@ fn has_explicit_blocker(lower: &str) -> bool {
         "credentials are missing",
         "not possible to proceed",
         "requires manual intervention",
+        "safety fuse",
+        "tool-call safety fuse",
+        "policy block",
     ]
     .iter()
     .any(|pattern| lower.contains(pattern))
@@ -1568,5 +1585,29 @@ mod tests {
 
         let complete_tracker = apply_tracker_continuation_override(base, false, false, recap);
         assert!(!complete_tracker.should_continue);
+
+        // Permission/safety handoffs stay terminal for the user.
+        for blocker in [
+            "Permission denied for exec_command. Next step: retry after access is granted.",
+            "Access denied to the sandbox; policy block.",
+            "I hit the tool-call safety fuse mid-verification; policy block.",
+            "Requires manual intervention from the workspace owner.",
+            "Missing credentials for the provider route.",
+        ] {
+            let b_base = evaluate_interim_text_continuation(true, false, &history, blocker, 0);
+            let b_over = apply_tracker_continuation_override(b_base, true, false, blocker);
+            assert!(!b_over.should_continue, "must not continue on blocker: {blocker}");
+        }
+
+        // Budget-like "blocked by …" still continues when tracker work remains.
+        let budget = "## Status\nBlocked by turn budget. Next step: read design/diff.rs.";
+        let budget_over = apply_tracker_continuation_override(
+            evaluate_interim_text_continuation(true, false, &history, budget, 0),
+            true,
+            false,
+            budget,
+        );
+        assert!(budget_over.should_continue);
+        assert_eq!(budget_over.reason, "tracker_incomplete_continuation");
     }
 }

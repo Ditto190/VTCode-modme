@@ -187,16 +187,20 @@ pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
 /// Whether a blocked/completed turn reason is recoverable for tracker auto-queue
 /// (budget/preview/tool-free recovery) rather than a user-input handoff.
 ///
-/// Matches the **literal production blocked-reason constants** emitted by the
-/// turn loop / post-tool recovery, plus an explicit deny-list for user-input,
-/// permission, verification, context-capacity, and contract-violation ends.
-/// Unknown `Some(_)` reasons are not auto-queued.
+/// Matches **production blocked-reason constants** (turn_loop / post_tool
+/// recovery), not paraphrases. Unknown / missing reasons are not auto-queued
+/// when the turn did not complete.
 pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -> bool {
     let Some(reason) = reason.map(str::to_ascii_lowercase) else {
-        // Completed turns with remaining tracker work are recoverable.
-        return true;
+        // Only used when the outer gate already marked the turn Completed.
+        // Blocked { reason: None } must not auto-queue.
+        return false;
     };
-    // Deny-list first (production constants that must never auto-queue).
+    // Deny production constants that must never auto-queue.
+    // RECOVERY_CONTRACT_VIOLATION_REASON: "...final tool-free synthesis pass...attempted more tool calls."
+    // PENDING_VERIFICATION_BLOCK_REASON: "...verification is still pending."
+    // POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON: "context exceeded...compaction could not reduce"
+    // UNMATCHED_TOOL_RESULT / planning handoffs / permission / safety fuse.
     if reason.contains("permission")
         || reason.contains("user input")
         || reason.contains("request_user_input")
@@ -207,14 +211,16 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
         || reason.contains("context exceeded")
         || reason.contains("compaction could not reduce")
         || reason.contains("unmatched tool result")
-        || reason.contains("contract violation")
+        || reason.contains("attempted more tool calls")
+        || reason.contains("final tool-free synthesis pass")
         || reason.contains("approval-ready plan")
+        || reason.contains("stale recovery state")
     {
         return false;
     }
-    // Recoverable production reason shapes.
+    // Recoverable production reason shapes only.
     // COMPLETED_TURN_FALLBACK_REASON: "Turn ended with a recovery fallback..."
-    // ASSISTANT_TEXT_RESPONSE_CAP_REASON: "Turn blocked after repeated assistant responses reached the safety cap..."
+    // ASSISTANT_TEXT_RESPONSE_CAP_REASON: "...reached the safety cap..."
     // POST_TOOL_TOOL_ENABLED_RETRY_FAILED_REASON: "Post-tool recovery could not confirm..."
     // preview / turn budget / wall-clock budget ends.
     reason.contains("recovery fallback")
@@ -224,12 +230,17 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
         || reason.contains("tool preview budget")
         || reason.contains("turn budget")
         || reason.contains("wall clock")
-        || reason.contains("tool-free")
         || reason.contains("blocked due to repeated")
         || reason.contains("blocked after repeated")
 }
 
 /// Pure gate for outer-loop tracker auto-continue after a turn end.
+///
+/// `auto_continue_enabled` is the raw kill-switch (do not pre-AND
+/// `planning_active` — this gate owns that check).
+/// `final_text_is_safety_handoff` is true when the turn's final assistant
+/// text is a permission/policy/safety handoff — those never auto-queue, even
+/// on `Completed` ends with incomplete tracker work.
 pub(crate) fn should_queue_tracker_auto_continue(
     auto_continue_enabled: bool,
     planning_active: bool,
@@ -238,8 +249,12 @@ pub(crate) fn should_queue_tracker_auto_continue(
     is_verification_block: bool,
     incomplete_items: Option<&[String]>,
     cross_turn_turns: u8,
+    final_text_is_safety_handoff: bool,
 ) -> bool {
     if !auto_continue_enabled || planning_active || cross_turn_turns == 0 {
+        return false;
+    }
+    if final_text_is_safety_handoff {
         return false;
     }
     if incomplete_items.is_none_or(|items| items.is_empty()) {
@@ -248,7 +263,7 @@ pub(crate) fn should_queue_tracker_auto_continue(
     if turn_completed {
         return true;
     }
-    if is_verification_block {
+    if is_verification_block || blocked_reason.is_none() {
         return false;
     }
     tracker_auto_continue_is_recoverable_block(blocked_reason)
@@ -302,6 +317,11 @@ pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
         || reason.contains("permission")
         || reason.contains("user input")
         || reason.contains("awaiting")
+        || reason.contains("attempted more tool calls")
+        || reason.contains("final tool-free synthesis pass")
+        || reason.contains("verification is still pending")
+        || reason.contains("compaction could not reduce")
+        || reason.contains("unmatched tool result")
     {
         return false;
     }
@@ -466,8 +486,22 @@ mod tracker_continue_tests {
 
     #[test]
     fn recoverable_block_classification_allow_list() {
-        assert!(tracker_auto_continue_is_recoverable_block(None));
-        // Production constants that MUST auto-queue when tracker work remains.
+        // Production RECOVERY_CONTRACT_VIOLATION_REASON — must NOT auto-queue
+        // despite containing "tool-free".
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."
+        )));
+        // Blocked with unknown/missing reason is not auto-queued.
+        assert!(!tracker_auto_continue_is_recoverable_block(None));
+        // Production PENDING_VERIFICATION_BLOCK_REASON.
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Turn blocked after repeated unverified assistant responses; verification is still pending."
+        )));
+        // Production POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON.
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "The provider rejected the follow-up because the context exceeded its capacity, and the bounded recovery compaction could not reduce the request."
+        )));
+        // Recoverable production constants.
         assert!(tracker_auto_continue_is_recoverable_block(Some(
             "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained."
         )));
@@ -479,52 +513,29 @@ mod tracker_continue_tests {
         )));
         assert!(tracker_auto_continue_is_recoverable_block(Some("preview budget exhausted")));
         assert!(tracker_auto_continue_is_recoverable_block(Some("Turn blocked due to repeated failing behavior.")));
-        // Production constants that must NOT auto-queue.
-        assert!(!tracker_auto_continue_is_recoverable_block(Some(
-            "Turn blocked after repeated unverified assistant responses; verification is still pending."
-        )));
-        assert!(!tracker_auto_continue_is_recoverable_block(Some(
-            "The provider rejected the follow-up because the context exceeded its capacity, and the bounded recovery compaction could not reduce the request."
-        )));
-        assert!(!tracker_auto_continue_is_recoverable_block(Some(
-            "Provider rejected an unmatched tool result after one bounded request-history repair."
-        )));
-        assert!(!tracker_auto_continue_is_recoverable_block(Some(
-            "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
-        )));
+        // Unknown / policy handoffs stay terminal.
+        assert!(!tracker_auto_continue_is_recoverable_block(Some("some unknown block")));
         assert!(!tracker_auto_continue_is_recoverable_block(Some("exec_command is denied by permission policy")));
         assert!(!tracker_auto_continue_is_recoverable_block(Some(
             "I hit the tool-call safety fuse mid-verification"
         )));
         assert!(!tracker_auto_continue_is_recoverable_block(Some("request_user_input is required")));
-        assert!(!tracker_auto_continue_is_recoverable_block(Some("some unknown block")));
     }
 
     #[test]
-    fn outer_queue_gate_respects_planning_verification_and_budget() {
+    fn outer_queue_gate_blocks_unknown_and_contract_violation() {
         let incomplete = ["#2 change (pending)".to_string()];
-        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(false, false, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(true, true, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8));
-        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 0));
+        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, false, false, None, false, Some(&incomplete), 8, false));
         assert!(!should_queue_tracker_auto_continue(
             true,
             false,
             false,
-            Some("pending verification; type continue"),
-            true,
-            Some(&incomplete),
-            8
-        ));
-        assert!(should_queue_tracker_auto_continue(
-            true,
-            false,
-            false,
-            Some("preview budget exhausted"),
+            Some("Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(should_queue_tracker_auto_continue(
             true,
@@ -535,7 +546,61 @@ mod tracker_continue_tests {
             ),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
+        ));
+    }
+
+    #[test]
+    fn outer_queue_gate_respects_planning_verification_and_budget() {
+        let incomplete = ["#2 change (pending)".to_string()];
+        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(false, false, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, true, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 0, false));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            true,
+            // safety-handoff final text
+        ));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("pending verification; type continue"),
+            true,
+            Some(&incomplete),
+            8,
+            false
+        ));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("preview budget exhausted"),
+            false,
+            Some(&incomplete),
+            8,
+            false
+        ));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some(
+                "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained."
+            ),
+            false,
+            Some(&incomplete),
+            8,
+            false
         ));
         assert!(should_queue_tracker_auto_continue(
             true,
@@ -546,7 +611,8 @@ mod tracker_continue_tests {
             ),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(!should_queue_tracker_auto_continue(
             true,
@@ -555,7 +621,8 @@ mod tracker_continue_tests {
             Some("permission denied"),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(!should_queue_tracker_auto_continue(
             true,
@@ -564,7 +631,8 @@ mod tracker_continue_tests {
             Some("unknown block reason"),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
     }
 
@@ -589,12 +657,16 @@ mod tracker_continue_tests {
         assert!(stats.record_tracker_continuation_turn_with_limit(8));
         assert!(stats.record_tracker_continuation_turn_with_limit(8));
         assert_eq!(stats.tracker_continuation_turns(), 2);
+        // Verification-episode reset must NOT wipe tracker/plan continuation budgets.
         stats.reset_verification_recovery_episode();
-        assert_eq!(stats.tracker_continuation_turns(), 0);
-        assert!(stats.record_tracker_continuation_turn_with_limit(1));
-        assert!(!stats.record_tracker_continuation_turn_with_limit(1));
+        assert_eq!(stats.tracker_continuation_turns(), 2);
+        assert!(stats.record_plan_continuation_turn_with_limit(1));
+        assert!(!stats.record_plan_continuation_turn_with_limit(1));
         stats.reset_tracker_continuation_budget();
         assert_eq!(stats.tracker_continuation_turns(), 0);
+        assert_eq!(stats.plan_continuation_turns(), 1);
+        stats.reset_plan_continuation_budget();
+        assert_eq!(stats.plan_continuation_turns(), 0);
     }
 }
 

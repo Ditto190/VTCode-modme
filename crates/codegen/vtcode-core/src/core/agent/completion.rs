@@ -1,6 +1,40 @@
 use crate::core::agent::session::AgentSessionState;
 use crate::llm::provider::MessageRole;
 
+/// True when assistant text is a genuine safety/permission handoff that must
+/// not be auto-continued, even if `task_tracker` still has incomplete steps.
+///
+/// Shared by the binary outer-loop Completed queue and AgentRunner status
+/// continuation so both surfaces use the same vocabulary. Budget-like
+/// "blocked by turn budget" phrasing is **not** a handoff.
+pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    if lower.trim().is_empty() {
+        return false;
+    }
+    let budget_like = lower.contains("turn budget")
+        || lower.contains("preview budget")
+        || lower.contains("wall clock")
+        || lower.contains("safety cap")
+        || lower.contains("recovery fallback");
+    if budget_like {
+        return false;
+    }
+    lower.contains("permission denied")
+        || lower.contains("access denied")
+        || lower.contains("safety fuse")
+        || lower.contains("tool-call safety fuse")
+        || lower.contains("policy block")
+        || lower.contains("blocked by policy")
+        || lower.contains("requires manual intervention")
+        || lower.contains("missing credentials")
+        || lower.contains("credentials are missing")
+        || lower.contains("denied by policy")
+        || lower.contains("denied by workspace tool policy")
+        || lower.contains("execution denied by policy")
+        || lower.contains("tool policy")
+}
+
 /// Checks if the agent's response is a candidate for completion handling.
 pub fn check_completion_candidate(response_text: &str) -> bool {
     // High-confidence terminal markers that strongly indicate intent to stop.
@@ -191,6 +225,24 @@ pub fn check_for_response_loop(response_text: &str, session_state: &mut AgentSes
 mod tests {
     use super::*;
     use crate::llm::provider::Message;
+
+    #[test]
+    fn tracker_final_text_is_safety_handoff_vocabulary() {
+        assert!(tracker_final_text_is_safety_handoff(
+            "Permission denied for exec_command. Next step: retry after access is granted."
+        ));
+        assert!(tracker_final_text_is_safety_handoff(
+            "I hit the tool-call safety fuse mid-verification; policy block."
+        ));
+        assert!(tracker_final_text_is_safety_handoff(
+            "Blocked action: exec_command is denied by workspace tool policy."
+        ));
+        assert!(!tracker_final_text_is_safety_handoff(
+            "## Status\nBlocked by turn budget. Next step: read design/diff.rs."
+        ));
+        assert!(!tracker_final_text_is_safety_handoff("Implemented patch apply; verification passed."));
+        assert!(!tracker_final_text_is_safety_handoff(""));
+    }
 
     #[test]
     fn test_completion_candidates() {

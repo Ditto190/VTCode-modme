@@ -687,6 +687,7 @@ impl<'a> TurnProcessingContext<'a> {
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
+            && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_cross_turn_turns(self.vt_cfg) > 0
             && crate::agent::runloop::unified::turn::tool_outcomes::helpers::incomplete_tracker_items(
                 self.tool_registry,
             )
