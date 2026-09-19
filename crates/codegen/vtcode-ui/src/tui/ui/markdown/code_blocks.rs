@@ -12,9 +12,9 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt::Write;
 use syntect::util::LinesWithEndings;
 use vtcode_commons::diff_paths::{
-    format_start_only_hunk_header, is_diff_addition_line, is_diff_deletion_line, is_diff_header_line,
-    is_diff_new_file_marker_line, is_prose_language_hint, language_hint_from_path, looks_like_diff_content,
-    parse_diff_git_path, parse_diff_marker_path,
+    is_diff_addition_line, is_diff_deletion_line, is_diff_header_line, is_diff_new_file_marker_line,
+    is_prose_language_hint, language_hint_from_path, looks_like_diff_content, parse_diff_git_path,
+    parse_diff_marker_path,
 };
 use vtcode_commons::diff_preview::{DiffDisplayKind, DiffDisplayLine, annotate_word_level_diffs};
 
@@ -690,7 +690,10 @@ fn code_block_contains_table(content: &str, language: Option<&str>) -> bool {
 }
 
 fn rewrite_diff_line(line: &str) -> String {
-    format_start_only_hunk_header(line).unwrap_or_else(|| line.to_string())
+    // Preserve the authored hunk header (including range counts). Rewriting to
+    // start-only form made partial hunks such as `@@ -65,19 +65,0 @@` read as a
+    // one-line change, contradicting the enclosing `• Diff … (+0 -19)` summary.
+    line.to_string()
 }
 
 fn bump_diff_counters(line: &str, additions: &mut usize, deletions: &mut usize) {

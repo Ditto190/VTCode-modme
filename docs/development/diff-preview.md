@@ -54,6 +54,11 @@ boundaries.
   cost. CRLF terminators, missing-final-newline hints, and git-compatible
   zero-context hunk headers (`@@ -0,0 +1,N @@`) are covered by regression
   tests.
+- Hunk headers keep their authored range counts. Previews render
+  `@@ -65,19 +65,0 @@` verbatim (and `display_lines_from_hunks` synthesizes the
+  same git-compatible form via `format_hunk_header`); collapsing to the
+  start-only `@@ -65 +65 @@` is rejected because it misreports a multi-line or
+  pure-deletion hunk as a one-line change.
 - Diff syntax highlighting reconstructs each side (pre-image and post-image)
   in original file order and highlights it once, bounded by the existing
   byte/line caps, so parser state survives hunk boundaries (multi-line strings

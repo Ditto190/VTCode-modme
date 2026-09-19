@@ -190,19 +190,12 @@ pub fn parse_hunk_starts(line: &str) -> Option<(usize, usize)> {
     Some((old_start, new_start))
 }
 
-/// Normalize hunk header to start-only form: `@@ -old +new @@`.
-pub fn format_start_only_hunk_header(line: &str) -> Option<String> {
-    let (old_start, new_start) = parse_hunk_starts(line)?;
-    Some(format!("@@ -{old_start} +{new_start} @@"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        format_start_only_hunk_header, is_apply_patch_header_line, is_diff_addition_line, is_diff_deletion_line,
-        is_diff_header_line, is_diff_new_file_marker_line, is_diff_old_file_marker_line, is_prose_language_hint,
-        language_hint_from_path, looks_like_diff_content, parse_diff_git_path, parse_diff_marker_path,
-        parse_hunk_starts,
+        is_apply_patch_header_line, is_diff_addition_line, is_diff_deletion_line, is_diff_header_line,
+        is_diff_new_file_marker_line, is_diff_old_file_marker_line, is_prose_language_hint, language_hint_from_path,
+        looks_like_diff_content, parse_diff_git_path, parse_diff_marker_path, parse_hunk_starts,
     };
 
     #[test]
@@ -227,11 +220,6 @@ mod tests {
     fn parses_hunk_starts() {
         assert_eq!(parse_hunk_starts("@@ -536,4 +540,5 @@"), Some((536, 540)));
         assert_eq!(parse_hunk_starts("not a hunk"), None);
-    }
-
-    #[test]
-    fn formats_start_only_hunk_header() {
-        assert_eq!(format_start_only_hunk_header("@@ -536,4 +540,5 @@"), Some("@@ -536 +540 @@".to_string()));
     }
 
     #[test]

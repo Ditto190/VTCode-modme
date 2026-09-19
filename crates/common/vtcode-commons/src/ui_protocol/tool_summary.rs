@@ -80,12 +80,14 @@ pub fn is_generic_diff_review_path(path: &str) -> bool {
 }
 
 /// Shared expand-notice copy for clipped completed-edit diff bodies.
+///
+/// `safety_capped` is retained so callers can distinguish a width-cap clip
+/// from vertical omission without changing the user-facing wording.
 #[must_use]
 pub fn diff_review_notice(file_path: &str, omitted_lines: u64, safety_capped: bool) -> String {
+    let _ = safety_capped;
     if omitted_lines > 0 {
         format!("… +{omitted_lines} lines — review full diff for {file_path}")
-    } else if safety_capped {
-        format!("… diff truncated — review full diff for {file_path}")
     } else {
         format!("… diff truncated — review full diff for {file_path}")
     }

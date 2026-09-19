@@ -565,6 +565,20 @@ fn format_unified_range(start: usize, count: usize) -> String {
     format!("{start},{count}")
 }
 
+/// Formats a git-compatible `@@ -old +new @@` hunk header.
+///
+/// Range counts are preserved rather than collapsed to start-only form: a
+/// pure deletion such as `@@ -65,19 +65,0 @@` must not read as a one-line
+/// change. Counts of one are elided (`@@ -1 +1 @@`) to match `git diff`.
+#[must_use]
+pub fn format_hunk_header(old_start: usize, old_count: usize, new_start: usize, new_count: usize) -> String {
+    format!(
+        "@@ -{} +{} @@",
+        format_unified_range(old_start, old_count),
+        format_unified_range(new_start, new_count)
+    )
+}
+
 /// Computes a character-level diff with adjacent chunks coalesced.
 #[must_use]
 pub fn compute_diff_chunks<'a>(old: &'a str, new: &'a str) -> Vec<Chunk<'a>> {
@@ -785,7 +799,7 @@ fn display_lines_from_hunks_with_timeout(hunks: &[DiffHunk], inline_timeout: Dur
             DiffDisplayKind::HunkHeader,
             None,
             None,
-            format!("@@ -{} +{} @@", hunk.old_start, hunk.new_start),
+            format_hunk_header(hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines),
         ));
         output.extend(hunk.lines.iter().map(|line| {
             let kind = match line.kind {
@@ -838,12 +852,10 @@ pub fn display_lines_from_unified_diff(input: &str) -> Vec<DiffDisplayLine> {
             hunk_new_start = new_start;
             in_hunk = true;
             omission_in_hunk = false;
-            output.push(DiffDisplayLine::body(
-                DiffDisplayKind::HunkHeader,
-                None,
-                None,
-                format!("@@ -{old_start} +{new_start} @@"),
-            ));
+            // Preserve the authored header verbatim so range counts survive.
+            // Collapsing to `@@ -65 +65 @@` made a pure deletion read as a
+            // one-line change.
+            output.push(DiffDisplayLine::body(DiffDisplayKind::HunkHeader, None, None, raw.to_owned()));
         } else if in_hunk && (omission_in_hunk || remaining_new > 0) && raw.starts_with('+') {
             let output_index = output.len();
             output.push(DiffDisplayLine::body(
@@ -2077,11 +2089,36 @@ mod tests {
         let bounded = bounded_display_lines(&lines, 4);
 
         assert_eq!(bounded.len(), 4);
-        assert_eq!(bounded[0].text, "@@ -1 +1 @@");
+        assert_eq!(bounded[0].text, "@@ -1,4 +1,4 @@");
         assert_eq!(bounded[1].text, "old-head");
         assert_eq!(bounded[2].kind, DiffDisplayKind::Metadata);
         assert!(bounded[2].text.contains("lines omitted"));
         assert_eq!(bounded[3].text, "new-tail");
+    }
+
+    #[test]
+    fn display_lines_preserve_hunk_range_counts() {
+        // Regression: `@@ -65,19 +64,0 @@` must not collapse to
+        // `@@ -65 +64 @@`, which reads as a one-line change.
+        let lines = display_lines_from_unified_diff("@@ -65,19 +64,0 @@\n-old\n");
+        assert_eq!(lines[0].kind, DiffDisplayKind::HunkHeader);
+        assert_eq!(lines[0].text, "@@ -65,19 +64,0 @@");
+    }
+
+    #[test]
+    fn hunk_header_formatter_elides_single_counts_and_keeps_ranges() {
+        assert_eq!(format_hunk_header(1, 1, 1, 1), "@@ -1 +1 @@");
+        assert_eq!(format_hunk_header(65, 19, 65, 0), "@@ -65,19 +64,0 @@");
+        assert_eq!(format_hunk_header(0, 0, 1, 5), "@@ -0,0 +1,5 @@");
+    }
+
+    #[test]
+    fn display_lines_from_hunks_keep_range_counts() {
+        let document = DiffDocument::between("a\nb\nc\n", "a\nx\ny\nc\n", DiffOptions::default());
+        let lines = display_lines_from_hunks(&document.hunks);
+        let hunk = &document.hunks[0];
+        assert_eq!(lines[0].text, format_hunk_header(hunk.old_start, hunk.old_lines, hunk.new_start, hunk.new_lines));
+        assert!(lines[0].text.contains(','), "hunk header must keep range counts: {:?}", lines[0].text);
     }
 
     #[test]

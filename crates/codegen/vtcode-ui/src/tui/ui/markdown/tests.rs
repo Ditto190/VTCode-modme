@@ -633,9 +633,16 @@ fn markdown_diff_empty_add_delete_rows_keep_the_capability_fallback() {
     let markdown = "```diff\n@@ -1 +1 @@\n+\n- \n```\n";
     let lines = render_markdown(markdown);
     let joined = |line: &MarkdownLine| line.segments.iter().map(|seg| seg.text.as_str()).collect::<String>();
+    // Exclude the `• Diff …` summary row: it carries `+N`/`-N` count text but
+    // is header metadata, not a tinted add/del body row.
     let diff_rows: Vec<_> = lines
         .iter()
-        .filter(|line| joined(line).contains('+') || joined(line).contains('-') || joined(line).contains("@@"))
+        .filter(|line| {
+            let text = joined(line);
+            let trimmed = text.trim_start();
+            !trimmed.starts_with("• Diff ")
+                && (trimmed.contains('+') || trimmed.contains('-') || trimmed.contains("@@"))
+        })
         .collect();
     assert!(diff_rows.len() >= 2, "empty + and - rows must render: {diff_rows:?}");
     for line in diff_rows {
@@ -682,6 +689,19 @@ fn markdown_diff_header_styles_are_classified() {
     for needle in ["--- a/main.rs", "+++ b/main.rs", "@@ -1 +1 @@"] {
         assert_eq!(text_and_style(needle).get_bg_color(), None, "{needle} must be background-free");
     }
+}
+
+#[test]
+fn markdown_diff_preserves_hunk_range_counts() {
+    // Regression: a partial hunk must keep its counts; `@@ -65,19 +64,0 @@`
+    // collapsed to `@@ -65 +64 @@` reads as a one-line change.
+    let markdown = "```diff\n@@ -65,19 +64,0 @@\n-removed\n```\n";
+    let lines = render_markdown(markdown);
+    let text = lines_to_text(&lines);
+    assert!(
+        text.iter().any(|line| line.trim() == "@@ -65,19 +64,0 @@"),
+        "hunk header must keep range counts, got: {text:?}"
+    );
 }
 
 #[test]

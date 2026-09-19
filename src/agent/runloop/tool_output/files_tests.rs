@@ -1,6 +1,34 @@
 use super::*;
 use unicode_width::UnicodeWidthStr;
 
+#[tokio::test]
+async fn apply_patch_preview_keeps_full_hunk_range_counts() {
+    // Regression for the reported diff header: a pure deletion hunk such as
+    // `@@ -65,19 +65,0 @@` must render its counts instead of the lossy
+    // start-only `@@ -65 +65 @@`, which reads as a one-line change.
+    use crate::agent::runloop::tool_output::collect_inline_output;
+    use serde_json::json;
+    use vtcode_core::ui::InlineHandle;
+    use vtcode_core::utils::ansi::AnsiRenderer;
+
+    let payload = json!({
+        "diff": [{
+            "path": "crates/codegen/vtcode-ui/src/tui/core_tui/style.rs",
+            "operation": "updated",
+            "additions": 0,
+            "deletions": 19,
+            "content": "@@ -65,19 +65,0 @@\n-removed_one\n-removed_two\n",
+        }]
+    });
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+    render_apply_patch_diff_preview(&mut renderer, &payload, &GitStyles::new(), &LsStyles::from_env()).expect("render");
+    let output = collect_inline_output(&mut receiver);
+
+    assert!(output.contains("@@ -65,19 +65,0 @@"), "hunk header must keep range counts, got: {output:?}");
+    assert!(!output.contains("@@ -65 +65 @@"), "lossy start-only hunk header must not render, got: {output:?}");
+}
+
 #[test]
 fn formats_unified_diff_with_hunk_headers() {
     let diff = "\
@@ -14,7 +42,7 @@ index 0000000..1111111 100644
 ";
     let lines = format_diff_content_lines_with_numbers(diff);
     assert_eq!(lines[0], "diff --git a/file1.txt b/file1.txt");
-    assert!(lines.iter().any(|line| line == "@@ -1 +1 @@"));
+    assert!(lines.iter().any(|line| line == "@@ -1,2 +1,2 @@"));
     // No "• Diff" summary line generated
     assert!(!lines.iter().any(|l| l.starts_with("• Diff ")));
 }
@@ -30,7 +58,7 @@ fn formats_diff_without_git_header() {
 ";
     let lines = format_diff_content_lines_with_numbers(diff);
     assert!(lines.iter().any(|line| line.starts_with("+++ ")));
-    assert!(lines.iter().any(|line| line == "@@ -2 +2 @@"));
+    assert!(lines.iter().any(|line| line == "@@ -2,3 +2,3 @@"));
     // No "• Diff" summary line generated
     assert!(!lines.iter().any(|l| l.starts_with("• Diff ")));
 }
@@ -48,7 +76,7 @@ index 0000000..1111111 100644
  context
 ";
     let lines = format_diff_content_lines_with_numbers(diff);
-    assert!(lines.iter().any(|line| line == "@@ -10 +10 @@"));
+    assert!(lines.iter().any(|line| line == "@@ -10,2 +10,2 @@"));
     assert!(lines.iter().any(|line| line.starts_with("-   10 │ old")));
     assert!(lines.iter().any(|line| line.starts_with("+   10 │ new")));
     assert!(lines.iter().any(|line| line.starts_with("    11 │ context")));
@@ -113,7 +141,7 @@ index 0000000..1111111 100644
     // No "• Diff" summary line generated
     assert!(!lines.iter().any(|l| l.starts_with("• Diff ")));
     assert!(lines.iter().any(|l| l.contains("diff --git")));
-    assert!(lines.iter().any(|l| l == "@@ -172 +172 @@"));
+    assert!(lines.iter().any(|l| l == "@@ -172,7 +172,7 @@"));
 }
 
 #[test]
@@ -139,8 +167,8 @@ index 0000000..1111111 100644
         lines[0],
         "diff --git a/crates/codegen/vtcode-config/src/loader/config.rs b/crates/codegen/vtcode-config/src/loader/config.rs"
     );
-    assert!(lines.iter().any(|line| line == "@@ -536 +536 @@"));
-    assert!(lines.iter().any(|line| line == "@@ -545 +545 @@"));
+    assert!(lines.iter().any(|line| line == "@@ -536,4 +536,4 @@"));
+    assert!(lines.iter().any(|line| line == "@@ -545,4 +545,4 @@"));
     assert!(
         lines
             .iter()
