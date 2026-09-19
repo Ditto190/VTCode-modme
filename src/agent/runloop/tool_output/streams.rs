@@ -362,7 +362,20 @@ fn parse_omitted_line_count(text: &str) -> Option<u64> {
 }
 
 fn is_generic_diff_review_label(path: &str) -> bool {
-    path.is_empty() || path == "diff" || path == "file" || path.starts_with("diff.")
+    vtcode_commons::ui_protocol::is_generic_diff_review_path(path)
+}
+
+fn resolve_diff_review_path(diff_content: &str) -> String {
+    file_path_from_diff_content(diff_content)
+        .filter(|path| !is_generic_diff_review_label(path))
+        .unwrap_or_else(|| "diff".to_owned())
+}
+
+/// True when `diff_content` is itself a pre-truncated excerpt (registry preview).
+fn is_pretruncated_diff_content(diff_content: &str) -> bool {
+    diff_content.lines().any(|line| {
+        line.contains("lines omitted") || line.contains("preview excerpt retained") || line.contains("diff truncated")
+    })
 }
 
 /// Whether any laid-out body/metadata row would exceed the reflow safety cap.
@@ -850,13 +863,8 @@ pub(crate) fn render_diff_content_block_with_language(
     let line_number_width = diff_display_line_number_width(lines_slice);
     let available_width = renderer.diff_content_width(fallback_style);
     let wrap_for_reflow = renderer.prefers_untruncated_output();
-    let review_path = file_path_from_diff_content(diff_content)
-        .or_else(|| {
-            diff_language_hint_from_content(diff_content)
-                .map(|hint| format!("diff.{hint}"))
-                .filter(|path| !is_generic_diff_review_label(path))
-        })
-        .unwrap_or_else(|| "diff".to_owned());
+    let review_path = resolve_diff_review_path(diff_content);
+    let pretruncated = is_pretruncated_diff_content(diff_content);
     let has_row_background = git_styles.add.as_ref().is_some_and(|style| style.get_bg_color().is_some());
     let show_gutter_probe = should_show_diff_gutter(
         renderer.capabilities().supports_color(),
@@ -864,7 +872,10 @@ pub(crate) fn render_diff_content_block_with_language(
         available_width,
         line_number_width,
     );
-    let safety_capped = wrap_for_reflow
+    // Expandable "full diff" is only honest when the function still holds the
+    // complete body in `diff_content` and we clipped it for display.
+    let can_expand_full = wrap_for_reflow && !pretruncated;
+    let safety_capped = can_expand_full
         && lines_slice
             .iter()
             .any(|line| line_exceeds_wrap_safety_cap(line, line_number_width, show_gutter_probe));
@@ -879,12 +890,13 @@ pub(crate) fn render_diff_content_block_with_language(
     {
         let result =
             render_diff_content_side_by_side_with_language(renderer, lines_slice, git_styles, fallback_style, language);
-        if vertical_omitted || safety_capped {
+        if can_expand_full && (vertical_omitted || safety_capped) {
             attach_diff_review_anchor(
                 renderer,
                 diff_content,
                 diff_lines.len().saturating_sub(lines_slice.len()),
                 safety_capped,
+                review_path.as_str(),
             );
         }
         return result;
@@ -905,44 +917,44 @@ pub(crate) fn render_diff_content_block_with_language(
         show_gutter,
         language,
         review_path.as_str(),
+        can_expand_full,
     );
-    if vertical_omitted || safety_capped {
+    if can_expand_full && (vertical_omitted || safety_capped) {
         attach_diff_review_anchor(
             renderer,
             diff_content,
             diff_lines.len().saturating_sub(lines_slice.len()),
             safety_capped,
+            review_path.as_str(),
         );
-        if safety_capped && !vertical_omitted && wrap_for_reflow {
+        if safety_capped && !vertical_omitted {
             // Spec S2.1: safety-cap truncation must advertise expand even when
             // the vertical budget retained every logical row.
-            let notice = format!("… diff truncated — review full diff for {review_path}");
+            let notice = vtcode_commons::ui_protocol::diff_review_notice(&review_path, 0, true);
             renderer.line(MessageStyle::ToolDetail, &notice)?;
         }
     }
     result
 }
 
-/// Attach a UI-only expand payload when the transcript body was clipped.
-///
-/// `omitted_lines > 0` covers vertical omission. `safety_capped` covers body
-/// rows that exceeded `DIFF_WRAP_SOURCE_MAX_WIDTH` and were ellipsis-truncated.
-fn attach_diff_review_anchor(renderer: &AnsiRenderer, diff_content: &str, omitted_lines: usize, safety_capped: bool) {
-    if diff_content.is_empty() || (omitted_lines == 0 && !safety_capped) {
+/// Attach a UI-only expand payload when the transcript body was clipped and
+/// `diff_content` still holds the complete source body.
+fn attach_diff_review_anchor(
+    renderer: &AnsiRenderer,
+    diff_content: &str,
+    omitted_lines: usize,
+    safety_capped: bool,
+    file_path: &str,
+) {
+    if diff_content.is_empty() || (omitted_lines == 0 && !safety_capped) || is_pretruncated_diff_content(diff_content) {
         return;
     }
-    let file_path = file_path_from_diff_content(diff_content)
-        .or_else(|| {
-            diff_language_hint_from_content(diff_content)
-                .map(|hint| format!("diff.{hint}"))
-                .filter(|path| !is_generic_diff_review_label(path))
-        })
-        .unwrap_or_else(|| "diff".to_owned());
-    let notice = if omitted_lines > 0 {
-        format!("… +{omitted_lines} lines — review full diff for {file_path}")
+    let file_path = if is_generic_diff_review_label(file_path) {
+        resolve_diff_review_path(diff_content)
     } else {
-        format!("… diff truncated — review full diff for {file_path}")
+        file_path.to_owned()
     };
+    let notice = vtcode_commons::ui_protocol::diff_review_notice(&file_path, omitted_lines as u64, safety_capped);
     renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
         file_path,
         unified: diff_content.to_owned(),
@@ -966,6 +978,7 @@ fn render_diff_content_inline_with_language(
     show_gutter: bool,
     language: Option<&str>,
     review_path: &str,
+    can_expand_full: bool,
 ) -> Result<()> {
     let color_enabled = renderer.capabilities().supports_color();
     let target_width = renderer.diff_content_width(fallback_style);
@@ -999,11 +1012,11 @@ fn render_diff_content_inline_with_language(
         if raw_line.is_empty() {
             continue;
         }
-        // Spec S2.1: vertical omission notices become expandable copy when a
-        // DiffReviewAnchor payload is retained for this block.
-        if wrap_for_reflow && raw_line.contains("lines omitted") {
+        // Expandable omission copy only when the full body is still available
+        // for review (not a pre-truncated registry excerpt).
+        if can_expand_full && wrap_for_reflow && raw_line.contains("lines omitted") {
             if let Some(omitted) = parse_omitted_line_count(&raw_line) {
-                display_buffer.push_str(&format!("… +{omitted} lines — review full diff for {review_path}"));
+                display_buffer.push_str(&vtcode_commons::ui_protocol::diff_review_notice(review_path, omitted, false));
             } else if !raw_line.contains("review full diff") {
                 display_buffer.push_str(&format!("{raw_line} — review full diff for {review_path}"));
             } else {

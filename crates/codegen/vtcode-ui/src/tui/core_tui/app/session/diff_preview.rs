@@ -45,59 +45,13 @@ pub(crate) fn render_diff_preview(session: &Session, frame: &mut Frame<'_>, area
     let configured_layout = session.core.appearance.diff_preview_mode;
     let layout_mode = effective_diff_layout(configured_layout, content.width);
     render_file_header(frame, header, preview, &palette, counts.additions, counts.deletions, layout_mode);
+    // Remaining-row disclosure reuses the same laid-out rows as painting so a
+    // frame never runs `layout_display_lines` twice for the same viewport.
     let remaining_rows = match layout_mode {
-        DiffLayoutMode::SideBySide => {
-            render_diff_content_side_by_side(frame, content, preview);
-            remaining_side_by_side_rows(preview, content)
-        }
-        _ => {
-            render_diff_content(frame, content, preview);
-            remaining_inline_rows(preview, content)
-        }
+        DiffLayoutMode::SideBySide => render_diff_content_side_by_side(frame, content, preview),
+        _ => render_diff_content(frame, content, preview),
     };
     render_controls(frame, controls, preview, remaining_rows);
-}
-
-/// Rows still hidden below the viewport after the current scroll offset.
-fn remaining_inline_rows(preview: &DiffPreviewState, content: Rect) -> usize {
-    let style_context = current_diff_render_style_context();
-    let width = content.width as usize;
-    let display_lines = preview.display_lines.get(preview.scroll_offset..).unwrap_or_default();
-    let line_number_width = diff_display_line_number_width(display_lines);
-    let show_gutter = should_show_inline_gutter(style_context, width, line_number_width);
-    let rows = layout_display_lines(
-        display_lines,
-        LayoutOptions {
-            layout: DiffLayout::Unified,
-            width: diff_layout_width(width, line_number_width, show_gutter),
-            max_rows: 2_000,
-            ..LayoutOptions::default()
-        },
-    );
-    let visible = content.height.saturating_sub(1) as usize;
-    rows.len().saturating_sub(visible)
-}
-
-#[cfg(test)]
-pub(crate) fn remaining_inline_rows_for_test(preview: &DiffPreviewState, content: Rect) -> usize {
-    remaining_inline_rows(preview, content)
-}
-
-fn remaining_side_by_side_rows(preview: &DiffPreviewState, content: Rect) -> usize {
-    let header_h = 1u16.min(content.height);
-    let visible = content.height.saturating_sub(header_h) as usize;
-    let lines = side_by_side_display_lines(preview);
-    let rows = layout_display_lines(
-        lines,
-        LayoutOptions {
-            layout: DiffLayout::SideBySide,
-            width: content.width as usize,
-            max_rows: 2_000,
-            min_side_by_side_width: vtcode_diff::DIFF_MIN_SIDE_BY_SIDE_WIDTH,
-            ..LayoutOptions::default()
-        },
-    );
-    rows.len().saturating_sub(visible)
 }
 
 fn effective_diff_layout(configured: DiffLayoutMode, width: u16) -> DiffLayoutMode {
@@ -162,7 +116,7 @@ fn style_diff_metadata(text: &str, style_context: crate::tui::utils::diff_styles
     }
 }
 
-fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState) {
+fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState) -> usize {
     let style_context = current_diff_render_style_context();
     let width = area.width as usize;
 
@@ -182,6 +136,7 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
             ..LayoutOptions::default()
         },
     );
+    let total_rows = rows.len();
     let mut syntax_offsets = HashMap::new();
     let mut active_syntax_key = None;
     for row in &rows {
@@ -230,9 +185,32 @@ fn render_diff_content(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewS
     }
 
     frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::NONE)), area);
+    total_rows.saturating_sub(max_display)
 }
 
-fn render_diff_content_side_by_side(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState) {
+/// Test-only remaining-row count using a single laid-out pass (same options as
+/// `render_diff_content`). Production remaining counts come from the paint path.
+#[cfg(test)]
+pub(crate) fn remaining_inline_rows_for_test(preview: &DiffPreviewState, content: Rect) -> usize {
+    let style_context = current_diff_render_style_context();
+    let width = content.width as usize;
+    let display_lines = preview.display_lines.get(preview.scroll_offset..).unwrap_or_default();
+    let line_number_width = diff_display_line_number_width(display_lines);
+    let show_gutter = should_show_inline_gutter(style_context, width, line_number_width);
+    let rows = layout_display_lines(
+        display_lines,
+        LayoutOptions {
+            layout: DiffLayout::Unified,
+            width: diff_layout_width(width, line_number_width, show_gutter),
+            max_rows: 2_000,
+            ..LayoutOptions::default()
+        },
+    );
+    let visible = content.height.saturating_sub(1) as usize;
+    rows.len().saturating_sub(visible)
+}
+
+fn render_diff_content_side_by_side(frame: &mut Frame<'_>, area: Rect, preview: &DiffPreviewState) -> usize {
     let style_context = current_diff_render_style_context();
 
     // Split into three independent areas so pane backgrounds physically
@@ -303,6 +281,7 @@ fn render_diff_content_side_by_side(frame: &mut Frame<'_>, area: Rect, preview: 
             ..LayoutOptions::default()
         },
     );
+    let total_side_by_side_rows = rows.len();
     let max_display = body_left.height as usize;
 
     let mut left_lines: Vec<Line> = Vec::new();
@@ -399,6 +378,7 @@ fn render_diff_content_side_by_side(frame: &mut Frame<'_>, area: Rect, preview: 
         let band = Rect { x: area.x, y, width: area.width, height: 1 };
         frame.render_widget(Paragraph::new(line), band);
     }
+    total_side_by_side_rows.saturating_sub(max_display)
 }
 
 fn side_by_side_display_lines(preview: &DiffPreviewState) -> &[DiffDisplayLine] {
@@ -862,7 +842,7 @@ fn control_lines(preview: &DiffPreviewState) -> Vec<Line<'static>> {
 mod tests {
     use super::{
         build_inline_diff_line, build_side_pane_line, control_lines, effective_diff_layout, header_action_label,
-        pad_line_to_width, remaining_inline_rows, should_show_inline_gutter, side_by_side_display_lines,
+        pad_line_to_width, remaining_inline_rows_for_test, should_show_inline_gutter, side_by_side_display_lines,
         styled_content_spans,
     };
     use crate::tui::core_tui::app::types::{DiffPreviewMode, DiffPreviewState};
@@ -905,7 +885,7 @@ mod tests {
         );
         let content = ratatui::layout::Rect::new(0, 0, 80, 8);
 
-        assert!(remaining_inline_rows(&preview, content) > 0);
+        assert!(remaining_inline_rows_for_test(&preview, content) > 0);
     }
 
     #[test]

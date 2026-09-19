@@ -73,6 +73,24 @@ pub struct DiffReviewAnchor {
     pub notice: String,
 }
 
+/// Generic fallback labels that must never win path-based notice matching.
+#[must_use]
+pub fn is_generic_diff_review_path(path: &str) -> bool {
+    path.is_empty() || path == "diff" || path == "file" || path.starts_with("diff.")
+}
+
+/// Shared expand-notice copy for clipped completed-edit diff bodies.
+#[must_use]
+pub fn diff_review_notice(file_path: &str, omitted_lines: u64, safety_capped: bool) -> String {
+    if omitted_lines > 0 {
+        format!("… +{omitted_lines} lines — review full diff for {file_path}")
+    } else if safety_capped {
+        format!("… diff truncated — review full diff for {file_path}")
+    } else {
+        format!("… diff truncated — review full diff for {file_path}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::CompactActivityMetadata;

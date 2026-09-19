@@ -1174,7 +1174,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn render_tool_output_write_file_diff_truncation_uses_file_operation_hint() {
+    async fn render_tool_output_write_file_diff_truncation_does_not_claim_full_review() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
         let payload = json!({
@@ -1190,18 +1190,20 @@ mod tests {
             .expect("write file diff payload should render");
 
         let inline_output = collect_inline_output(&mut receiver);
-        assert!(inline_output.contains("review full diff"));
-        assert!(inline_output.contains("+5 lines"));
-        assert!(inline_output.contains("for"));
-        assert!(!inline_output.contains("use read_file for full view"));
         assert!(
-            inline_output.contains("RecordDiffReview"),
-            "expandable notice must record DiffReviewAnchor for activation: {inline_output:?}"
+            inline_output.contains("preview excerpt retained") || inline_output.contains("lines omitted"),
+            "tool-truncated previews must not claim full-diff review: {inline_output:?}"
         );
+        assert!(
+            !inline_output.contains("RecordDiffReview"),
+            "excerpt payloads must not record expand anchors: {inline_output:?}"
+        );
+        assert!(!inline_output.contains("review full diff"));
+        assert!(!inline_output.contains("use read_file for full view"));
     }
 
     #[tokio::test]
-    async fn render_tool_output_write_file_diff_records_path_bearing_anchor() {
+    async fn render_tool_output_write_file_truncated_preview_does_not_record_anchor() {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
         let payload = json!({
@@ -1218,10 +1220,39 @@ mod tests {
             .expect("write file diff payload should render");
 
         let anchors = super::collect_inline_diff_review_anchors(&mut receiver);
-        assert_eq!(anchors.len(), 1, "expected one expand anchor: {anchors:?}");
-        assert_eq!(anchors[0].file_path, "src/main.rs");
-        assert!(anchors[0].notice.contains("review full diff for src/main.rs"));
-        assert!(!anchors[0].unified.is_empty());
+        assert!(
+            anchors.is_empty(),
+            "tool-level truncated previews are excerpts and must not record full-diff anchors: {anchors:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_tool_output_write_file_untruncated_preview_can_record_expand_from_streams() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut renderer = AnsiRenderer::with_inline_ui(InlineHandle::new_for_tests(sender), Default::default());
+        renderer.set_table_max_width(Some(40));
+        // Complete unified body (not a registry excerpt) whose rows exceed
+        // DIFF_WRAP_SOURCE_MAX_WIDTH so safety-cap truncation advertises expand.
+        let body = format!("@@ -1 +1 @@\n-{}\n+{}\n", "old ".repeat(600), "new ".repeat(600));
+        let payload = json!({
+            "diff_preview": {
+                "content": body,
+                "truncated": false,
+                "path": "src/main.rs"
+            }
+        });
+
+        render_tool_output(&mut renderer, Some(vtcode_core::config::constants::tools::WRITE_FILE), &payload, None)
+            .await
+            .expect("write file diff payload should render");
+
+        let anchors = super::collect_inline_diff_review_anchors(&mut receiver);
+        assert!(!anchors.is_empty(), "safety-capped full body should record an expand anchor");
+        assert!(
+            anchors
+                .iter()
+                .any(|a| a.unified.contains("old old") || a.unified.contains("new new"))
+        );
     }
 
     #[tokio::test]

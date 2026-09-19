@@ -78,11 +78,12 @@ User-facing behavior for long diffs in the TUI:
   `src/agent/runloop/tool_output/streams.rs`). Continuation rows hang under the
   visible gutter or, for compact tinted rows without a gutter, under the single
   marker cell. CLI / no-sink renders keep the bounded `MAX_LINE_LENGTH` cap.
-- **Vertical omission** — clipped completed-edit bodies advertise
-  `review full diff for <path>` and record a UI-only `DiffReviewAnchor`
-  (`vtcode_commons::ui_protocol`) so activating the notice opens full-viewport
-  `ReadonlyReview` via `DiffOverlayRequest.unified`. Overlays do not auto-open
-  after a completed edit mid-turn.
+- **Vertical omission** — expandable `review full diff` copy and `DiffReviewAnchor`
+  are recorded only when the renderer still holds the **complete** unified body
+  and clipped it for display (inline TUI sink, not a pre-truncated registry
+  excerpt). Tool-level truncated previews advertise omission/excerpt copy and
+  never claim full-diff review. CLI/no-sink keeps the actionable
+  `exec_command`/sed recovery hint.
 - **Safety-cap expand** — when an inline-TUI body row exceeds
   `DIFF_WRAP_SOURCE_MAX_WIDTH`, the transcript still ellipsis-truncates that
   row but also advertises expand (`… diff truncated — review full diff for

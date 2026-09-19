@@ -118,7 +118,9 @@ impl DiffPreviewState {
     pub(crate) fn from_unified(file_path: String, unified: &str, mode: DiffPreviewMode) -> Self {
         let document = DiffDocument::from_unified(unified)
             .unwrap_or_else(|_| DiffDocument::between("", "", DiffOptions::default()));
-        Self::from_document(file_path, String::new(), unified.to_owned(), document, mode)
+        // Document/display lines carry the review body; do not retain a second
+        // full copy of `unified` on the state.
+        Self::from_document(file_path, String::new(), String::new(), document, mode)
     }
 
     fn from_document(

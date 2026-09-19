@@ -467,7 +467,9 @@ impl AppSession {
             let excess = self.diff_review_anchors.len() - MAX_DIFF_REVIEW_ANCHORS;
             self.diff_review_anchors.drain(..excess);
         }
-        self.core.mark_dirty();
+        // Anchors are activation-only; recording them does not change visible
+        // transcript content, so skip mark_dirty to avoid cache invalidation
+        // on every clipped preview.
     }
 
     /// Open full-viewport ReadonlyReview for a completed-edit expand notice.
@@ -478,52 +480,56 @@ impl AppSession {
     /// 3. the sole stored anchor, when only one exists
     ///
     /// Refuse rather than open an arbitrary last anchor when multiple payloads
-    /// are present and the notice carries no distinctive path.
+    /// are present and the notice carries no distinctive path. Takes the
+    /// matching anchor out of the session list so unified content is moved,
+    /// not cloned.
     pub(crate) fn open_diff_review_for_notice(&mut self, notice_text: &str) -> bool {
         if !notice_text.contains("review full diff") {
             return false;
         }
 
         fn is_generic_label(path: &str) -> bool {
-            path.is_empty() || path == "diff" || path == "file" || path.starts_with("diff.")
+            vtcode_commons::ui_protocol::is_generic_diff_review_path(path)
         }
 
         let by_notice = self
             .diff_review_anchors
             .iter()
+            .enumerate()
             .rev()
-            .find(|anchor| !anchor.notice.is_empty() && notice_text.contains(anchor.notice.as_str()))
-            .cloned();
+            .find(|(_, anchor)| !anchor.notice.is_empty() && notice_text.contains(anchor.notice.as_str()))
+            .map(|(index, _)| index);
 
-        let mut by_path: Option<vtcode_commons::ui_protocol::DiffReviewAnchor> = None;
-        for anchor in self.diff_review_anchors.iter() {
+        let mut by_path: Option<usize> = None;
+        for (index, anchor) in self.diff_review_anchors.iter().enumerate() {
             if is_generic_label(anchor.file_path.as_str()) {
                 continue;
             }
             if !notice_text.contains(anchor.file_path.as_str()) {
                 continue;
             }
-            let better = match &by_path {
+            let better = match by_path {
                 None => true,
-                Some(prev) => anchor.file_path.len() > prev.file_path.len(),
+                Some(prev_index) => anchor.file_path.len() > self.diff_review_anchors[prev_index].file_path.len(),
             };
             if better {
-                by_path = Some(anchor.clone());
+                by_path = Some(index);
             }
         }
 
-        let anchor = by_notice
+        let index = by_notice
             .or(by_path)
-            .or_else(|| (self.diff_review_anchors.len() == 1).then(|| self.diff_review_anchors[0].clone()));
-        let Some(anchor) = anchor else {
+            .or_else(|| (self.diff_review_anchors.len() == 1).then_some(0));
+        let Some(index) = index else {
             return false;
         };
+        let anchor = self.diff_review_anchors.swap_remove(index);
         self.open_diff_review_anchor(anchor)
     }
 
     fn open_diff_review_anchor(&mut self, anchor: vtcode_commons::ui_protocol::DiffReviewAnchor) -> bool {
         self.show_diff_overlay(DiffOverlayRequest {
-            file_path: anchor.file_path.clone(),
+            file_path: anchor.file_path,
             before: String::new(),
             after: String::new(),
             hunks: Vec::new(),
