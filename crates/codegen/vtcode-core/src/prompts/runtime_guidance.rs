@@ -14,12 +14,13 @@ pub(crate) const RUNTIME_GUIDANCE_SECTION: &str = r#"## Runtime Guidance
 - Failed/timed-out/non-zero tools need bounded diagnosis and a safe next action; never bypass safeguards.
 - Fix root causes, not symptoms.
 - Verify every edit (build/test/lint) before the next one; never stack unverified changes; after a fix, rerun a related test.
-- Keep output concise; never use emojis in responses; report checks; test observable behavior; cite retrieved evidence when needed.
+- Keep output concise; report checks; test observable behavior; cite evidence.
+- Never use emojis, incl. verification recaps: write plain text like `pass (6/6)`, not checkmarks/crosses.
 - Test risk-first: name risks + likely mistakes; check asymmetric/boundary both sides; re-derive high-risk results without reusing helpers; avoid panic-only tests.
 "#;
 
 /// Maximum approximate size for the compiled universal guidance section.
-pub(crate) const RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS: usize = 288;
+pub(crate) const RUNTIME_GUIDANCE_MAX_ESTIMATED_TOKENS: usize = 320;
 
 pub(crate) const fn runtime_guidance_section() -> &'static str {
     RUNTIME_GUIDANCE_SECTION
@@ -74,7 +75,9 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("never stack unverified changes"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("rerun a related test"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Fix root causes, not symptoms"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("never use emojis in responses"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("Never use emojis"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("incl. verification recaps"));
+        assert!(RUNTIME_GUIDANCE_SECTION.contains("not checkmarks/crosses"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("Keep this file concise and under 150 lines"));
         assert!(!RUNTIME_GUIDANCE_SECTION.contains("vtcode-exec-events::ThreadEvent"));
     }
