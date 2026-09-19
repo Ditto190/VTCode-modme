@@ -638,11 +638,10 @@ impl SessionStats {
     /// count (tracker recreate) — either restores the auto-continue episode.
     pub(crate) fn note_tracker_completed_count(&mut self, completed: u32) -> bool {
         let changed = completed != self.tracker_completed_count_last;
-        let progressed_or_reopened = completed != self.tracker_completed_count_last;
         if changed {
             self.tracker_completed_count_last = completed;
         }
-        progressed_or_reopened
+        changed
     }
 
     /// Record one plan-mode auto-continue turn against its own budget.
