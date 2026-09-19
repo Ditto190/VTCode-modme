@@ -300,10 +300,37 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
     }
 }
 
+/// Persist blocked-handoff artifacts without renderer nudge lines or
+/// blocked UI state. Used when tracker/plan auto-continue already printed
+/// the single exhausted-path info line and the generic "Type continue"
+/// stack must not be duplicated.
+pub(super) fn persist_blocked_handoff_quiet(workspace: &Path, session_id: &str, blocker_summary: &str) {
+    match write_blocked_handoff_with_resume(
+        workspace,
+        session_id,
+        "blocked",
+        blocker_summary,
+        &existing_harness_artifact_paths(workspace),
+        BlockedHandoffResume::Unavailable(NO_ARCHIVE_RESUME_EXPLANATION),
+    ) {
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err, "Failed to persist quiet blocked handoff"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics, truncated_block_reason};
+    use super::{
+        NO_ARCHIVE_RESUME_EXPLANATION, TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics,
+        truncated_block_reason,
+    };
     use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
+
+    #[test]
+    fn quiet_handoff_resume_explanation_is_non_empty() {
+        assert!(!NO_ARCHIVE_RESUME_EXPLANATION.trim().is_empty());
+        assert!(NO_ARCHIVE_RESUME_EXPLANATION.contains("Resume is unavailable"));
+    }
 
     #[test]
     fn short_block_reason_is_rendered_verbatim() {

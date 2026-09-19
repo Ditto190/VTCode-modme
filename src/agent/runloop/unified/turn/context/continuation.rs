@@ -116,6 +116,14 @@ pub(super) fn evaluate_interim_text_continuation(
         if asks_user_input {
             return d(false, "full_auto_user_input_handoff");
         }
+        // Verification-gate / safety recaps are terminal even in full-auto:
+        // autonomous continuation must not race past the anti-blind checkpoint.
+        if lower.contains("verification is still pending")
+            || lower.contains("unverified assistant responses")
+            || vtcode_core::core::agent::completion::tracker_final_text_is_safety_handoff(text)
+        {
+            return d(false, "full_auto_safety_handoff");
+        }
         if has_explicit_blocker(&lower) {
             return d(false, "full_auto_blocked_handoff");
         }
@@ -187,22 +195,7 @@ pub(super) fn evaluate_interim_text_continuation(
 /// including tool-call / tool-loop budget vocabulary the model uses in status
 /// recaps ("blocked by turn tool budget", "tool loop budget", "read cap").
 fn recoverable_tracker_budget_phrasing(lower: &str) -> bool {
-    lower.contains("turn budget")
-        || lower.contains("preview budget")
-        || lower.contains("wall clock")
-        || lower.contains("safety cap")
-        || lower.contains("recovery fallback")
-        || lower.contains("tool budget")
-        || lower.contains("tool loop")
-        || lower.contains("tool-call budget")
-        || lower.contains("tool follow-up")
-        || lower.contains("read cap")
-        || lower.contains("work budget")
-        || lower.contains("max tool")
-        || lower.contains("per-turn tool")
-        || lower.contains("recovery exhausted")
-        || lower.contains("budget exhausted")
-        || lower.contains("budget ran out")
+    vtcode_core::core::agent::completion::recoverable_status_recap_phrasing(lower)
 }
 
 /// True-handoff detector used when `task_tracker` still has incomplete steps.
@@ -276,15 +269,29 @@ pub(super) fn apply_tracker_continuation_override(
     planning_active: bool,
     text: &str,
 ) -> InterimTextContinuationDecision {
-    if !tracker_incomplete || planning_active || decision.should_continue {
+    if !tracker_incomplete || planning_active {
+        return decision;
+    }
+    // True safety/permission/credential/verification-gate handoffs always end
+    // the turn, even if an earlier full-auto/relaxed path already chose to
+    // continue. In-turn tracker continuation must not race past the anti-blind
+    // gate the outer loop will not auto-queue.
+    if vtcode_core::core::agent::completion::tracker_final_text_is_safety_handoff(text)
+        || text.to_ascii_lowercase().contains("verification is still pending")
+        || text.to_ascii_lowercase().contains("unverified assistant responses")
+    {
+        decision.should_continue = false;
+        decision.reason = "tracker_safety_handoff";
+        decision.is_relaxed_continuation = false;
+        return decision;
+    }
+    if decision.should_continue {
         return decision;
     }
     if tracker_incomplete_text_is_user_handoff(text) {
         return decision;
     }
     let lower = text.to_ascii_lowercase();
-    // True safety/permission/credential handoffs always end the turn for the
-    // user, even if the recap also mentions a budget.
     let explicit_safety_handoff = lower.contains("safety fuse")
         || lower.contains("permission denied")
         || lower.contains("access denied")
@@ -297,6 +304,9 @@ pub(super) fn apply_tracker_continuation_override(
         || lower.contains("denied by tool policy")
         || lower.contains("denied by workspace tool policy");
     if explicit_safety_handoff {
+        decision.should_continue = false;
+        decision.reason = "tracker_safety_handoff";
+        decision.is_relaxed_continuation = false;
         return decision;
     }
     // Recoverable budget/recovery phrasing continues even when the recap also
@@ -475,6 +485,11 @@ fn has_explicit_blocker(lower: &str) -> bool {
         "safety fuse",
         "tool-call safety fuse",
         "policy block",
+        "verification is still pending",
+        "unverified assistant responses",
+        "anti-blind",
+        "verification gate",
+        "turn blocked after",
     ]
     .iter()
     .any(|pattern| lower.contains(pattern))
@@ -1748,5 +1763,82 @@ mod tests {
             trailing_q,
         );
         assert!(!t_over.should_continue);
+
+        // Verification-pending recaps are true handoffs — outer verification
+        // recovery owns that path; in-turn tracker continuation must not race
+        // past the anti-blind gate, even when full-auto already continued.
+        for recap in [
+            "Turn blocked after repeated unverified assistant responses; verification is still pending.",
+            "## Status\nBlocked by turn budget. Verification is still pending; run cargo check --locked.",
+            "Anti-blind checkpoint: verification is still pending before further edits.",
+        ] {
+            let base = evaluate_interim_text_continuation(true, false, &history, recap, 0);
+            let over = apply_tracker_continuation_override(base, true, false, recap);
+            assert!(!over.should_continue, "must not continue past verification gate: {recap}");
+        }
+
+        // Session evidence: budget/status recaps without a gate still continue.
+        // Full-auto may already continue some of these; the tracker override
+        // must not reverse that. Assert `tracker_incomplete_continuation` only
+        // when the base classifier would have stopped.
+        for recap in [
+            "## Status\nTask 7 blocked by the turn's preview budget before I could read docs.",
+            "## Status\nTool budget ran out after evidence gathering; next step is the patch.",
+            "Task 3 mid-flight — hit the per-file read cap before editing.",
+            "Fix 1 partially applied, needs verification; continuing with the remaining checks now.",
+        ] {
+            let base = evaluate_interim_text_continuation(true, false, &history, recap, 0);
+            let over = apply_tracker_continuation_override(base, true, false, recap);
+            assert!(over.should_continue, "must continue on session budget recap: {recap}");
+            if !base.should_continue {
+                assert_eq!(over.reason, "tracker_incomplete_continuation");
+            }
+        }
+
+        // When the base classifier would end the turn, tracker override forces
+        // non-relaxed continuation with the tracker reason.
+        let status_only =
+            "## Status\nBlocked by the turn's preview budget. Next step on resume: read docs/development/README.md.";
+        let s_base = evaluate_interim_text_continuation(false, false, &history, status_only, 0);
+        assert!(!s_base.should_continue, "interactive status recap must not auto-continue without tracker");
+        let s_over = apply_tracker_continuation_override(s_base, true, false, status_only);
+        assert!(s_over.should_continue);
+        assert_eq!(s_over.reason, "tracker_incomplete_continuation");
+        assert!(!s_over.is_relaxed_continuation);
+    }
+
+    #[test]
+    fn recoverable_status_recap_vocabulary_matches_outer_classifier() {
+        use vtcode_core::core::agent::completion::recoverable_status_recap_phrasing;
+        for phrase in [
+            "blocked by the turn's preview budget",
+            "tool budget ran out",
+            "per-file read cap",
+            "preview budget exhausted",
+            "tool loop budget exhausted",
+            "recovery fallback",
+            "reached the safety cap",
+        ] {
+            let lower = phrase.to_ascii_lowercase();
+            assert!(recoverable_status_recap_phrasing(&lower), "shared vocab must cover {phrase}");
+            assert!(
+                crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_is_recoverable_block(
+                    Some(phrase)
+                ),
+                "outer classifier must cover {phrase}"
+            );
+        }
+        for phrase in [
+            "Turn blocked after repeated unverified assistant responses; verification is still pending.",
+            "exec_command is denied by permission policy",
+            "request_user_input is required",
+        ] {
+            assert!(
+                !crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_is_recoverable_block(
+                    Some(phrase)
+                ),
+                "outer classifier must deny {phrase}"
+            );
+        }
     }
 }

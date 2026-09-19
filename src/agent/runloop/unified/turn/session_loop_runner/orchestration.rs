@@ -1678,6 +1678,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // incomplete tracker work + recoverable turn end → queue the next
                 // turn instead of nudging the user. Verification blocks keep their
                 // existing recovery path first (handled below).
+                // Set when tracker auto-queue was eligible but could not
+                // resume (queue full / cross-turn budget exhausted) while
+                // incomplete tracker steps remain. The exhausted-path info
+                // line is the single user-facing nudge; suppress the generic
+                // blocked-handoff "Type continue" stack and blocked placeholder
+                // for this recoverable budget end.
+                let mut tracker_auto_continue_exhausted = false;
                 {
                     use crate::agent::runloop::unified::turn::tool_outcomes::helpers as tracker_continue;
                     let planning_active = tool_registry.is_planning_active();
@@ -1777,8 +1784,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     );
                                     let _ = renderer.line(
                                         MessageStyle::Info,
-                                        "[i] Plan-mode auto-continue queue full; planning remains active. Type `continue` to resume planning.",
+                                        "[i] Plan-mode auto-continue could not resume automatically; planning remains active. Type `continue` to resume planning.",
                                     );
+                                    tracker_auto_continue_exhausted = true;
                                     false
                                 }
                             };
@@ -1793,6 +1801,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 MessageStyle::Info,
                                 "[i] Plan-mode auto-continue budget exhausted; planning remains active. Type `continue` to resume planning.",
                             );
+                            tracker_auto_continue_exhausted = true;
                         }
                         if planning_active && !plan_ready_for_approval {
                             let _ = renderer
@@ -1829,8 +1838,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     tracing::warn!(%err, "Tracker auto-continue queue full; falling through to turn end");
                                     let _ = renderer.line(
                                         MessageStyle::Info,
-                                        "[i] Tracker auto-continue queue full; incomplete tracker steps remain. Type `continue` to resume.",
+                                        "[i] Tracker auto-continue could not resume automatically; incomplete tracker steps remain. Type `continue` to resume remaining steps.",
                                     );
+                                    tracker_auto_continue_exhausted = true;
                                     false
                                 }
                             };
@@ -1843,8 +1853,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         if !budget_remaining {
                             let _ = renderer.line(
                                 MessageStyle::Info,
-                                "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume.",
+                                "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume remaining steps.",
                             );
+                            tracker_auto_continue_exhausted = true;
                         }
                     } else if planning_active && plan_ready_for_approval && turn_completed {
                         session_stats.reset_plan_continuation_budget();
@@ -1868,6 +1879,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     let base = reason.as_deref().unwrap_or("Turn blocked due to repeated failing behavior.");
                     let is_verification_block = base
                         .contains(crate::agent::runloop::unified::turn::turn_loop::PENDING_VERIFICATION_BLOCK_REASON);
+                    // Recoverable tracker/plan budget ends that already printed
+                    // the exhausted auto-continue info line must not stack a
+                    // second "Type continue" blocked-handoff nudge.
+                    let suppress_blocked_nudge = tracker_auto_continue_exhausted
+                        && !is_verification_block
+                        && verification_gate::tracker_auto_continue_is_recoverable_block(Some(base));
                     let max_failures = verification_gate::verification_max_consecutive_failures(vt_cfg.as_ref());
                     let escalated = session_stats.verification_consecutive_failures() >= max_failures;
                     // Autonomous cross-turn recovery for verification blocks:
@@ -1961,20 +1978,34 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     } else {
                         base.to_string()
                     };
-                    let summary = super::blocked_handoff::blocker_summary_with_diagnostics(
-                        &base_owned,
-                        last_turn_diagnostics.as_ref(),
-                        &session_stats.sorted_tools(),
-                    );
-                    write_blocked_handoff_after_checkpoint(
-                        &config.workspace,
-                        &harness_snapshot.session_id,
-                        &summary,
-                        checkpoint_outcome.blocked_handoff_resume(),
-                        &mut renderer,
-                        harness_emitter.as_ref(),
-                        Some(&handle),
-                    );
+                    if !suppress_blocked_nudge {
+                        let summary = super::blocked_handoff::blocker_summary_with_diagnostics(
+                            &base_owned,
+                            last_turn_diagnostics.as_ref(),
+                            &session_stats.sorted_tools(),
+                        );
+                        write_blocked_handoff_after_checkpoint(
+                            &config.workspace,
+                            &harness_snapshot.session_id,
+                            &summary,
+                            checkpoint_outcome.blocked_handoff_resume(),
+                            &mut renderer,
+                            harness_emitter.as_ref(),
+                            Some(&handle),
+                        );
+                    } else {
+                        // Keep forensics artifacts without the user-nudge stack.
+                        let summary = super::blocked_handoff::blocker_summary_with_diagnostics(
+                            &base_owned,
+                            last_turn_diagnostics.as_ref(),
+                            &session_stats.sorted_tools(),
+                        );
+                        super::blocked_handoff::persist_blocked_handoff_quiet(
+                            &config.workspace,
+                            &harness_snapshot.session_id,
+                            &summary,
+                        );
+                    }
                 }
                 match &outcome_result {
                     RunLoopTurnLoopResult::Completed { .. } => {
@@ -2006,9 +2037,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .mark_turn_stalled(true, Some("Turn aborted due to an execution error.".to_string()));
                     }
                     RunLoopTurnLoopResult::Blocked { reason } => {
-                        handle.set_placeholder(Some(
-                            "Turn blocked · Type 'continue' to retry or describe changes...".to_string(),
-                        ));
+                        if tracker_auto_continue_exhausted {
+                            handle.set_placeholder(Some(
+                                "Tracker auto-continue exhausted · Type 'continue' to resume remaining steps..."
+                                    .to_string(),
+                            ));
+                        } else {
+                            handle.set_placeholder(Some(
+                                "Turn blocked · Type 'continue' to retry or describe changes...".to_string(),
+                            ));
+                        }
                         input_status_state.is_blocked = true;
                         session_stats.mark_turn_stalled(
                             true,

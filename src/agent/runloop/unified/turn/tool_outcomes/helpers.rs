@@ -301,6 +301,9 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
         || reason.contains("safety fuse")
         || reason.contains("manual intervention")
         || reason.contains("verification is still pending")
+        || reason.contains("unverified assistant responses")
+        || reason.contains("anti-blind")
+        || reason.contains("verification gate")
         || reason.contains("context exceeded")
         || reason.contains("compaction could not reduce")
         || reason.contains("unmatched tool result")
@@ -313,21 +316,21 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
     {
         return false;
     }
-    // Recoverable production reason shapes.
-    // COMPLETED_TURN_FALLBACK_REASON / COMPLETED_TURN_NO_RESPONSE_REASON
-    // ASSISTANT_TEXT_RESPONSE_CAP_REASON / POST_TOOL_* recovery constants
-    // TOOL_LOOP_LIMIT_RECOVERY_REASON / tool-call & preview budgets
-    // PLAN_RECOVERY_EXHAUSTED_REASON ("recovery was exhausted")
+    // Recoverable production reason shapes — keep aligned with
+    // `completion::recoverable_status_recap_phrasing` plus outer-only
+    // harness constants (text-cap / no-response / safety-cap wording).
     reason.contains("recovery fallback")
         || reason.contains("recovery could not confirm")
         || reason.contains("recovery exhausted")
         || reason.contains("recovery was exhausted")
         || reason.contains("reached the safety cap")
+        || reason.contains("safety cap")
         || reason.contains("preview budget")
         || reason.contains("tool preview budget")
         || reason.contains("turn budget")
         || reason.contains("tool budget")
         || reason.contains("tool loop budget")
+        || reason.contains("tool loop")
         || reason.contains("tool-call budget")
         || reason.contains("tool follow-up")
         || reason.contains("wall clock")
@@ -337,7 +340,9 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
         || reason.contains("max tool")
         || reason.contains("per-turn tool")
         || reason.contains("read cap")
+        || reason.contains("work budget")
         || reason.contains("budget exhausted")
+        || reason.contains("budget ran out")
 }
 
 /// Pure gate for outer-loop tracker auto-continue after a turn end.
@@ -664,6 +669,18 @@ mod tracker_continue_tests {
         )));
         assert!(tracker_auto_continue_is_recoverable_block(Some("preview budget exhausted")));
         assert!(tracker_auto_continue_is_recoverable_block(Some("Turn blocked due to repeated failing behavior.")));
+        // Session/production budget phrases from residual UX work.
+        assert!(tracker_auto_continue_is_recoverable_block(Some("Task 7 blocked by the turn's preview budget")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("tool budget ran out")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("hit the per-file read cap")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Tool loop budget exhausted before a final response."
+        )));
+        // True handoffs stay terminal.
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Anti-blind checkpoint: verification is still pending"
+        )));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some("verification gate remains open")));
         // Unknown / policy handoffs stay terminal.
         assert!(!tracker_auto_continue_is_recoverable_block(Some("some unknown block")));
         assert!(!tracker_auto_continue_is_recoverable_block(Some("exec_command is denied by permission policy")));
@@ -671,6 +688,17 @@ mod tracker_continue_tests {
             "I hit the tool-call safety fuse mid-verification"
         )));
         assert!(!tracker_auto_continue_is_recoverable_block(Some("request_user_input is required")));
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(
+            "Turn blocked after repeated unverified assistant responses; verification is still pending."
+        )));
+        // Session/production recoverable vocabulary parity.
+        assert!(tracker_auto_continue_is_recoverable_block(Some("Task 7 blocked by the turn's preview budget")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("tool budget ran out")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("per-file read cap")));
+        assert!(tracker_auto_continue_is_recoverable_block(Some(
+            "Tool loop budget exhausted before a final response"
+        )));
+        assert!(tracker_auto_continue_is_recoverable_block(Some("work budget exhausted")));
     }
 
     #[test]
