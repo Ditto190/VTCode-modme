@@ -22,6 +22,7 @@ use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use vtcode_config::TimeoutsConfig;
 use vtcode_config::constants::{env_vars, models, urls};
 use vtcode_config::core::{AnthropicConfig, ModelConfig, PromptCachingConfig};
@@ -432,6 +433,9 @@ impl MergeGatewayProvider {
         {
             payload.insert("prompt_cache_key".to_owned(), Value::String(cache_key.to_owned()));
         }
+        if let Some(session_id) = merge_session_identity(request) {
+            payload.insert("session_id".to_owned(), Value::String(session_id));
+        }
         if stream {
             payload.insert("stream".to_owned(), Value::Bool(true));
         }
@@ -462,11 +466,16 @@ impl MergeGatewayProvider {
         self.prepare_native_request(&mut request);
         LLMProvider::validate_request(self, &request)?;
         let payload = self.build_native_payload(&request, false)?;
-        let response = self
+        let session_id = merge_session_identity(&request);
+        let mut http = self
             .native
             .http_client
             .post(self.responses_url())
-            .bearer_auth(&self.native.api_key)
+            .bearer_auth(&self.native.api_key);
+        if let Some(session_id) = session_id.as_deref() {
+            http = http.header("X-Session-Id", session_id);
+        }
+        let response = http
             .json(&payload)
             .send()
             .await
@@ -488,11 +497,16 @@ impl MergeGatewayProvider {
         request.stream = true;
 
         let payload = self.build_native_payload(&request, true)?;
-        let response = self
+        let session_id = merge_session_identity(&request);
+        let mut http = self
             .native
             .http_client
             .post(self.responses_url())
-            .bearer_auth(&self.native.api_key)
+            .bearer_auth(&self.native.api_key);
+        if let Some(session_id) = session_id.as_deref() {
+            http = http.header("X-Session-Id", session_id);
+        }
+        let response = http
             .json(&payload)
             .send()
             .await
@@ -1113,6 +1127,37 @@ impl MergeGatewayProvider {
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
     }
+}
+
+/// Stable opaque session identity for Merge Gateway cache-aware routing.
+///
+/// Prefers `LLMRequest.prompt_cache_key` (session-stable, often mapped to
+/// `vtcode:merge:{lineage}`), strips the VT Code namespace and any residual
+/// `-{16 hex}` prefix-hash suffix so the gateway sees one lineage id even if
+/// an older caller still suffixes the cache key. Blank keys yield `None`.
+fn merge_session_identity(request: &LLMRequest) -> Option<String> {
+    let key = request.prompt_cache_key.as_deref()?.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let id = key
+        .strip_prefix("vtcode:merge:")
+        .or_else(|| key.strip_prefix("vtcode:openai:"))
+        .unwrap_or(key)
+        .trim();
+    let id = strip_prefix_hash_suffix(id);
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Drop a trailing `-{16 hex}` suffix used by legacy cache-key assembly.
+fn strip_prefix_hash_suffix(id: &str) -> &str {
+    if let Some((head, tail)) = id.rsplit_once('-')
+        && tail.len() == 16
+        && tail.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return head;
+    }
+    id
 }
 
 #[derive(Default)]
@@ -2058,6 +2103,67 @@ mod tests {
         let payload = provider.build_native_payload(&request, false).expect("payload");
 
         assert!(payload.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn native_payload_includes_session_id_from_cache_key_lineage() {
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+        );
+        let mut request = LLMRequest {
+            model: models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+            system_prompt: Some(Arc::from("sys")),
+            messages: vec![Message::user("hi".to_string())].into(),
+            ..Default::default()
+        };
+        request.prompt_cache_key = Some("vtcode:merge:session-lineage-1".to_string());
+
+        let payload = provider.build_native_payload(&request, false).expect("payload");
+
+        assert_eq!(
+            payload.get("session_id").and_then(Value::as_str),
+            Some("session-lineage-1"),
+            "body session_id must be the namespaced lineage without the vtcode prefix"
+        );
+        assert_eq!(merge_session_identity(&request).as_deref(), Some("session-lineage-1"));
+    }
+
+    #[test]
+    fn native_payload_omits_blank_session_id() {
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+        );
+        let mut request = LLMRequest {
+            model: models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+            system_prompt: Some(Arc::from("sys")),
+            messages: vec![Message::user("hi".to_string())].into(),
+            ..Default::default()
+        };
+        request.prompt_cache_key = Some("   ".to_string());
+
+        let payload = provider.build_native_payload(&request, false).expect("payload");
+
+        assert!(payload.get("session_id").is_none());
+        assert!(merge_session_identity(&request).is_none());
+    }
+
+    #[test]
+    fn merge_session_identity_strips_legacy_prefix_hash_suffix() {
+        let mut request = LLMRequest {
+            model: models::merge_gateway::ZAI_GLM_5_3_FLASH.to_string(),
+            ..Default::default()
+        };
+        request.prompt_cache_key = Some("vtcode:merge:lineage-abc-deadbeef01234567".to_string());
+        assert_eq!(merge_session_identity(&request).as_deref(), Some("lineage-abc"));
+
+        request.prompt_cache_key = Some("vtcode:openai:lineage-abc-0123456789abcdef".to_string());
+        assert_eq!(merge_session_identity(&request).as_deref(), Some("lineage-abc"));
+
+        // Non-hex / wrong-length tails stay intact.
+        request.prompt_cache_key = Some("vtcode:merge:lineage-notahash".to_string());
+        assert_eq!(merge_session_identity(&request).as_deref(), Some("lineage-notahash"));
     }
 
     #[test]

@@ -1287,7 +1287,11 @@ fn refresh_session_memory_envelope_merges_existing_continuity_fields() {
     .expect("refresh succeeds")
     .expect("envelope should be refreshed");
 
-    assert_eq!(envelope.objective.as_deref(), Some("Keep continuity"));
+    assert_eq!(
+        envelope.objective.as_deref(),
+        Some("Ship compaction cleanup"),
+        "live task-tracker objective wins over a stale prior envelope"
+    );
     assert!(envelope.constraints.contains(&"Do not redesign the harness".to_string()));
     assert!(
         envelope

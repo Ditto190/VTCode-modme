@@ -71,6 +71,7 @@ use snapshot::{is_openai_prompt_cache_enabled, resolve_prompt_cache_shaping_mode
 use streaming::HarnessStreamingBridge;
 #[cfg(test)]
 use vtcode_core::config::build_openai_prompt_cache_key;
+use vtcode_core::utils::transcript::MessageStyle;
 
 async fn run_standard_stream_attempt(
     ctx: &mut TurnProcessingContext<'_>,
@@ -174,6 +175,7 @@ async fn execute_llm_request_with_options_impl(
         turn_snapshot.turn_timeout_secs,
         turn_snapshot.planning_active,
         supports_non_streaming,
+        &turn_snapshot.provider_name,
     );
 
     ctx.renderer
@@ -601,6 +603,13 @@ async fn execute_llm_request_with_options_impl(
                 if is_retryable && attempt < max_retries - 1 {
                     if use_streaming && supports_non_streaming && is_stream_timeout_error(&msg) {
                         switch_to_non_streaming_retry_mode(&mut use_streaming, &mut stream_fallback_used);
+                        if let Some(advisory) = ctx
+                            .session_stats
+                            .merge_stream_timeout_billing_advisory(&turn_snapshot.provider_name)
+                        {
+                            tracing::warn!("{advisory}");
+                            let _ = ctx.renderer.line(MessageStyle::Warning, &advisory);
+                        }
                         crate::agent::runloop::unified::turn::turn_helpers::display_status(
                             ctx.renderer,
                             "Streaming timed out; retrying with non-streaming for this provider.",

@@ -395,7 +395,7 @@ mod tests {
     fn invalid_positional_workspace_fails_during_cli_parse() {
         let mut command = build_augmented_cli_command();
         let err = command
-            .try_get_matches_from_mut(["vtcode", "hellp"])
+            .try_get_matches_from_mut(["vtcode", "--", "hellp"])
             .expect_err("invalid positional workspace should fail at clap parsing");
         let err_text = err.to_string();
         assert!(
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn invalid_positional_workspace_fails_with_derive_parser_too() {
-        let err = Cli::try_parse_from(["vtcode", "hellp"])
+        let err = Cli::try_parse_from(["vtcode", "--", "hellp"])
             .expect_err("invalid positional workspace should fail at derive parser");
         let err_text = err.to_string();
         assert!(

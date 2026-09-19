@@ -863,6 +863,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Purpose, File Index, Cross-References, Navigation, Maintaining Freshness
   - **User Questions**: "What can you tell me about Harness Engineering Knowledge Base?", "How does Purpose work?", "How does File Index work?"
 
+- **File**: `docs/compose/spec/harness-stability-cost-p1.md`
+  - **Content**: Harness Stability Cost P1
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Harness Stability Cost P1?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/huggingface/index.md`
   - **Content**: Hugging Face Inference Providers Integrations
   - **Topics**: Featured Integrations, About This Directory, Overview, Configuration, Resources

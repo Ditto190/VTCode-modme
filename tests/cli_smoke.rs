@@ -46,7 +46,8 @@ fn vtcode_positional_workspace_with_tool_policy_status_succeeds() {
     let workspace = home.path().join("workspace");
     std::fs::create_dir(&workspace).expect("create workspace");
 
-    let _argument = cmd.arg("workspace").arg("tool-policy").arg("status");
+    // Workspace is a `last = true` positional: command first, path after `--`.
+    let _argument = cmd.arg("tool-policy").arg("status").arg("--").arg(&workspace);
     let _assertion = cmd.assert().success();
 }
 

@@ -48,7 +48,7 @@ pub enum MemoryEnvelopePlacement {
     BeforeLastUserOrSummary,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionMemoryEnvelope {
     #[serde(default)]
     pub session_id: String,
@@ -291,16 +291,58 @@ pub fn build_session_memory_envelope(
         &update.applied_intent_ids,
     );
 
+    // Live task-tracker identity wins over a prior envelope from another
+    // session/task. Workspace-global `current_task.md` is a live snapshot
+    // source; inheriting a stale prior objective re-labels later sessions.
+    let live_objective = task_snapshot.objective.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let prior_objective = pe.and_then(|e| e.objective.as_deref()).map(str::trim).filter(|s| !s.is_empty());
+    let objective_changed = match (live_objective, prior_objective) {
+        (Some(live), Some(prior)) => live != prior,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => false,
+    };
+
+    let objective = update
+        .objective
+        .or_else(|| live_objective.map(ToOwned::to_owned))
+        .or_else(|| pe.and_then(|e| e.objective.clone()));
+
+    let task_summary = if objective_changed {
+        // Spec S2: never inherit another task's checklist narrative.
+        task_snapshot.summary.clone().filter(|s| !s.trim().is_empty())
+    } else {
+        pe.and_then(|e| e.task_summary.clone())
+            .or_else(|| task_snapshot.summary.clone())
+    };
+
+    let verification_todo = if objective_changed {
+        // Replace, do not union: prior-task open items are not this session's todos.
+        task_snapshot
+            .verification_todo
+            .iter()
+            .cloned()
+            .chain(update.verification_todo.iter().cloned())
+            .take(MEMORY_LIST_LIMIT)
+            .collect()
+    } else {
+        merge(
+            pe.map(|e| e.verification_todo.as_slice()).unwrap_or(&[]),
+            &task_snapshot
+                .verification_todo
+                .iter()
+                .cloned()
+                .chain(update.verification_todo)
+                .collect::<Vec<_>>(),
+        )
+    };
+
     SessionMemoryEnvelope {
         session_id: session_id.to_string(),
         schema_version: Some(SESSION_MEMORY_ENVELOPE_SCHEMA_VERSION),
         summary,
-        objective: update
-            .objective
-            .or_else(|| pe.and_then(|e| e.objective.clone()).or_else(|| task_snapshot.objective.clone())),
-        task_summary: pe
-            .and_then(|e| e.task_summary.clone())
-            .or_else(|| task_snapshot.summary.clone()),
+        objective,
+        task_summary,
         spec_summary,
         evaluation_summary,
         verification_summary: task_snapshot
@@ -314,15 +356,7 @@ pub fn build_session_memory_envelope(
             &touched_files.iter().cloned().chain(update.touched_files).collect::<Vec<_>>(),
         ),
         open_questions: merge(pe.map(|e| e.open_questions.as_slice()).unwrap_or(&[]), &update.open_questions),
-        verification_todo: merge(
-            pe.map(|e| e.verification_todo.as_slice()).unwrap_or(&[]),
-            &task_snapshot
-                .verification_todo
-                .iter()
-                .cloned()
-                .chain(update.verification_todo)
-                .collect::<Vec<_>>(),
-        ),
+        verification_todo,
         delegation_notes: merge(pe.map(|e| e.delegation_notes.as_slice()).unwrap_or(&[]), &update.delegation_notes),
         pending_intents,
         applied_intent_ids,
@@ -1395,7 +1429,112 @@ pub fn effective_compaction_threshold(
 #[cfg(test)]
 mod tests {
     use super::extract_compaction_summary;
+    use super::{
+        SessionMemoryEnvelope, TaskTrackerSnapshot, build_session_memory_envelope, parse_task_tracker_snapshot,
+    };
     use crate::llm::provider::Message;
+    use std::path::Path;
+
+    fn tracker_snapshot(summary: &str, objective: &str, todo: &[&str]) -> TaskTrackerSnapshot {
+        let markdown = format!("# {objective}\n\n- [ ] {}\n", todo.join("\n- [ ] "));
+        let mut snap = parse_task_tracker_snapshot(&markdown);
+        snap.summary = Some(summary.to_string());
+        snap.objective = Some(objective.to_string());
+        snap.verification_todo = todo.iter().map(|s| (*s).to_string()).collect();
+        snap
+    }
+
+    #[test]
+    fn envelope_prefers_live_objective_over_stale_prior() {
+        let prior = SessionMemoryEnvelope {
+            session_id: "sess-a".to_string(),
+            objective: Some("1789-mighty-harbor".to_string()),
+            task_summary: Some("mighty-harbor: README checklist".to_string()),
+            verification_todo: vec!["mighty todo".to_string()],
+            ..Default::default()
+        };
+        let live = tracker_snapshot("bright-squid analyze fix", "1789-bright-squid", &["cargo check analyze"]);
+
+        let envelope = build_session_memory_envelope(
+            "sess-b",
+            Path::new("."),
+            &[],
+            &[],
+            "Working on bright-squid".to_string(),
+            None,
+            Some(&prior),
+            &live,
+            None,
+        );
+
+        assert_eq!(envelope.objective.as_deref(), Some("1789-bright-squid"));
+        assert!(
+            envelope.task_summary.as_deref().unwrap_or_default().contains("bright-squid"),
+            "task_summary must not keep prior-task narrative: {:?}",
+            envelope.task_summary
+        );
+        assert_eq!(envelope.verification_todo, vec!["cargo check analyze".to_string()]);
+    }
+
+    #[test]
+    fn envelope_objective_change_drops_prior_task_summary_when_live_empty() {
+        let prior = SessionMemoryEnvelope {
+            session_id: "sess-a".to_string(),
+            objective: Some("task-a".to_string()),
+            task_summary: Some("task-a: stale checklist".to_string()),
+            verification_todo: vec!["stale".to_string()],
+            ..Default::default()
+        };
+        let live = TaskTrackerSnapshot {
+            objective: Some("task-b".to_string()),
+            summary: None,
+            ..Default::default()
+        };
+
+        let envelope = build_session_memory_envelope(
+            "sess-b",
+            Path::new("."),
+            &[],
+            &[],
+            "summary".to_string(),
+            None,
+            Some(&prior),
+            &live,
+            None,
+        );
+
+        assert_eq!(envelope.objective.as_deref(), Some("task-b"));
+        assert_eq!(envelope.task_summary, None);
+        assert!(envelope.verification_todo.is_empty());
+    }
+
+    #[test]
+    fn envelope_same_objective_keeps_todo_merge() {
+        let prior = SessionMemoryEnvelope {
+            session_id: "sess-a".to_string(),
+            objective: Some("task-1".to_string()),
+            task_summary: Some("task-1: shared".to_string()),
+            verification_todo: vec!["keep me".to_string()],
+            ..Default::default()
+        };
+        let live = tracker_snapshot("task-1 continued", "task-1", &["new item"]);
+
+        let envelope = build_session_memory_envelope(
+            "sess-a",
+            Path::new("."),
+            &[],
+            &[],
+            "summary".to_string(),
+            None,
+            Some(&prior),
+            &live,
+            None,
+        );
+
+        assert_eq!(envelope.objective.as_deref(), Some("task-1"));
+        assert!(envelope.verification_todo.contains(&"keep me".to_string()));
+        assert!(envelope.verification_todo.contains(&"new item".to_string()));
+    }
 
     #[test]
     fn local_summary_takes_precedence_over_retained_provider_detail() {

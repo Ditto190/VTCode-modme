@@ -116,3 +116,7 @@ Hydration and post-hydration hook execution are awaited before the interaction
 loop dispatches the first model turn. Setup failures still abort the session.
 Trace phases: `session_setup_critical`, `session_setup_ui`,
 `session_setup_hydrate`, `session_setup`, `first_ui_render`.
+
+## Blocker forensics and retention pins
+
+Blocked handoffs copy session `events.jsonl` / ATIF into `{archive}-forensics/` beside the blocker archive (best-effort; missing sources do not fail the handoff) and write `retention-pin.json` under the session directory so ordinary session retention cannot evict forensics while the blocker is unresolved. Resolving the archive unpins only when no other unresolved archive still references that session.

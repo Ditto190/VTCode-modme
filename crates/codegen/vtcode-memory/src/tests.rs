@@ -945,3 +945,40 @@ fn scan_skips_malformed_lifecycle_payloads() {
     assert_eq!(log.turn_count(), 1);
     assert_eq!(log.reconstruct_turn(1).expect("reconstruct").len(), 2);
 }
+
+#[test]
+fn retention_skips_pinned_sessions_and_evicts_when_unpinned() {
+    use crate::retention::{RetentionPolicy, apply_retention, pin_session_retention, unpin_session_retention};
+    use std::path::Path;
+
+    fn write_session(root: &Path, id: &str, updated_at: &str, status: &str) {
+        let dir = root.join(".vtcode/sessions").join(id);
+        fs::create_dir_all(&dir).expect("session dir");
+        let manifest = serde_json::json!({
+            "session_id": id,
+            "schema_version": 1,
+            "created_at": updated_at,
+            "updated_at": updated_at,
+            "turn_count": 1,
+            "event_count": 1,
+            "status": status,
+        });
+        fs::write(dir.join("manifest.json"), manifest.to_string()).expect("manifest");
+        fs::write(dir.join("events.jsonl"), "{}\n").expect("events");
+    }
+
+    let dir = TempDir::new().expect("temp");
+    write_session(dir.path(), "sess-old", "2026-01-01T00:00:00Z", "completed");
+    write_session(dir.path(), "sess-new", "2026-01-02T00:00:00Z", "completed");
+    pin_session_retention(&dir.path().join(".vtcode/sessions/sess-old"), "unresolved-blocker").expect("pin");
+    let policy = RetentionPolicy { max_sessions: 1, max_age_days: 365 };
+    let removed = apply_retention(dir.path(), policy).expect("retention");
+    assert_eq!(removed, 0, "pinned old session must not be evicted: {removed}");
+    assert!(dir.path().join(".vtcode/sessions/sess-old").is_dir());
+    assert!(dir.path().join(".vtcode/sessions/sess-new").is_dir());
+
+    assert!(unpin_session_retention(&dir.path().join(".vtcode/sessions/sess-old")).expect("unpin"));
+    let removed = apply_retention(dir.path(), policy).expect("retention 2");
+    assert!(removed >= 1, "unpinned oldest should evict under max_sessions=1");
+    assert!(!dir.path().join(".vtcode/sessions/sess-old").exists());
+}

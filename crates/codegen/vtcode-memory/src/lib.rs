@@ -56,7 +56,10 @@ pub use query::{
     FactRecord, MemorySearchResult, SessionMemoryView, SessionSummary, query_facts, recent_sessions, search_memory,
     session_memory_facts, write_session_memory_view,
 };
-pub use retention::{RetentionPolicy, apply_retention, apply_retention_preserving, gc_legacy};
+pub use retention::{
+    RETENTION_PIN_FILE, RetentionPolicy, apply_retention, apply_retention_preserving, gc_legacy, pin_session_retention,
+    session_retention_pinned, unpin_session_retention,
+};
 
 use std::path::{Path, PathBuf};
 

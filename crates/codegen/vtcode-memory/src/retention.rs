@@ -87,6 +87,36 @@ pub fn apply_retention_preserving(
     Ok(removed)
 }
 
+/// Sidecar marker written when a session must outlive ordinary retention
+/// because an unresolved blocker archive references it.
+pub const RETENTION_PIN_FILE: &str = "retention-pin.json";
+
+/// Whether a session directory is pinned against ordinary retention eviction.
+#[must_use]
+pub fn session_retention_pinned(session_dir: &Path) -> bool {
+    session_dir.join(RETENTION_PIN_FILE).is_file()
+}
+
+/// Write a retention pin for a session (best-effort path check by caller).
+pub fn pin_session_retention(session_dir: &Path, reason: &str) -> Result<(), SessionStoreError> {
+    let path = session_dir.join(RETENTION_PIN_FILE);
+    let body = serde_json::json!({
+        "reason": reason,
+        "pinned_at": chrono::Utc::now().to_rfc3339(),
+    });
+    std::fs::write(&path, body.to_string()).map_err(|e| SessionStoreError::io(path, e))
+}
+
+/// Remove a retention pin if present.
+pub fn unpin_session_retention(session_dir: &Path) -> Result<bool, SessionStoreError> {
+    let path = session_dir.join(RETENTION_PIN_FILE);
+    if !path.is_file() {
+        return Ok(false);
+    }
+    std::fs::remove_file(&path).map_err(|e| SessionStoreError::io(path, e))?;
+    Ok(true)
+}
+
 /// Enumerate session stores from their filesystem entries, never from the
 /// session ID contained in a manifest. This keeps retention confined to
 /// validated direct children of the sessions root.
@@ -104,6 +134,10 @@ fn retention_candidates(
         }
         let path = entry.path();
         if preserve_path.is_some_and(|preserve_path| preserve_path == path) {
+            continue;
+        }
+        // Unresolved blocker forensics must survive count/age eviction.
+        if session_retention_pinned(&path) {
             continue;
         }
         let manifest_path = path.join("manifest.json");

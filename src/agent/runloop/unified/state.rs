@@ -122,6 +122,7 @@ pub(crate) struct SessionStats {
     previous_response_chains: HashMap<(String, String), ResponsesContinuationState>,
     prompt_cache_profile: Option<PromptCacheProfile>,
     prompt_cache_lineage_id: Option<String>,
+    merge_timeout_advisory_emitted: bool,
     last_prompt_cache_model: Option<String>,
     last_stable_prefix_hash: Option<u64>,
     last_tool_catalog_hash: Option<u64>,
@@ -812,6 +813,20 @@ impl SessionStats {
         })
     }
 
+    /// One-shot advisory when merge-gateway stream timeout falls back to
+    /// non-streaming: abandoned provider streams may still be drained/billed.
+    pub(crate) fn merge_stream_timeout_billing_advisory(&mut self, provider_name: &str) -> Option<String> {
+        if !provider_name.eq_ignore_ascii_case("merge-gateway") || self.merge_timeout_advisory_emitted {
+            return None;
+        }
+        self.merge_timeout_advisory_emitted = true;
+        Some(
+            "Merge Gateway stream timed out before first token; falling back to non-streaming. Abandoned provider \
+             streams may still be drained and billed, and the retry re-sends the full prompt."
+                .to_string(),
+        )
+    }
+
     fn counter_for_reason(&mut self, reason: &str) -> &mut usize {
         match reason {
             "model" => &mut self.prompt_cache_model_changes,
@@ -1386,6 +1401,17 @@ mod tests {
         assert!(stats.note_tool_catalog_observability_change(&tools, 5, 2, 3, &skills));
         assert!(!stats.note_tool_catalog_observability_change(&tools, 5, 2, 3, &skills));
         assert!(stats.note_tool_catalog_observability_change(&tools, 6, 2, 4, &skills));
+    }
+
+    #[test]
+    fn merge_stream_timeout_billing_advisory_fires_once() {
+        let mut stats = SessionStats::default();
+        let first = stats.merge_stream_timeout_billing_advisory("merge-gateway");
+        assert!(first.is_some());
+        let second = stats.merge_stream_timeout_billing_advisory("merge-gateway");
+        assert!(second.is_none());
+        let mut other = SessionStats::default();
+        assert!(other.merge_stream_timeout_billing_advisory("openai").is_none());
     }
 
     #[test]

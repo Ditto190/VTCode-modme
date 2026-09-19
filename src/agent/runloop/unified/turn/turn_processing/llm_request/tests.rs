@@ -413,28 +413,45 @@ fn stream_timeout_error_detection_matches_common_messages() {
 
 #[test]
 fn llm_first_progress_timeout_defaults_to_fifth_of_turn_budget() {
-    assert_eq!(llm_first_progress_timeout_secs(300, false, true), 60);
+    assert_eq!(llm_first_progress_timeout_secs(300, false, true, "openai"), 60);
+    assert_eq!(llm_first_progress_timeout_secs(300, false, false, "openai"), 60);
 }
 
 #[test]
-fn llm_first_progress_timeout_expands_for_planning_workflow() {
-    assert_eq!(llm_first_progress_timeout_secs(300, true, true), 150);
-}
-
-#[test]
-fn llm_first_progress_timeout_planning_workflow_respects_smaller_turn_budget() {
-    assert_eq!(llm_first_progress_timeout_secs(180, true, true), 90);
+fn llm_first_progress_timeout_merge_gateway_floors_to_gateway_silence() {
+    // Non-streaming merge-gateway turns must not abandon before Gateway's
+    // 120s first-frame silence window (double-bill risk).
+    assert_eq!(llm_first_progress_timeout_secs(300, false, true, "merge-gateway"), 120);
+    // Without non-streaming fallback there is no double-bill retry path.
+    assert_eq!(llm_first_progress_timeout_secs(300, false, false, "merge-gateway"), 60);
+    // Other providers keep the baseline.
+    assert_eq!(llm_first_progress_timeout_secs(300, false, true, "anthropic"), 60);
 }
 
 #[test]
 fn llm_first_progress_timeout_planning_workflow_uses_capability_floor() {
-    assert_eq!(llm_first_progress_timeout_secs(150, true, true), 90);
-    assert_eq!(llm_first_progress_timeout_secs(150, true, false), 75);
+    assert_eq!(llm_first_progress_timeout_secs(150, true, true, "merge-gateway"), 90);
+}
+
+#[test]
+fn llm_first_progress_timeout_expands_for_planning_workflow() {
+    assert_eq!(llm_first_progress_timeout_secs(300, true, true, "openai"), 150);
+}
+
+#[test]
+fn llm_first_progress_timeout_planning_workflow_respects_smaller_turn_budget() {
+    assert_eq!(llm_first_progress_timeout_secs(180, true, true, "openai"), 90);
+}
+
+#[test]
+fn llm_first_progress_timeout_planning_workflow_uses_capability_floor_for_openai() {
+    assert_eq!(llm_first_progress_timeout_secs(150, true, true, "openai"), 90);
+    assert_eq!(llm_first_progress_timeout_secs(150, true, false, "openai"), 75);
 }
 
 #[test]
 fn llm_first_progress_timeout_respects_planning_workflow_cap() {
-    assert_eq!(llm_first_progress_timeout_secs(1_200, true, true), 180);
+    assert_eq!(llm_first_progress_timeout_secs(1_200, true, true, "openai"), 180);
 }
 
 #[test]

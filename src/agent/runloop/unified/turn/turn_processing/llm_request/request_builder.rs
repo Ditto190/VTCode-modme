@@ -373,7 +373,12 @@ pub(super) async fn build_turn_request(
         metadata,
         context_management,
         previous_response_id,
-        prompt_cache_key: prompt_cache_key.map(|key| format!("{key}-{stable_prefix_hash:016x}")),
+        // Keep the wire key stable per session. OpenAI/Merge Gateway route by
+        // (prefix hash + key); the key must stay consistent across requests
+        // sharing a prefix. Per-prefix suffixes fragment routing buckets when
+        // the tool catalog or system prompt churns. Prefix identity stays
+        // tracked via `tool_catalog_hash` / `system_prompt_prefix_hash`.
+        prompt_cache_key,
         prompt_cache_profile: ctx.session_stats.prompt_cache_profile(),
         tool_catalog_hash,
         system_prompt_prefix_hash: Some(stable_prefix_hash),

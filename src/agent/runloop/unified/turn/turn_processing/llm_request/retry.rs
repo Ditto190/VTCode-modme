@@ -101,12 +101,19 @@ pub(crate) fn llm_first_progress_timeout_secs(
     turn_timeout_secs: u64,
     planning_active: bool,
     supports_non_streaming: bool,
+    provider_name: &str,
 ) -> u64 {
     // A single slow first-token follow-up on a large context (common after many
     // accumulated tool outputs) should not burn all retries too aggressively.
     // After first progress arrives, the stream is allowed to run to completion.
     let baseline = (turn_timeout_secs / 5).clamp(30, 180);
     if !planning_active {
+        // Merge Gateway first-frame silence budget is 120s; abandoning earlier
+        // lets the gateway drain+bill the provider call while VT Code retries
+        // non-streaming and re-pays the full prompt.
+        if provider_name.eq_ignore_ascii_case("merge-gateway") && supports_non_streaming {
+            return baseline.max(120);
+        }
         return baseline;
     }
 

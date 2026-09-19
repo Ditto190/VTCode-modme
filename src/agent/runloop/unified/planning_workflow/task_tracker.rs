@@ -98,6 +98,34 @@ fn plan_section(line: &str) -> Option<PlanSection> {
     }
 }
 
+/// Bare section labels (`Summary`) without markdown hashes are valid plan
+/// markers — the same labels `PlanContent::from_markdown` accepts for display.
+/// Unknown `##` headings stay non-tracker context.
+fn is_bare_section_label(trimmed: &str, section: PlanSection) -> bool {
+    if trimmed.starts_with('#') {
+        return false;
+    }
+    let label = trimmed.trim_end_matches(':').trim();
+    match section {
+        PlanSection::Summary => label.eq_ignore_ascii_case("summary"),
+        PlanSection::Scope => label.eq_ignore_ascii_case("scope"),
+        PlanSection::Implementation => {
+            label.eq_ignore_ascii_case("implementation steps") || label.eq_ignore_ascii_case("steps")
+        }
+        PlanSection::Validation => {
+            label.eq_ignore_ascii_case("validation") || label.eq_ignore_ascii_case("test cases and validation")
+        }
+        PlanSection::Assumptions => {
+            label.eq_ignore_ascii_case("assumptions") || label.eq_ignore_ascii_case("assumptions and defaults")
+        }
+        PlanSection::NonTracker => {
+            label.eq_ignore_ascii_case("expected outcomes")
+                || label.eq_ignore_ascii_case("dependencies and prerequisites")
+                || label.eq_ignore_ascii_case("repository facts checked")
+        }
+    }
+}
+
 fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
     let mut in_implementation = false;
     let mut saw_implementation = false;
@@ -107,8 +135,12 @@ fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
 
     for line in plan.raw_content.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            if let Some(section) = plan_section(line) {
+        let section = plan_section(line);
+        let is_heading = trimmed.starts_with('#');
+        let is_section_marker = is_heading || section.is_some_and(|section| is_bare_section_label(trimmed, section));
+
+        if is_section_marker {
+            if let Some(section) = section {
                 match section {
                     PlanSection::Summary => {
                         in_implementation = false;
@@ -118,6 +150,7 @@ fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
                     PlanSection::Scope | PlanSection::NonTracker => {
                         in_implementation = false;
                         in_non_tracker_section = true;
+                        compact_after_summary = false;
                     }
                     PlanSection::Implementation => {
                         in_implementation = true;
@@ -462,9 +495,11 @@ mod tests {
 
     #[test]
     fn repeated_plan_steps_are_deduplicated_in_order() {
+        // Dedup applies to implementation steps (named phases or sparse after
+        // Summary). Unknown `## Phase N` headings stay non-tracker context.
         let plan = PlanContent::from_markdown(
             "Launch plan".to_string(),
-            "Summary\nImprove the runtime.\n\n## Phase 1\n1. Inspect the runtime\n2. Apply the fix\n\n## Phase 2\n1. inspect   the runtime\n[x] Verify the fix\n[x] APPLY THE FIX",
+            "## Summary\nImprove the runtime.\n\n## Implementation Steps\n1. Inspect the runtime\n2. Apply the fix\n1. inspect   the runtime\n[x] Verify the fix\n[x] APPLY THE FIX",
             None,
         );
 

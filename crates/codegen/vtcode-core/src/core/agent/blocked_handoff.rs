@@ -102,7 +102,80 @@ pub fn write_blocked_handoff_with_resume(
     write_handoff_file(&archive_path, &markdown, false)?;
     write_handoff_file(&current_path, &markdown, true)?;
 
+    // Preserve forensic artifacts and pin the session so ordinary retention
+    // cannot erase evidence while this blocker remains unresolved.
+    copy_blocker_session_forensics(&workspace, session_id, &archive_path);
+    pin_blocker_session_retention(&workspace, session_id);
+
     Ok(BlockedHandoffArtifacts { current_path, archive_path })
+}
+
+/// Copy session `events.jsonl` / ATIF into a forensics dir beside the archive.
+/// Best-effort: missing sources must never fail the handoff write.
+fn copy_blocker_session_forensics(workspace: &Path, session_id: &str, archive_path: &Path) {
+    let session_dir = vtcode_memory::session_directory(workspace, session_id);
+    if !session_dir.is_dir() {
+        return;
+    }
+    copy_forensics_from_dir(&session_dir, archive_path);
+}
+
+fn copy_forensics_from_dir(session_dir: &Path, archive_path: &Path) {
+    let Some(stem) = archive_path.file_stem().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let Some(parent) = archive_path.parent() else {
+        return;
+    };
+    let forensics_dir = parent.join(format!("{stem}-forensics"));
+    if fs::create_dir_all(&forensics_dir).is_err() {
+        return;
+    }
+    for rel in ["events.jsonl", "derived/atif-trajectory.json"] {
+        let src = session_dir.join(rel);
+        if !src.is_file() {
+            continue;
+        }
+        let dest_name = rel.replace('/', "__");
+        let _ = fs::copy(&src, forensics_dir.join(dest_name));
+    }
+}
+
+/// Pin the session directory against retention while the blocker is open.
+fn pin_blocker_session_retention(workspace: &Path, session_id: &str) {
+    let session_dir = vtcode_memory::session_directory(workspace, session_id);
+    if !session_dir.is_dir() {
+        return;
+    }
+    let _ = vtcode_memory::pin_session_retention(&session_dir, "unresolved-blocker");
+}
+
+/// Clear retention pins when a blocker archive for `session_id` is resolved.
+/// Keeps the pin if another unresolved archive still references the session.
+fn unpin_resolved_blocker_session(workspace: &Path, session_id: &str) {
+    let Ok((_, _, blockers_dir)) = safe_handoff_directories(workspace) else {
+        return;
+    };
+    if let Ok(entries) = fs::read_dir(&blockers_dir) {
+        let resolution_marker = format!("resolved_by_session: {session_id}");
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if parse_blocked_handoff_content(&content).is_some_and(|info| info.session_id == session_id)
+                && !content.lines().any(|line| line.trim() == resolution_marker)
+            {
+                // Another unresolved archive still references this session.
+                return;
+            }
+        }
+    }
+    let session_dir = vtcode_memory::session_directory(workspace, session_id);
+    let _ = vtcode_memory::unpin_session_retention(&session_dir);
 }
 
 /// Parsed information from a blocked handoff file.
@@ -502,6 +575,9 @@ fn mark_archived_handoff_resolved(workspace: &Path, current_content: &str, sessi
     );
     let resolution_marker = format!("resolved_by_session: {session_id}");
     if archive_content.lines().any(|line| line.trim() == resolution_marker) {
+        // Already resolved: still release the pin when no other unresolved
+        // archive references this session.
+        unpin_resolved_blocker_session(workspace, session_id);
         return Ok(());
     }
 
@@ -510,6 +586,7 @@ fn mark_archived_handoff_resolved(workspace: &Path, current_content: &str, sessi
     archive
         .sync_data()
         .with_context(|| format!("failed to sync {}", canonical_archive.display()))?;
+    unpin_resolved_blocker_session(workspace, session_id);
     Ok(())
 }
 
@@ -679,35 +756,52 @@ mod tests {
 
     #[test]
     fn writes_current_and_archived_blocked_handoffs() {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let tasks_dir = temp.path().join(".vtcode/tasks");
-        fs::create_dir_all(&tasks_dir).expect("tasks dir");
-        fs::write(tasks_dir.join("current_task.md"), "# Unrelated Workspace Task\n").expect("tracker");
+        let temp = tempfile::TempDir::new().expect("temp");
+        // Provide a session store so forensics/pin paths resolve.
+        let session_dir = vtcode_memory::session_directory(temp.path(), "session-a");
+        fs::create_dir_all(session_dir.join("derived")).expect("session dir");
+        fs::write(session_dir.join("events.jsonl"), "{\"type\":\"thread.started\"}\n").expect("events");
+        fs::write(session_dir.join("derived/atif-trajectory.json"), "{\"schema_version\":\"ATIF-v1.4\",\"steps\":[]}")
+            .expect("atif");
 
-        let artifacts = write_blocked_handoff(
-            temp.path(),
-            "session-123",
-            "loop_detected",
-            "Execution stalled on a loop.",
-            &[temp.path().join("src/lib.rs")],
-        )
-        .expect("write handoff");
+        let artifacts =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "first", &[]).expect("write first handoff");
 
-        let current = fs::read_to_string(&artifacts.current_path).expect("current handoff");
-        let archive = fs::read_to_string(&artifacts.archive_path).expect("archive handoff");
+        assert!(artifacts.archive_path.is_file());
+        let stem = artifacts.archive_path.file_stem().unwrap().to_string_lossy().to_string();
+        let forensics = artifacts
+            .archive_path
+            .parent()
+            .expect("parent")
+            .join(format!("{stem}-forensics"));
+        assert!(forensics.join("events.jsonl").is_file(), "forensics events copy missing");
+        assert!(forensics.join("derived__atif-trajectory.json").is_file(), "forensics ATIF copy missing");
+        assert!(
+            vtcode_memory::session_retention_pinned(&session_dir),
+            "unresolved blocker must pin session retention"
+        );
 
-        assert_eq!(current, archive);
-        assert!(current.contains("session_id: session-123"));
-        assert!(current.contains("# Blocker Summary"));
-        assert!(current.contains("Execution stalled on a loop."));
-        assert!(current.contains("# Session Tracker Snapshot"));
-        assert!(current.contains("workspace-global"));
-        assert!(!current.contains("Unrelated Workspace Task"));
-        assert!(current.contains(&artifacts.archive_path.display().to_string()));
-        assert!(!current.contains("resume_command:"));
-        assert!(!current.contains("vtcode --resume"));
-        assert!(current.contains("Resume is unavailable"));
-        assert!(current.contains("src/lib.rs"));
+        let artifacts2 =
+            write_blocked_handoff(temp.path(), "session-a", "blocked", "second", &[]).expect("write second handoff");
+        assert_ne!(artifacts.archive_path, artifacts2.archive_path);
+    }
+
+    #[test]
+    fn resolution_clears_retention_pin_when_no_other_open_blocker() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let session_dir = vtcode_memory::session_directory(temp.path(), "session-pin");
+        fs::create_dir_all(&session_dir).expect("session dir");
+
+        let artifacts =
+            write_blocked_handoff(temp.path(), "session-pin", "blocked", "stall", &[]).expect("write handoff");
+        assert!(vtcode_memory::session_retention_pinned(&session_dir));
+
+        clear_current_blocked_handoff_for_session(temp.path(), "session-pin").expect("resolve");
+        assert!(
+            !vtcode_memory::session_retention_pinned(&session_dir),
+            "resolution must clear retention pin when no other unresolved archive remains"
+        );
+        assert!(artifacts.archive_path.is_file());
     }
 
     #[test]

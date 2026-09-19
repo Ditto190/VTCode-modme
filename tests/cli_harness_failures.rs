@@ -62,7 +62,7 @@ fn unknown_positional_token_fails_without_forwarding_prompt_to_llm() {
         .expect("failed to mark workspace initialized");
 
     let mut cmd = base_command(&harness);
-    let _argument = cmd.arg("hellp");
+    let _argument = cmd.arg("--").arg("hellp");
 
     let _assertion = cmd.assert().failure().stderr(
         predicate::str::contains("invalid value")
