@@ -468,16 +468,20 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 None
             };
             // Planning-blocked resume: auto-queue plan continuation when the
-            // blocked-handoff summary is recoverable and no plan is approval-ready.
+            // blocked-handoff summary is planning-related and recoverable, and
+            // no plan is approval-ready. Require planning context so long
+            // diagnostic summaries that merely quote "budget exhausted" cannot
+            // trigger plan auto-queue.
             let resume_blocked_summary =
                 vtcode_core::core::agent::blocked_handoff::read_current_blocked_handoff(config.workspace.as_path())
                     .map(|info| info.blocker_summary);
             let planning_resume = auto_continue_enabled
                 && cross_turn_turns > 0
                 && tool_registry.is_planning_active()
-                && resume_blocked_summary
-                    .as_deref()
-                    .is_some_and(tracker_continue::plan_mode_recoverable_block);
+                && resume_blocked_summary.as_deref().is_some_and(|summary| {
+                    let lower = summary.to_ascii_lowercase();
+                    lower.contains("planning") && tracker_continue::plan_mode_recoverable_block(summary)
+                });
             if planning_resume {
                 let plan_state = tool_registry.planning_workflow_state();
                 let plan_ready =
@@ -505,11 +509,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         }
                     }
                 }
-            } else if tracker_continue::should_queue_tracker_resume_continuation(
-                auto_continue_enabled,
-                cross_turn_turns,
-                incomplete.as_deref(),
-            ) {
+            } else if !tool_registry.is_planning_active()
+                && tracker_continue::should_queue_tracker_resume_continuation(
+                    auto_continue_enabled,
+                    cross_turn_turns,
+                    incomplete.as_deref(),
+                )
+            {
                 let incomplete = incomplete.unwrap_or_default();
                 // Resume with open TODO/tracker steps: auto-queue one continuation
                 // turn instead of waiting for the user to type continue.
@@ -1708,6 +1714,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         vtcode_core::core::agent::completion::tracker_final_text_is_safety_handoff(
                             final_text.as_deref().unwrap_or(""),
                         );
+                    let final_text_requires_user_input =
+                        vtcode_core::core::agent::completion::tracker_final_text_requires_user_input(
+                            final_text.as_deref().unwrap_or(""),
+                        );
                     let should_queue = tracker_continue::should_queue_tracker_auto_continue(
                         tracker_kill_switch,
                         planning_active,
@@ -1717,6 +1727,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         incomplete.as_deref(),
                         max_turns,
                         final_text_is_safety_handoff,
+                        final_text_requires_user_input,
                     );
                     // Plan-mode outer auto-continue: only recoverable *blocked*
                     // planning ends (budget/safety-cap/tool-free recovery) queue

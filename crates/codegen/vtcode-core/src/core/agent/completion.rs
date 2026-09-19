@@ -5,31 +5,17 @@ use crate::llm::provider::MessageRole;
 /// not be auto-continued, even if `task_tracker` still has incomplete steps.
 ///
 /// Shared by the binary outer-loop Completed queue and AgentRunner status
-/// continuation so both surfaces use the same vocabulary. Budget-like
-/// "blocked by turn budget" phrasing is **not** a handoff.
+/// continuation so both surfaces use the same vocabulary. Safety/policy
+/// denials are evaluated first so a recap that mentions both a budget and a
+/// policy denial still counts as a handoff. Pure budget/recovery recaps are
+/// not handoffs (outer/in-turn recoverable classifiers treat those as continue).
 pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     if lower.trim().is_empty() {
         return false;
     }
-    // Budget/recovery phrasing is never a user handoff — including tool-call /
-    // tool-loop budgets that previously fell through as policy denials.
-    let budget_like = lower.contains("turn budget")
-        || lower.contains("preview budget")
-        || lower.contains("wall clock")
-        || lower.contains("safety cap")
-        || lower.contains("recovery fallback")
-        || lower.contains("tool budget")
-        || lower.contains("tool loop")
-        || lower.contains("tool-call budget")
-        || lower.contains("read cap")
-        || lower.contains("budget exhausted")
-        || lower.contains("per-turn tool")
-        || lower.contains("max tool");
-    if budget_like {
-        return false;
-    }
-    lower.contains("permission denied")
+    // True handoffs win even when the text also mentions a budget.
+    if lower.contains("permission denied")
         || lower.contains("access denied")
         || lower.contains("safety fuse")
         || lower.contains("tool-call safety fuse")
@@ -42,8 +28,67 @@ pub fn tracker_final_text_is_safety_handoff(text: &str) -> bool {
         || lower.contains("denied by workspace tool policy")
         || lower.contains("denied by tool policy")
         || lower.contains("execution denied by policy")
-        // Narrow former bare `"tool policy"` over-match: only explicit denials.
         || lower.contains("blocked by tool policy")
+    {
+        return true;
+    }
+    // Pure budget/recovery recaps ("blocked by turn budget", "tool loop
+    // budget exhausted", …) are not user handoffs.
+    false
+}
+
+/// True when final assistant text asks the user for a decision/confirmation.
+///
+/// Shared by outer tracker auto-queue and in-turn continuation so Completed
+/// turns that end with a genuine question are not auto-continued past the ask.
+pub fn tracker_final_text_requires_user_input(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.ends_with('?') {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    const STRONG: &[&str] = &[
+        "please provide",
+        "please confirm",
+        "please approve",
+        "need your approval",
+        "need your permission",
+        "need your decision",
+        "need you to choose",
+        "need you to confirm",
+        "waiting for your",
+        "awaiting your",
+        "your choice",
+        "your decision",
+        "need approval",
+        "requires approval",
+        "approval is required",
+        "need permission",
+        "requires permission",
+        "permission is required",
+        "grant permission",
+        "authorize this",
+        "need a decision",
+        "need clarification",
+        "waiting for input",
+        "awaiting input",
+        "waiting on you",
+        "how should i proceed",
+        "what should i do",
+        "what would you like",
+        "how would you like",
+        "do you want me to",
+    ];
+    const CLAUSE_START: &[&str] = &["could you ", "can you ", "shall i ", "should i "];
+    if STRONG.iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    CLAUSE_START
+        .iter()
+        .any(|p| lower.trim_start().starts_with(p) || lower.contains(&format!("\n{p}")))
 }
 
 /// Checks if the agent's response is a candidate for completion handling.
@@ -264,6 +309,23 @@ mod tests {
         ));
         assert!(!tracker_final_text_is_safety_handoff("Implemented patch apply; verification passed."));
         assert!(!tracker_final_text_is_safety_handoff(""));
+        // Policy denial wins even when a budget is also mentioned.
+        assert!(tracker_final_text_is_safety_handoff("Tool budget exhausted; denied by policy for exec_command."));
+        assert!(tracker_final_text_is_safety_handoff("Turn budget hit, then permission denied for the write."));
+    }
+
+    #[test]
+    fn tracker_final_text_requires_user_input_vocabulary() {
+        assert!(tracker_final_text_requires_user_input("Step 1 done. Which branch should I use for step 2?"));
+        assert!(tracker_final_text_requires_user_input(
+            "## Status\nPlease confirm whether to use the stable schema."
+        ));
+        assert!(tracker_final_text_requires_user_input("Can you confirm the migration path before I edit."));
+        assert!(!tracker_final_text_requires_user_input(
+            "## Status\nNext we need your workspace path in CONFIG; patching the struct now."
+        ));
+        assert!(!tracker_final_text_requires_user_input("Blocked by turn budget. Next step: read helpers.rs."));
+        assert!(!tracker_final_text_requires_user_input(""));
     }
 
     #[test]

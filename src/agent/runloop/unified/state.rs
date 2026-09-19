@@ -634,13 +634,14 @@ impl SessionStats {
     }
 
     /// Observe the live completed checklist count. Returns `true` when progress
-    /// increased (the cross-turn auto-continue episode budget should reset).
+    /// increased **or** the checklist was replaced with a lower completed
+    /// count (tracker recreate) — either restores the auto-continue episode.
     pub(crate) fn note_tracker_completed_count(&mut self, completed: u32) -> bool {
-        let progressed = completed > self.tracker_completed_count_last;
-        if completed >= self.tracker_completed_count_last {
+        let changed = completed != self.tracker_completed_count_last;
+        if changed {
             self.tracker_completed_count_last = completed;
         }
-        progressed
+        changed
     }
 
     /// Record one plan-mode auto-continue turn against its own budget.

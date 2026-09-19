@@ -153,7 +153,9 @@ pub(crate) fn tracker_probe_outcome(payload: &serde_json::Value) -> TrackerProbe
         return TrackerProbeOutcome::Unavailable;
     };
     let Some(raw_items) = checklist.get("items").and_then(serde_json::Value::as_array) else {
-        return TrackerProbeOutcome::Complete;
+        // Malformed checklist without items: do not treat as Complete (that
+        // would clear caches and stop auto-continue on a broken probe shape).
+        return TrackerProbeOutcome::Unavailable;
     };
     let items: Vec<String> = raw_items
         .iter()
@@ -345,6 +347,8 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
 /// `final_text_is_safety_handoff` is true when the turn's final assistant
 /// text is a permission/policy/safety handoff — those never auto-queue, even
 /// on `Completed` ends with incomplete tracker work.
+/// `final_text_requires_user_input` is true when the final text asks the user
+/// a genuine question/decision — Completed ends must not auto-queue past the ask.
 pub(crate) fn should_queue_tracker_auto_continue(
     auto_continue_enabled: bool,
     planning_active: bool,
@@ -354,11 +358,12 @@ pub(crate) fn should_queue_tracker_auto_continue(
     incomplete_items: Option<&[String]>,
     cross_turn_turns: u8,
     final_text_is_safety_handoff: bool,
+    final_text_requires_user_input: bool,
 ) -> bool {
     if !auto_continue_enabled || planning_active || cross_turn_turns == 0 {
         return false;
     }
-    if final_text_is_safety_handoff {
+    if final_text_is_safety_handoff || final_text_requires_user_input {
         return false;
     }
     if incomplete_items.is_none_or(|items| items.is_empty()) {
@@ -416,6 +421,24 @@ pub(crate) fn should_queue_plan_mode_auto_continue(
 /// handoffs stay denied after the allow-list misses.
 pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
     let lower = reason.to_ascii_lowercase();
+    // True handoffs deny even when recovery/budget tokens are also present
+    // (compound reasons must not auto-queue past a permission/interview wait).
+    if lower.contains("request_user_input")
+        || lower.contains("permission")
+        || lower.contains("user input")
+        || lower.contains("awaiting")
+        || lower.contains("interview")
+        || lower.contains("attempted more tool calls")
+        || lower.contains("final tool-free synthesis pass")
+        || lower.contains("verification is still pending")
+        || lower.contains("compaction could not reduce")
+        || lower.contains("unmatched tool result")
+    {
+        return false;
+    }
+    // Production recovery constants (including PLANNING_COMPLETED_TURN_FALLBACK_REASON)
+    // are recoverable. Deny tokens like "planning turn ended" / "approval-ready
+    // plan" must not shadow "recovery fallback".
     if lower.contains("recovery fallback")
         || lower.contains("recovery could not confirm")
         || lower.contains("recovery exhausted")
@@ -433,19 +456,8 @@ pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
     {
         return true;
     }
-    if lower.contains("request_user_input")
-        || lower.contains("permission")
-        || lower.contains("user input")
-        || lower.contains("awaiting")
-        || lower.contains("interview")
-        || lower.contains("attempted more tool calls")
-        || lower.contains("final tool-free synthesis pass")
-        || lower.contains("verification is still pending")
-        || lower.contains("compaction could not reduce")
-        || lower.contains("unmatched tool result")
-        || lower.contains("planning turn ended")
-        || lower.contains("approval-ready plan")
-    {
+    // Remaining planning handoffs (interview/approval without recovery tokens).
+    if lower.contains("planning turn ended") || lower.contains("approval-ready plan") {
         return false;
     }
     false
@@ -538,7 +550,9 @@ mod tracker_continue_tests {
             8
         ));
         // Planning handoff / verification / blocked-without-reason stay off.
-        assert!(!should_queue_plan_mode_auto_continue(
+        // Production PLANNING_COMPLETED_TURN_FALLBACK_REASON is recoverable
+        // (allow-list after true-handoff deny) so planning auto-continues.
+        assert!(should_queue_plan_mode_auto_continue(
             true,
             true,
             false,
@@ -546,6 +560,16 @@ mod tracker_continue_tests {
             Some(
                 "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
             ),
+            false,
+            8
+        ));
+        // Compound permission+recovery stays denied.
+        assert!(!should_queue_plan_mode_auto_continue(
+            true,
+            true,
+            false,
+            false,
+            Some("recovery fallback; permission denied for exec_command"),
             false,
             8
         ));
@@ -586,6 +610,9 @@ mod tracker_continue_tests {
         assert!(!plan_mode_recoverable_block(
             "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."
         ));
+        // Compound recovery+permission must deny (true handoff first).
+        assert!(!plan_mode_recoverable_block("recovery fallback after permission denied for exec_command"));
+        assert!(!plan_mode_recoverable_block("tool budget exhausted while awaiting user approval"));
     }
 
     #[test]
@@ -649,8 +676,41 @@ mod tracker_continue_tests {
     #[test]
     fn outer_queue_gate_blocks_unknown_and_contract_violation() {
         let incomplete = ["#2 change (pending)".to_string()];
-        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8, false));
-        assert!(!should_queue_tracker_auto_continue(true, false, false, None, false, Some(&incomplete), 8, false));
+        // Completed + incomplete tracker → queue when not a handoff/question.
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            false,
+            false
+        ));
+        // Completed + genuine user question → do not queue past the ask.
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            false,
+            true
+        ));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            false,
+            false
+        ));
         assert!(!should_queue_tracker_auto_continue(
             true,
             false,
@@ -659,6 +719,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
         assert!(should_queue_tracker_auto_continue(
@@ -671,6 +732,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
     }
@@ -678,11 +740,51 @@ mod tracker_continue_tests {
     #[test]
     fn outer_queue_gate_respects_planning_verification_and_budget() {
         let incomplete = ["#2 change (pending)".to_string()];
-        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8, false));
-        assert!(!should_queue_tracker_auto_continue(false, false, true, None, false, Some(&incomplete), 8, false));
-        assert!(!should_queue_tracker_auto_continue(true, true, true, None, false, Some(&incomplete), 8, false));
-        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8, false));
-        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 0, false));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            false,
+            false
+        ));
+        assert!(!should_queue_tracker_auto_continue(
+            false,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            false,
+            false
+        ));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            true,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            false,
+            false
+        ));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8, false, false));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            0,
+            false,
+            false
+        ));
         assert!(!should_queue_tracker_auto_continue(
             true,
             false,
@@ -692,6 +794,7 @@ mod tracker_continue_tests {
             Some(&incomplete),
             8,
             true,
+            false,
             // safety-handoff final text
         ));
         assert!(!should_queue_tracker_auto_continue(
@@ -702,6 +805,7 @@ mod tracker_continue_tests {
             true,
             Some(&incomplete),
             8,
+            false,
             false
         ));
         assert!(should_queue_tracker_auto_continue(
@@ -712,6 +816,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
         assert!(should_queue_tracker_auto_continue(
@@ -724,6 +829,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
         assert!(should_queue_tracker_auto_continue(
@@ -736,6 +842,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
         assert!(!should_queue_tracker_auto_continue(
@@ -746,6 +853,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
         assert!(!should_queue_tracker_auto_continue(
@@ -756,6 +864,7 @@ mod tracker_continue_tests {
             false,
             Some(&incomplete),
             8,
+            false,
             false
         ));
     }
@@ -816,6 +925,7 @@ mod tracker_continue_tests {
         assert!(!plan_mode_recoverable_block(
             "Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."
         ));
+        assert!(!plan_mode_recoverable_block("recovery fallback; interview waiting on user decision"));
     }
 
     #[test]
@@ -824,7 +934,7 @@ mod tracker_continue_tests {
         assert!(stats.record_tracker_continuation_turn_with_limit(32));
         assert!(stats.record_tracker_continuation_turn_with_limit(32));
         assert_eq!(stats.tracker_continuation_turns(), 2);
-        // No progress → no reset.
+        // No first observation yet — initial 0 → 0 is not progress.
         assert!(!stats.note_tracker_completed_count(0));
         assert_eq!(stats.tracker_continuation_turns(), 2);
         // Progress → reset episode budget.
@@ -833,6 +943,11 @@ mod tracker_continue_tests {
         assert_eq!(stats.tracker_continuation_turns(), 0);
         // Same count is not further progress.
         assert!(!stats.note_tracker_completed_count(1));
+        // Tracker recreate with a lower completed count still resets the episode.
+        assert!(stats.record_tracker_continuation_turn_with_limit(32));
+        assert!(stats.note_tracker_completed_count(0));
+        stats.reset_tracker_continuation_budget();
+        assert_eq!(stats.tracker_continuation_turns(), 0);
     }
 
     #[test]
@@ -865,6 +980,11 @@ mod tracker_continue_tests {
         assert!(matches!(tracker_probe_outcome(&incomplete), TrackerProbeOutcome::Incomplete(_)));
         assert_eq!(tracker_probe_outcome(&serde_json::json!({"status": "empty"})), TrackerProbeOutcome::Complete);
         assert_eq!(tracker_probe_outcome(&serde_json::json!({"no_status": true})), TrackerProbeOutcome::Unavailable);
+        // Checklist without items is malformed → Unavailable (keep cache), not Complete.
+        assert_eq!(
+            tracker_probe_outcome(&serde_json::json!({"status": "ok", "checklist": {}})),
+            TrackerProbeOutcome::Unavailable
+        );
     }
 
     #[test]
