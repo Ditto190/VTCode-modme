@@ -761,14 +761,14 @@ impl HarnessTurnState {
         }
     }
 
-    pub(crate) fn note_incomplete_tracker_items(&mut self, items: Option<Vec<String>>) {
-        if items.is_some() {
-            self.incomplete_tracker_items_cache = items;
-        }
-    }
-
-    pub(crate) fn incomplete_tracker_items_cached(&self) -> Option<&[String]> {
-        self.incomplete_tracker_items_cache.as_deref()
+    pub(crate) fn apply_tracker_probe(
+        &mut self,
+        probe: crate::agent::runloop::unified::turn::tool_outcomes::helpers::TrackerProbeOutcome,
+    ) -> Option<&[String]> {
+        crate::agent::runloop::unified::turn::tool_outcomes::helpers::apply_tracker_probe_to_cache(
+            &mut self.incomplete_tracker_items_cache,
+            probe,
+        )
     }
 
     pub(crate) fn has_tool_call_budget(&self) -> bool {

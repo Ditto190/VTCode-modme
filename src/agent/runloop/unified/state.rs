@@ -619,16 +619,18 @@ impl SessionStats {
         self.tracker_continuation_turns = 0;
     }
 
-    /// Cache incomplete tracker items when a live probe succeeds.
-    pub(crate) fn note_incomplete_tracker_items(&mut self, items: Option<Vec<String>>) {
-        if items.is_some() {
-            self.last_incomplete_tracker_items = items;
-        }
-    }
-
-    /// Last successfully observed incomplete tracker items (progress cache).
-    pub(crate) fn incomplete_tracker_items_cached(&self) -> Option<&[String]> {
-        self.last_incomplete_tracker_items.as_deref()
+    /// Apply a live tracker probe to the incomplete-items cache.
+    ///
+    /// Successful `Complete` probes **clear** the cache so auto-continue stops
+    /// after the tracker finishes. `Unavailable` keeps the last value.
+    pub(crate) fn apply_tracker_probe(
+        &mut self,
+        probe: crate::agent::runloop::unified::turn::tool_outcomes::helpers::TrackerProbeOutcome,
+    ) -> Option<&[String]> {
+        crate::agent::runloop::unified::turn::tool_outcomes::helpers::apply_tracker_probe_to_cache(
+            &mut self.last_incomplete_tracker_items,
+            probe,
+        )
     }
 
     /// Observe the live completed checklist count. Returns `true` when progress

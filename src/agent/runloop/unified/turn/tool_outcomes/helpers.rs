@@ -129,20 +129,34 @@ pub(crate) fn tracker_cross_turn_turns(vt_cfg: Option<&vtcode_core::config::load
 /// Cap on incomplete tracker items listed in continuation prompts.
 const TRACKER_CONTINUE_ITEM_CAP: usize = 4;
 
-/// Parse a `task_tracker` `action=list` payload into incomplete step labels.
-///
-/// Returns `None` when the tracker is empty/absent or every step is completed.
-pub(crate) fn parse_incomplete_tracker_items(payload: &serde_json::Value) -> Option<Vec<String>> {
-    let status = payload.get("status").and_then(serde_json::Value::as_str)?;
+/// Outcome of a live `task_tracker` probe, distinguishing completion from
+/// probe failure so caches do not retain stale incomplete steps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TrackerProbeOutcome {
+    /// Checklist exists and at least one step is not `completed`.
+    Incomplete(Vec<String>),
+    /// Tracker is empty or every step is `completed` — authoritative clear.
+    Complete,
+    /// Tool missing / execute failed / malformed payload — keep last cache.
+    Unavailable,
+}
+
+/// Classify a `task_tracker` `action=list` payload for cache/gate decisions.
+pub(crate) fn tracker_probe_outcome(payload: &serde_json::Value) -> TrackerProbeOutcome {
+    let Some(status) = payload.get("status").and_then(serde_json::Value::as_str) else {
+        return TrackerProbeOutcome::Unavailable;
+    };
     if status == "empty" {
-        return None;
+        return TrackerProbeOutcome::Complete;
     }
-    let checklist = payload.get("checklist")?;
-    let items: Vec<String> = checklist
-        .get("items")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
+    let Some(checklist) = payload.get("checklist") else {
+        return TrackerProbeOutcome::Unavailable;
+    };
+    let Some(raw_items) = checklist.get("items").and_then(serde_json::Value::as_array) else {
+        return TrackerProbeOutcome::Complete;
+    };
+    let items: Vec<String> = raw_items
+        .iter()
         .filter(|item| item.get("status").and_then(serde_json::Value::as_str) != Some("completed"))
         .filter_map(|item| {
             let description = item.get("description").and_then(serde_json::Value::as_str)?;
@@ -156,9 +170,22 @@ pub(crate) fn parse_incomplete_tracker_items(payload: &serde_json::Value) -> Opt
         .take(TRACKER_CONTINUE_ITEM_CAP)
         .collect();
     if items.is_empty() {
-        return None;
+        TrackerProbeOutcome::Complete
+    } else {
+        TrackerProbeOutcome::Incomplete(items)
     }
-    Some(items)
+}
+
+/// Parse incomplete step labels from a `task_tracker` list payload.
+///
+/// Thin wrapper over [`tracker_probe_outcome`] for tests and call sites that
+/// only need the incomplete `Option` shape.
+#[cfg(test)]
+pub(crate) fn parse_incomplete_tracker_items(payload: &serde_json::Value) -> Option<Vec<String>> {
+    match tracker_probe_outcome(payload) {
+        TrackerProbeOutcome::Incomplete(items) => Some(items),
+        TrackerProbeOutcome::Complete | TrackerProbeOutcome::Unavailable => None,
+    }
 }
 
 /// Count completed checklist items in a `task_tracker` `action=list` payload.
@@ -182,16 +209,52 @@ pub(crate) fn parse_tracker_completed_count(payload: &serde_json::Value) -> u32 
         .count() as u32
 }
 
+/// Apply a live probe to an incomplete-items cache.
+///
+/// `Incomplete` replaces the cache; `Complete` **clears** it; `Unavailable`
+/// leaves the previous value so transient probe failures do not drop
+/// auto-continue. Returns the effective incomplete slice after the update.
+pub(crate) fn apply_tracker_probe_to_cache(
+    cache: &mut Option<Vec<String>>,
+    probe: TrackerProbeOutcome,
+) -> Option<&[String]> {
+    match probe {
+        TrackerProbeOutcome::Incomplete(items) => {
+            *cache = Some(items);
+        }
+        TrackerProbeOutcome::Complete => {
+            *cache = None;
+        }
+        TrackerProbeOutcome::Unavailable => {}
+    }
+    cache.as_deref()
+}
+
 /// Load incomplete `task_tracker` step descriptions via the live tool registry.
 ///
-/// Returns `None` when the tracker is absent or empty; `Some(items)` when a
-/// checklist exists and at least one step is not `completed`.
+/// Returns `None` when the tracker is absent, empty, fully completed, or the
+/// probe fails. Prefer [`probe_tracker_incomplete`] when a cache must
+/// distinguish complete from unavailable.
 pub(crate) async fn incomplete_tracker_items(
     tool_registry: &vtcode_core::tools::registry::ToolRegistry,
 ) -> Option<Vec<String>> {
-    let tool = tool_registry.get_tool(vtcode_core::config::constants::tools::TASK_TRACKER)?;
-    let payload = tool.execute(serde_json::json!({ "action": "list" })).await.ok()?;
-    parse_incomplete_tracker_items(&payload)
+    match probe_tracker_incomplete(tool_registry).await {
+        TrackerProbeOutcome::Incomplete(items) => Some(items),
+        TrackerProbeOutcome::Complete | TrackerProbeOutcome::Unavailable => None,
+    }
+}
+
+/// Live tracker probe that distinguishes complete from unavailable.
+pub(crate) async fn probe_tracker_incomplete(
+    tool_registry: &vtcode_core::tools::registry::ToolRegistry,
+) -> TrackerProbeOutcome {
+    let Some(tool) = tool_registry.get_tool(vtcode_core::config::constants::tools::TASK_TRACKER) else {
+        return TrackerProbeOutcome::Unavailable;
+    };
+    let Ok(payload) = tool.execute(serde_json::json!({ "action": "list" })).await else {
+        return TrackerProbeOutcome::Unavailable;
+    };
+    tracker_probe_outcome(&payload)
 }
 
 /// Live completed-item count for progress-reset. Returns `None` on probe failure.
@@ -770,11 +833,54 @@ mod tracker_continue_tests {
         assert_eq!(stats.tracker_continuation_turns(), 0);
         // Same count is not further progress.
         assert!(!stats.note_tracker_completed_count(1));
-        // Cached incomplete items survive live-probe failures.
-        stats.note_incomplete_tracker_items(Some(vec!["#2 change (pending)".to_string()]));
-        assert!(stats.incomplete_tracker_items_cached().is_some());
-        stats.note_incomplete_tracker_items(None);
-        assert!(stats.incomplete_tracker_items_cached().is_some());
+    }
+
+    #[test]
+    fn tracker_probe_cache_clears_on_complete_and_keeps_on_unavailable() {
+        let mut cache: Option<Vec<String>> = Some(vec!["#1 a (pending)".to_string()]);
+        // Complete is an authoritative clear.
+        let effective = apply_tracker_probe_to_cache(&mut cache, TrackerProbeOutcome::Complete);
+        assert!(effective.is_none());
+        assert!(cache.is_none());
+        // Incomplete replaces the cache.
+        let effective = apply_tracker_probe_to_cache(
+            &mut cache,
+            TrackerProbeOutcome::Incomplete(vec!["#2 b (in_progress)".to_string()]),
+        );
+        assert_eq!(effective, Some(["#2 b (in_progress)".to_string()].as_slice()));
+        // Unavailable keeps the last incomplete set.
+        let effective = apply_tracker_probe_to_cache(&mut cache, TrackerProbeOutcome::Unavailable);
+        assert_eq!(effective, Some(["#2 b (in_progress)".to_string()].as_slice()));
+        // Parse distinguishes complete vs incomplete vs unavailable shapes.
+        let complete = serde_json::json!({
+            "status": "ok",
+            "checklist": {"items": [{"index": 1, "description": "a", "status": "completed"}]}
+        });
+        assert_eq!(tracker_probe_outcome(&complete), TrackerProbeOutcome::Complete);
+        assert!(parse_incomplete_tracker_items(&complete).is_none());
+        let incomplete = serde_json::json!({
+            "status": "ok",
+            "checklist": {"items": [{"index": 1, "description": "a", "status": "pending"}]}
+        });
+        assert!(matches!(tracker_probe_outcome(&incomplete), TrackerProbeOutcome::Incomplete(_)));
+        assert_eq!(tracker_probe_outcome(&serde_json::json!({"status": "empty"})), TrackerProbeOutcome::Complete);
+        assert_eq!(tracker_probe_outcome(&serde_json::json!({"no_status": true})), TrackerProbeOutcome::Unavailable);
+    }
+
+    #[test]
+    fn session_stats_apply_tracker_probe_clears_stale_incomplete() {
+        let mut stats = crate::agent::runloop::unified::state::SessionStats::default();
+        let after_incomplete =
+            stats.apply_tracker_probe(TrackerProbeOutcome::Incomplete(vec!["#1 a (pending)".to_string()]));
+        assert_eq!(after_incomplete, Some(["#1 a (pending)".to_string()].as_slice()));
+        // Successful complete must clear — do not auto-continue after tracker finishes.
+        assert!(stats.apply_tracker_probe(TrackerProbeOutcome::Complete).is_none());
+        // Unavailable after a new incomplete keeps that incomplete set.
+        stats.apply_tracker_probe(TrackerProbeOutcome::Incomplete(vec!["#2 b (pending)".to_string()]));
+        assert_eq!(
+            stats.apply_tracker_probe(TrackerProbeOutcome::Unavailable),
+            Some(["#2 b (pending)".to_string()].as_slice())
+        );
     }
 
     #[test]

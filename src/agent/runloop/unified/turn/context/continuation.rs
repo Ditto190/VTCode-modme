@@ -284,7 +284,12 @@ pub(super) fn apply_tracker_continuation_override(
         || lower.contains("access denied")
         || lower.contains("requires manual intervention")
         || lower.contains("missing credentials")
-        || lower.contains("credentials are missing");
+        || lower.contains("credentials are missing")
+        || lower.contains("policy block")
+        || lower.contains("blocked by policy")
+        || lower.contains("denied by policy")
+        || lower.contains("denied by tool policy")
+        || lower.contains("denied by workspace tool policy");
     if explicit_safety_handoff {
         return decision;
     }

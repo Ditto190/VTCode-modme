@@ -684,24 +684,20 @@ impl<'a> TurnProcessingContext<'a> {
         // session). Completed-plan branches above stay terminal in-turn.
         // In-turn override is gated on `auto_continue_tracker` only —
         // `cross_turn_turns == 0` disables only the outer auto-queue.
-        let live_incomplete = if !continuation_decision.should_continue
+        // Complete probes clear the cache so auto-continue stops when the
+        // tracker finishes; Unavailable keeps the last known incomplete set.
+        let live_probe = if !continuation_decision.should_continue
             && proposed_plan.is_none()
             && !self.is_planning_active()
             && crate::agent::runloop::unified::turn::tool_outcomes::helpers::tracker_auto_continue_enabled(self.vt_cfg)
         {
-            crate::agent::runloop::unified::turn::tool_outcomes::helpers::incomplete_tracker_items(self.tool_registry)
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::probe_tracker_incomplete(self.tool_registry)
                 .await
         } else {
-            None
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::TrackerProbeOutcome::Unavailable
         };
-        if let Some(items) = live_incomplete.as_ref() {
-            self.harness_state.note_incomplete_tracker_items(Some(items.clone()));
-        }
-        let tracker_incomplete = live_incomplete.is_some()
-            || self
-                .harness_state
-                .incomplete_tracker_items_cached()
-                .is_some_and(|items| !items.is_empty());
+        let effective_incomplete = self.harness_state.apply_tracker_probe(live_probe);
+        let tracker_incomplete = effective_incomplete.is_some_and(|items| !items.is_empty());
         let continuation_decision = if !continuation_decision.should_continue
             && proposed_plan.is_none()
             && !self.is_planning_active()

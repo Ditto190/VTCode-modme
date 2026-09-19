@@ -1688,14 +1688,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         _ => None,
                     };
                     let incomplete = if tracker_kill_switch && !planning_active {
-                        let live = tracker_continue::incomplete_tracker_items(&tool_registry).await;
-                        session_stats.note_incomplete_tracker_items(live.clone());
-                        live.or_else(|| {
-                            session_stats
-                                .incomplete_tracker_items_cached()
-                                .filter(|items| !items.is_empty())
-                                .map(|items| items.to_vec())
-                        })
+                        let probe = tracker_continue::probe_tracker_incomplete(&tool_registry).await;
+                        // Complete clears the cache so auto-queue stops after tracker finishes.
+                        session_stats.apply_tracker_probe(probe).map(|items| items.to_vec())
                     } else {
                         None
                     };
