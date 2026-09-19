@@ -238,6 +238,9 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
 ///
 /// `auto_continue_enabled` is the raw kill-switch (do not pre-AND
 /// `planning_active` — this gate owns that check).
+/// `final_text_is_safety_handoff` is true when the turn's final assistant
+/// text is a permission/policy/safety handoff — those never auto-queue, even
+/// on `Completed` ends with incomplete tracker work.
 pub(crate) fn should_queue_tracker_auto_continue(
     auto_continue_enabled: bool,
     planning_active: bool,
@@ -246,8 +249,12 @@ pub(crate) fn should_queue_tracker_auto_continue(
     is_verification_block: bool,
     incomplete_items: Option<&[String]>,
     cross_turn_turns: u8,
+    final_text_is_safety_handoff: bool,
 ) -> bool {
     if !auto_continue_enabled || planning_active || cross_turn_turns == 0 {
+        return false;
+    }
+    if final_text_is_safety_handoff {
         return false;
     }
     if incomplete_items.is_none_or(|items| items.is_empty()) {
@@ -518,8 +525,8 @@ mod tracker_continue_tests {
     #[test]
     fn outer_queue_gate_blocks_unknown_and_contract_violation() {
         let incomplete = ["#2 change (pending)".to_string()];
-        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(true, false, false, None, false, Some(&incomplete), 8));
+        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, false, false, None, false, Some(&incomplete), 8, false));
         assert!(!should_queue_tracker_auto_continue(
             true,
             false,
@@ -527,7 +534,8 @@ mod tracker_continue_tests {
             Some("Recovery mode requested a final tool-free synthesis pass, but the model attempted more tool calls."),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(should_queue_tracker_auto_continue(
             true,
@@ -538,18 +546,30 @@ mod tracker_continue_tests {
             ),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
     }
 
     #[test]
     fn outer_queue_gate_respects_planning_verification_and_budget() {
         let incomplete = ["#2 change (pending)".to_string()];
-        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(false, false, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(true, true, true, None, false, Some(&incomplete), 8));
-        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8));
-        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 0));
+        assert!(should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(false, false, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, true, true, None, false, Some(&incomplete), 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8, false));
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, Some(&incomplete), 0, false));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            true,
+            None,
+            false,
+            Some(&incomplete),
+            8,
+            true,
+            // safety-handoff final text
+        ));
         assert!(!should_queue_tracker_auto_continue(
             true,
             false,
@@ -557,7 +577,8 @@ mod tracker_continue_tests {
             Some("pending verification; type continue"),
             true,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(should_queue_tracker_auto_continue(
             true,
@@ -566,7 +587,8 @@ mod tracker_continue_tests {
             Some("preview budget exhausted"),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(should_queue_tracker_auto_continue(
             true,
@@ -577,7 +599,8 @@ mod tracker_continue_tests {
             ),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(should_queue_tracker_auto_continue(
             true,
@@ -588,7 +611,8 @@ mod tracker_continue_tests {
             ),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(!should_queue_tracker_auto_continue(
             true,
@@ -597,7 +621,8 @@ mod tracker_continue_tests {
             Some("permission denied"),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
         assert!(!should_queue_tracker_auto_continue(
             true,
@@ -606,7 +631,8 @@ mod tracker_continue_tests {
             Some("unknown block reason"),
             false,
             Some(&incomplete),
-            8
+            8,
+            false
         ));
     }
 

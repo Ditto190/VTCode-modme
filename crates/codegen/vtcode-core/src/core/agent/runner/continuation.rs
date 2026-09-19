@@ -755,4 +755,12 @@ mod tests {
         let labels = controller.incomplete_tracker_labels().await.expect("labels");
         assert!(labels.is_empty(), "absent tracker must not invent incomplete work");
     }
+
+    #[test]
+    fn tracker_status_text_safety_handoff_shared_vocabulary() {
+        use crate::core::agent::completion::tracker_final_text_is_safety_handoff as handoff;
+        assert!(handoff("Permission denied for exec_command. Next step: retry after access is granted."));
+        assert!(handoff("I hit the tool-call safety fuse mid-verification; policy block."));
+        assert!(!handoff("## Status\nBlocked by turn budget. Next step: read design/diff.rs."));
+    }
 }

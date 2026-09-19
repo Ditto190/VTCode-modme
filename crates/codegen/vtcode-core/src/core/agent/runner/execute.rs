@@ -1244,28 +1244,33 @@ impl AgentRunner {
                         let idle_limit_hit = runtime.state.consecutive_idle_turns >= idle_limit;
                         let asks_user = response.content_text().contains('?');
                         if tracker_auto_continue && !idle_limit_hit && !asks_user {
-                            let incomplete = continuation_controller.incomplete_tracker_labels().await?;
-                            if !incomplete.is_empty() {
-                                let joined = incomplete.join(", ");
-                                let reason = format!("Task tracker is incomplete: {joined}.");
-                                if super::continuation::tracker_status_force_continue_eligible(
-                                    tracker_auto_continue,
-                                    idle_limit_hit,
-                                    asks_user,
-                                    &reason,
-                                ) {
-                                    let prompt = format!(
-                                        "Continue working. Do not stop yet. The task tracker still has incomplete steps: {joined}. \
-                                         Complete the remaining steps before finishing. Do not ask the user to resume."
-                                    );
-                                    self.runner_println(format_args!(
-                                        "[{}] {}: {}",
-                                        self.agent_type,
-                                        style("[TRACKER CONTINUE]").yellow().bold(),
-                                        reason
-                                    ));
-                                    runtime.state.add_user_message(prompt);
-                                    forced_continuation = true;
+                            let status_text = response.content_text();
+                            let safety_handoff =
+                                crate::core::agent::completion::tracker_final_text_is_safety_handoff(status_text);
+                            if !safety_handoff {
+                                let incomplete = continuation_controller.incomplete_tracker_labels().await?;
+                                if !incomplete.is_empty() {
+                                    let joined = incomplete.join(", ");
+                                    let reason = format!("Task tracker is incomplete: {joined}.");
+                                    if super::continuation::tracker_status_force_continue_eligible(
+                                        tracker_auto_continue,
+                                        idle_limit_hit,
+                                        asks_user,
+                                        &reason,
+                                    ) {
+                                        let prompt = format!(
+                                            "Continue working. Do not stop yet. The task tracker still has incomplete steps: {joined}. \
+                                             Complete the remaining steps before finishing. Do not ask the user to resume."
+                                        );
+                                        self.runner_println(format_args!(
+                                            "[{}] {}: {}",
+                                            self.agent_type,
+                                            style("[TRACKER CONTINUE]").yellow().bold(),
+                                            reason
+                                        ));
+                                        runtime.state.add_user_message(prompt);
+                                        forced_continuation = true;
+                                    }
                                 }
                             }
                         }

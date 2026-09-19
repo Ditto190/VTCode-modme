@@ -1655,6 +1655,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         None
                     };
                     let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
+                    let final_text = latest_assistant_result_text(&runtime.state.messages);
+                    let final_text_is_safety_handoff =
+                        vtcode_core::core::agent::completion::tracker_final_text_is_safety_handoff(
+                            final_text.as_deref().unwrap_or(""),
+                        );
                     let should_queue = tracker_continue::should_queue_tracker_auto_continue(
                         tracker_kill_switch,
                         planning_active,
@@ -1663,6 +1668,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         is_verification_block,
                         incomplete.as_deref(),
                         max_turns,
+                        final_text_is_safety_handoff,
                     );
                     // Plan-mode outer auto-continue: only recoverable *blocked*
                     // planning ends (budget/safety-cap/tool-free recovery) queue
