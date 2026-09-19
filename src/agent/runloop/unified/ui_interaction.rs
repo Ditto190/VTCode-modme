@@ -601,9 +601,7 @@ impl PlaceholderSpinner {
         restore_right: Option<String>,
         message: impl Into<String>,
     ) -> Self {
-        let mut spinner = Self::with_progress(handle, restore_left, restore_right, message, None);
-        spinner.message_sender = None;
-        spinner
+        Self::with_progress(handle, restore_left, restore_right, message, None)
     }
 
     pub(crate) fn set_defer_restore(&self, defer: bool) {

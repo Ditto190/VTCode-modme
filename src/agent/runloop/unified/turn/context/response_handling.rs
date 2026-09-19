@@ -945,6 +945,9 @@ impl<'a> TurnProcessingContext<'a> {
                 approved_execution_revision,
                 "completed plan reached approval handoff"
             );
+            self.handle
+                .set_input_status(Some("Validating plan...".to_string()), self.input_status_state.right.clone());
+            self.handle.force_redraw();
             // Persist before publishing the approval request so consumers that
             // follow the event's plan_file can read the completed draft.
             let validation = validate_plan_content(&plan_text);
@@ -955,9 +958,19 @@ impl<'a> TurnProcessingContext<'a> {
                 };
                 return self.reject_plan_artifact(error, &plan_text, !tool_free_recovery_pass);
             }
+            self.handle
+                .set_input_status(Some("Persisting plan...".to_string()), self.input_status_state.right.clone());
+            self.handle.force_redraw();
 
             let persisted = match persist_plan_draft(&self.tool_registry.planning_workflow_state(), &plan_text).await {
-                Ok(persisted) => persisted,
+                Ok(persisted) => {
+                    self.handle.set_input_status(
+                        Some("Preparing approval...".to_string()),
+                        self.input_status_state.right.clone(),
+                    );
+                    self.handle.force_redraw();
+                    persisted
+                }
                 Err(error) => {
                     let error = PlanArtifactError::Persistence { reason: error.to_string() };
                     return self.reject_plan_artifact(error, &plan_text, false);

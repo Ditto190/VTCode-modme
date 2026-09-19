@@ -20,7 +20,9 @@ use vtcode_ui::tui::app::{
 
 use crate::agent::runloop::unified::external_editor::run_blocking_with_event_loop_suspended;
 use crate::agent::runloop::unified::inline_events::harness::HarnessEventEmitter;
-use crate::agent::runloop::unified::overlay_prompt::{OverlayWaitOutcome, show_overlay_and_wait};
+use crate::agent::runloop::unified::overlay_prompt::{
+    OverlayWaitOutcome, show_overlay_and_wait, wait_for_overlay_submission,
+};
 use crate::agent::runloop::unified::planning_workflow::{
     PlanArtifactError, PlanExecutionContext, ValidatedPlanArtifact, complete_approved_plan_handoff,
     resolve_plan_execution_target,
@@ -554,6 +556,18 @@ enum PlanConfirmationWait {
     EditInExternalEditor,
 }
 
+/// Map an approval-overlay submission to its internal wait result.
+/// Shared by the overlay-first initial wait and the re-show path after an
+/// external-editor edit so the two cannot diverge.
+fn map_plan_confirmation_submission(submission: TransientSubmission) -> Option<PlanConfirmationWait> {
+    match submission {
+        TransientSubmission::Hotkey(TransientHotkeyAction::LaunchEditor) => {
+            Some(PlanConfirmationWait::EditInExternalEditor)
+        }
+        other => plan_confirmation_submission_to_outcome(&other).map(PlanConfirmationWait::Outcome),
+    }
+}
+
 /// Execute the plan confirmation HITL flow.
 ///
 /// The plan is rendered as static transcript markdown plus an inline confirmation list.
@@ -606,25 +620,36 @@ pub(crate) async fn execute_plan_confirmation_with_context(
         target: "vtcode.planning_workflow",
         "execute_plan_confirmation: rendering confirmation prompt and showing overlay"
     );
-    render_confirmation_prompt(handle, &plan_content);
     let mut plan = plan_content;
     let mut edited_plan: Option<ValidatedPlanArtifact> = None;
+    // Overlay-first: publish the compact approval overlay before the heavy
+    // full-markdown transcript render so the user sees a decision gate
+    // immediately. The transcript fills in behind the overlay (wheel-scroll
+    // passes through) rather than blocking the gate.
+    let first_request = build_plan_confirmation_request_with_context(&plan, draft_incomplete, context_usage_percent);
+    handle.show_transient(first_request);
+    handle.force_redraw();
+    tokio::task::yield_now().await;
+    render_confirmation_prompt(handle, &plan);
+    handle.force_redraw();
 
+    let mut first_wait = true;
     loop {
-        let wait = show_overlay_and_wait(
-            handle,
-            session,
-            build_plan_confirmation_request_with_context(&plan, draft_incomplete, context_usage_percent),
-            ctrl_c_state,
-            ctrl_c_notify,
-            |submission| match submission {
-                TransientSubmission::Hotkey(TransientHotkeyAction::LaunchEditor) => {
-                    Some(PlanConfirmationWait::EditInExternalEditor)
-                }
-                other => plan_confirmation_submission_to_outcome(&other).map(PlanConfirmationWait::Outcome),
-            },
-        )
-        .await?;
+        let wait = if first_wait {
+            first_wait = false;
+            wait_for_overlay_submission(handle, session, ctrl_c_state, ctrl_c_notify, map_plan_confirmation_submission)
+                .await?
+        } else {
+            show_overlay_and_wait(
+                handle,
+                session,
+                build_plan_confirmation_request_with_context(&plan, draft_incomplete, context_usage_percent),
+                ctrl_c_state,
+                ctrl_c_notify,
+                map_plan_confirmation_submission,
+            )
+            .await?
+        };
 
         match wait {
             OverlayWaitOutcome::Submitted(PlanConfirmationWait::Outcome(outcome)) => {
@@ -1193,8 +1218,8 @@ mod tests {
 
         let mut transcript_messages = Vec::new();
         let mut saw_markdown_append_line = false;
-        let request = loop {
-            let command = command_rx.try_recv().expect("confirmation command");
+        let mut request = None;
+        while let Ok(command) = command_rx.try_recv() {
             match command {
                 InlineCommand::AppendPastedMessage { kind: InlineMessageKind::Agent, text, .. } => {
                     transcript_messages.push(text);
@@ -1204,10 +1229,18 @@ mod tests {
                     let text: String = segments.into_iter().map(|seg| seg.text).collect();
                     transcript_messages.push(text);
                 }
-                InlineCommand::ShowTransient { request } => break request,
+                InlineCommand::ShowTransient { request: req } => {
+                    // Overlay-first: the gate is published before the heavy
+                    // transcript render, so the request may arrive before or
+                    // after transcript rows. Keep the first gate.
+                    if request.is_none() {
+                        request = Some(req);
+                    }
+                }
                 _ => {}
             }
-        };
+        }
+        let request = request.expect("confirmation overlay request");
         assert!(
             saw_markdown_append_line,
             "plan body must go through the markdown pipeline (AppendLine), not raw pasted text"

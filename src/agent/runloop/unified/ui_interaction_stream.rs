@@ -727,9 +727,22 @@ pub(crate) async fn render_stream_with_options_and_copilot_runtime_impl(
                     }
                 }
 
+                let is_drafting_plan = plan_parser.as_ref().is_some_and(|parser| parser.is_drafting_plan());
+
                 if !spinner_message_updated {
-                    spinner.update_message("Receiving response...");
+                    if is_drafting_plan {
+                        let len = plan_parser.as_ref().map(|parser| parser.drafted_plan_len()).unwrap_or(0);
+                        spinner.update_message(format!("Drafting plan... ({len} chars)"));
+                    } else {
+                        spinner.update_message("Receiving response...");
+                    }
                     spinner_message_updated = true;
+                } else if is_drafting_plan {
+                    if last_progress_update.elapsed() >= Duration::from_millis(200) {
+                        let len = plan_parser.as_ref().map(|parser| parser.drafted_plan_len()).unwrap_or(0);
+                        spinner.update_message(format!("Drafting plan... ({len} chars)"));
+                        last_progress_update = Instant::now();
+                    }
                 } else if last_progress_update.elapsed() >= Duration::from_millis(500) {
                     spinner.update_message(format!("Receiving response... ({token_count} tokens)"));
                     last_progress_update = Instant::now();

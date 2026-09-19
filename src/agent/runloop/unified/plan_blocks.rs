@@ -133,6 +133,22 @@ impl ProposedPlanStreamParser {
         matches!(self.mode, Some(ParseMode::InPlan { .. })) || has_partial_open_tag(&self.pending)
     }
 
+    /// Whether the parser is currently buffering a `<proposed_plan>` / `<plan>`
+    /// body. While true, streamed tokens are intentionally hidden from the
+    /// transcript, so callers should show explicit drafting progress.
+    pub(crate) fn is_drafting_plan(&self) -> bool {
+        matches!(self.mode, Some(ParseMode::InPlan { .. }))
+    }
+
+    /// Number of plan body characters buffered so far. Used for throttled
+    /// `Drafting plan... (N chars)` spinner updates without exposing content.
+    /// Callers should only invoke this when an update is actually due: counting
+    /// is linear in the buffered body, while [`Self::is_drafting_plan`] is O(1)
+    /// and suitable for per-token checks.
+    pub(crate) fn drafted_plan_len(&self) -> usize {
+        self.plan_buffer.chars().count()
+    }
+
     fn filter_policy_chunk(&mut self, chunk: &str, flush: bool) -> String {
         self.policy_pending.push_str(chunk);
         filter_policy_text(&mut self.policy_pending, flush)
@@ -700,6 +716,47 @@ mod tests {
         ProposedPlanStreamParser, extract_any_plan, extract_proposed_plan, has_exactly_one_proposed_plan_block,
         has_unclosed_plan_block, prepare_plan_markdown_for_display, strip_plan_persistence_policy_line,
     };
+
+    #[test]
+    fn drafting_state_tracks_suppressed_plan_body() {
+        let mut parser = ProposedPlanStreamParser::new();
+        assert!(!parser.is_drafting_plan());
+        assert_eq!(parser.drafted_plan_len(), 0);
+
+        // Asymmetric: visible intro vs suppressed plan body. The parser holds
+        // back a short tail for split-tag detection, so visible output appears
+        // after `finish`, while drafting state flips immediately on open tag.
+        let _ = parser.consume("Intro\n<proposed_plan>\n- Step 1\n");
+        assert!(parser.is_drafting_plan());
+
+        // Feed enough body to exceed the close-tag tail buffer.
+        let long_body = "x".repeat(128);
+        let _ = parser.consume(&long_body);
+        assert!(parser.drafted_plan_len() > 0);
+
+        let _ = parser.consume("\n</proposed_plan>\nOutro");
+        assert!(!parser.is_drafting_plan());
+        let trailing = parser.finish();
+        assert!(trailing.plan_text.is_some());
+        assert!(trailing.stripped_text.contains("Outro"));
+    }
+
+    #[test]
+    fn drafting_state_ignores_closed_and_tagless_text() {
+        let mut parser = ProposedPlanStreamParser::new();
+        let _ = parser.consume("No plan here");
+        let trailing = parser.finish();
+        assert_eq!(trailing.stripped_text, "No plan here");
+        assert!(!parser.is_drafting_plan());
+        assert_eq!(trailing.plan_text, None);
+
+        // Alternate tag also drafts; closed block stops drafting.
+        let mut parser = ProposedPlanStreamParser::new();
+        let _ = parser.consume("Before<plan>\n- A");
+        assert!(parser.is_drafting_plan());
+        let _ = parser.consume("\n</plan>\nAfter");
+        assert!(!parser.is_drafting_plan());
+    }
 
     #[test]
     fn extracts_single_proposed_plan_block() {
