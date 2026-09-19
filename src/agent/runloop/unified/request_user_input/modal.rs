@@ -218,7 +218,9 @@ fn append_summary_lines(
                 }
             })
             .unwrap_or_else(|| "(unanswered)".to_string());
-        handle.append_line(InlineMessageKind::Info, vec![summary_segment(format!("    answer: {answer_text}"))]);
+        let answer_line = format!("    answer: {answer_text}");
+        handle.append_line(InlineMessageKind::Info, vec![summary_segment(answer_line.clone())]);
+        vtcode_core::utils::transcript::append(&answer_line);
     }
 }
 

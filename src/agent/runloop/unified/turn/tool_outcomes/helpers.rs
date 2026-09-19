@@ -326,8 +326,10 @@ pub(crate) fn plan_progress_line(
     let name = if label.is_empty() { None } else { Some(label) };
     if ready_for_approval {
         return match name {
-            Some(name) => format!("• Plan {name} — ready for approval ({step_count} steps)"),
-            None => format!("• Plan — ready for approval ({step_count} steps)"),
+            Some(name) if step_count > 0 => format!("• Plan {name} — ready for approval ({step_count} steps)"),
+            Some(name) => format!("• Plan {name} — ready for approval"),
+            None if step_count > 0 => format!("• Plan — ready for approval ({step_count} steps)"),
+            None => "• Plan — ready for approval".to_string(),
         };
     }
     if open_decisions > 0 {
@@ -447,6 +449,8 @@ mod tracker_continue_tests {
         assert_eq!(plan_progress_line("Release", false, 0, 0), "• Plan Release — research/synthesis");
         assert_eq!(plan_progress_line("Release", false, 2, 4), "• Plan Release — open decisions: 2");
         assert_eq!(plan_progress_line("Release", true, 0, 4), "• Plan Release — ready for approval (4 steps)");
+        assert_eq!(plan_progress_line("Release", true, 0, 0), "• Plan Release — ready for approval");
+        assert_eq!(plan_progress_line("", true, 0, 0), "• Plan — ready for approval");
         assert_eq!(plan_progress_line("", false, 0, 0), "• Plan — research/synthesis");
         assert_eq!(plan_progress_line("", true, 0, 4), "• Plan — ready for approval (4 steps)");
         assert_eq!(plan_progress_line("", false, 1, 0), "• Plan — open decisions: 1");

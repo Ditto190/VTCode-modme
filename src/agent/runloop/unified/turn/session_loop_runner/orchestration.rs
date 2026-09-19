@@ -1763,9 +1763,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     true
                                 }
                                 Err(err) => {
-                                    tracing::warn!(
-                                        %err,
-                                        "Tracker auto-continue queue full; falling through to turn end"
+                                    tracing::warn!(%err, "Tracker auto-continue queue full; falling through to turn end");
+                                    let _ = renderer.line(
+                                        MessageStyle::Info,
+                                        "[i] Tracker auto-continue queue full; incomplete tracker steps remain. Type `continue` to resume.",
                                     );
                                     false
                                 }
@@ -1789,8 +1790,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         // Blocked planning without auto-queue: compact status only.
                         let _ =
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
-                    } else if incomplete.as_ref().is_none_or(|items| items.is_empty()) {
-                        // Tracker work cleared (or none): reset the episode budget.
+                    } else if !planning_active && incomplete.as_ref().is_none_or(|items| items.is_empty()) {
+                        // Tracker work cleared (or none) outside planning: reset the
+                        // episode budget. Planning ends must not silently restore the
+                        // shared plan/tracker continuation budget.
                         session_stats.reset_tracker_continuation_budget();
                     }
                 }

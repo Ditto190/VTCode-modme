@@ -106,29 +106,37 @@ fn sparse_implementation_task_lines(plan: &PlanContent) -> Vec<(&str, bool)> {
     let mut tasks = Vec::new();
 
     for line in plan.raw_content.lines() {
-        if let Some(section) = plan_section(line) {
-            match section {
-                PlanSection::Summary => {
-                    in_implementation = false;
-                    in_non_tracker_section = false;
-                    compact_after_summary = !saw_implementation;
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            if let Some(section) = plan_section(line) {
+                match section {
+                    PlanSection::Summary => {
+                        in_implementation = false;
+                        in_non_tracker_section = false;
+                        compact_after_summary = !saw_implementation;
+                    }
+                    PlanSection::Scope | PlanSection::NonTracker => {
+                        in_implementation = false;
+                        in_non_tracker_section = true;
+                    }
+                    PlanSection::Implementation => {
+                        in_implementation = true;
+                        saw_implementation = true;
+                        in_non_tracker_section = false;
+                        compact_after_summary = false;
+                    }
+                    PlanSection::Validation | PlanSection::Assumptions => {
+                        in_implementation = false;
+                        in_non_tracker_section = false;
+                        compact_after_summary = false;
+                    }
                 }
-                PlanSection::Scope | PlanSection::NonTracker => {
-                    // Scope / outcomes / deps are plan context, never checklist items.
-                    in_implementation = false;
-                    in_non_tracker_section = true;
-                }
-                PlanSection::Implementation => {
-                    in_implementation = true;
-                    saw_implementation = true;
-                    in_non_tracker_section = false;
-                    compact_after_summary = false;
-                }
-                PlanSection::Validation | PlanSection::Assumptions => {
-                    in_implementation = false;
-                    in_non_tracker_section = false;
-                    compact_after_summary = false;
-                }
+            } else {
+                // Unknown markdown heading: treat as non-implementation context so
+                // numbered lines under custom sections are not distilled.
+                in_implementation = false;
+                in_non_tracker_section = true;
+                compact_after_summary = false;
             }
             continue;
         }
@@ -413,6 +421,25 @@ mod tests {
                 .iter()
                 .any(|d| d.contains("In scope") || d.contains("Out of scope")),
             "Scope lines must not become tracker items: {descriptions:?}"
+        );
+    }
+
+    #[test]
+    fn sparse_plan_unknown_heading_sections_are_not_distilled() {
+        let plan = PlanContent::from_markdown(
+            "sparse-unknown".to_string(),
+            "## Summary\nWork.\n\n1. Implement the change\n\n## Open Questions\n1. Decide migration strategy\n",
+            None,
+        );
+        let items = task_items_from_plan(&plan);
+        let descriptions: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.get("description").and_then(|value| value.as_str()).map(ToOwned::to_owned))
+            .collect();
+        assert!(descriptions.iter().any(|d| d.contains("Implement the change")));
+        assert!(
+            !descriptions.iter().any(|d| d.contains("Decide migration")),
+            "unknown sections must not become tracker items: {descriptions:?}"
         );
     }
 
