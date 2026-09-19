@@ -1,9 +1,9 @@
 ---
 feature: todo-continuation-hardening
-status: in-progress
+status: delivered
 updated: 2026-09-19
 branch: fix/todo-continuation-gaps
-commits: # filled at delivery
+commits: 326810f14..fc5e3851d
 ---
 
 # TODO Continuation Hardening (Residual)
@@ -12,18 +12,42 @@ Residual work after delivered `tracker-continuation`. Evidence session `session-
 
 ## Report
 
-(Empty at design time.)
+**What was built** — VT Code’s TODO/tracker continuation is hardened so incomplete `task_tracker` work continues across turns without user nudges, while true handoffs still stop for the user.
+
+1. **Classifiers.** In-turn recoverable phrasing, outer `tracker_auto_continue_is_recoverable_block`, and `tracker_final_text_is_safety_handoff` now treat tool-call/tool-loop/read-cap/budget-exhausted recaps as recoverable, not policy denials. `plan_mode_recoverable_block` is allow-list first so production `PLANNING_COMPLETED_TURN_FALLBACK_REASON` auto-queues instead of emitting “Type continue”. Bare `"tool policy"` over-match is narrowed to explicit denials.
+
+2. **In-turn override.** Applies on tool-free recovery status text; gated only on `auto_continue_tracker` (not `cross_turn_turns > 0`). When tracker work remains, only trailing questions and strong interview/permission phrases are handoffs — mid-text `?` and optional-offer closers continue. Policy block / denied-by-policy phrases stay terminal.
+
+3. **Budget + probe.** Default `[agent.harness.continuation].cross_turn_turns` is **32** with **progress-reset**: any newly completed tracker step resets the episode (`SessionStats::note_tracker_completed_count`). Live probes return `TrackerProbeOutcome::{Incomplete,Complete,Unavailable}`; **Complete clears** the incomplete cache so auto-continue stops after the tracker finishes; Unavailable keeps the last known incomplete set.
+
+4. **Planning + resume + UX.** Planning resume auto-queues plan continuation when the blocked-handoff summary is plan-recoverable and no plan is approval-ready (never auto-approves). Successful auto-queue paths print continuation Info lines — never “Type `continue`”. Compiled runtime guidance forbids status-only / “next step on resume” recaps while tracker steps remain.
+
+**Verification** — commands and results:
+
+- `cargo nextest run -p vtcode-config -E 'test(tracker) or test(continuation)'` — PASS (3)
+- `cargo nextest run -p vtcode-core -E 'test(runtime_guidance) or test(tracker_final_text) or test(tracker_status)'` — PASS (6)
+- `cargo nextest run -p vtcode -E 'test(tracker_probe) or test(session_stats_apply) or test(session_stats_progress) or test(parse_incomplete) or test(recoverable_block) or test(plan_mode_recoverable) or test(tracker_incomplete) or test(tracker_config) or test(outer_queue) or test(resume_gate) or test(parse_tracker)'` — PASS (14)
+- `./scripts/check-dev.sh` — PASS
+- PRE-EXISTING (unrelated): `sparse_approved_plan_is_distilled_into_tracker_items` may fail; not part of this diff
+
+**Journey log** —
+
+1. Empirical check of the cited session showed auto-continue already worked (20/20 turns, 0 user `continue` prompts); residual UX/classifier/budget gaps were the real bug class.
+2. First review (general-1): critical B1 — incomplete cache never cleared on successful complete probes, so auto-continue could fire after the tracker finished.
+3. Fix: `TrackerProbeOutcome` + `apply_tracker_probe_to_cache` (Complete = clear, Unavailable = keep last); re-review (general-2) confirmed B1 fixed with no remaining criticals.
+4. Drive-by clippy fix in `vtcode-commons::diff_review_notice` (identical if-blocks) cleared the check-dev gate; behavior unchanged.
+5. Dual incomplete caches (HarnessTurnState + SessionStats) share the same clear/keep contract; mid-session Unavailable is intentionally fail-open, resume remains fail-closed via `incomplete_tracker_items`.
 
 ## [S1] Problem
 
 TODO/tracker work does not continue *seamlessly* from the user’s point of view, and several harness paths still nudge:
 
 1. **Model status recaps still read as handoffs.** Assistant finals like `## Status` / “blocked by turn tool budget” / “Next step on resume” end turns even when `task_tracker` is incomplete.
-2. **Planning recovery still nudges.** `current_blocked.md` / footer still say “Type `continue`” / “Type `keep planning`” when planning ends via recovery fallback (`PLANNING_COMPLETED_TURN_FALLBACK_REASON` contains both deny tokens *and* “recovery fallback”; deny-list runs first).
+2. **Planning recovery still nudges.** `current_blocked.md` / footer still say “Type `continue`” / “Type `keep planning`” when planning ends via recovery fallback (`PLANNING_COMPLETED_TURN_FALLBACK_REASON` contains both deny tokens *and* “recovery fallback”; deny-list ran first).
 3. **Cross-turn tracker budget is an episode that only resets when the whole tracker completes.** Default `cross_turn_turns = 8` exhausts on long TODO lists, then the outer loop prints “Type `continue` to resume.”
-4. **Recoverable classifiers miss production blocked-reasons.** Tool-call / tool-loop budget, tool follow-up recovery, completed-turn-no-response, and plan recovery-exhausted constants are not allow-listed, so outer auto-queue never fires.
-5. **In-turn override is skipped or over-denied.** Tool-free recovery status text never gets the tracker override; any mid-text `?` or “happy to” closer ends the turn; `cross_turn_turns == 0` also kills in-turn continuation; live tracker probe failure yields no queue.
-6. **UX still prints “Type continue” after a successful auto-queue**, and safety-handoff vocabulary over-matches (`"tool policy"`).
+4. **Recoverable classifiers miss production blocked-reasons.** Tool-call / tool-loop budget, tool follow-up recovery, completed-turn-no-response, and plan recovery-exhausted constants were not allow-listed.
+5. **In-turn override is skipped or over-denied.** Tool-free recovery status text never got the tracker override; any mid-text `?` ended the turn; `cross_turn_turns == 0` also killed in-turn continuation; live tracker probe failure yielded no queue / stale cache after completion.
+6. **UX still printed “Type continue” after a successful auto-queue**, and safety-handoff vocabulary over-matched (`"tool policy"`).
 
 ## [S2] Design
 
@@ -37,58 +61,56 @@ User-confirmed decisions (2026-09-19):
 
 **In-turn** (`continuation.rs::apply_tracker_continuation_override`):
 
-- Treat as recoverable budget phrasing (non-exhaustive): existing tokens plus `"tool budget"`, `"tool loop"`, `"read cap"`, `"work budget"`, `"max tool"`, `"per-turn tool"`, `"tool-call budget"`, `"tool follow-up"`, `"recovery exhausted"`.
-- When tracker is incomplete, recoverable budget phrasing **wins** even if the text also contains `"blocked by"` / other `has_explicit_blocker` tokens.
-- **True-handoff filter when tracker incomplete:** only a *trailing* clarifying question or interview phrases (`?` at the end / closing ask) end the turn. Mid-text `?` in status sections and optional-offer closers (`happy to`, `let me know if`, `if you want me to`) are **not** handoffs while incomplete tracker work remains.
-- Override remains skipped for empty text, planning active, and genuine permission/policy/safety/credentials handoffs.
+- Recoverable budget phrasing includes `"tool budget"`, `"tool loop"`, `"read cap"`, `"work budget"`, `"max tool"`, `"per-turn tool"`, `"tool-call budget"`, `"tool follow-up"`, `"recovery exhausted"`, `"budget exhausted"`.
+- When tracker is incomplete, recoverable budget phrasing **wins** even if the text also contains `"blocked by"`.
+- **True-handoff filter when tracker incomplete:** trailing clarifying question or strong interview/permission phrases end the turn. Mid-text `?` and optional-offer closers are not handoffs.
+- Explicit safety/policy/credentials phrases (including `policy block`, `blocked by policy`, `denied by policy`) always end the turn.
 
 **Outer Completed/Blocked** (`helpers.rs::tracker_auto_continue_is_recoverable_block`):
 
-- Allow-list additional production shapes: `"tool loop budget"`, `"tool-call budget"`, `"tool follow-up"`, `"recovery exhausted"`, `"without a harness-visible final assistant response"`, `"max tool"`, `"per-turn tool limit"`.
-- Keep deny-list for verification-pending, context-capacity, contract-violation, unmatched tool result, permission/user-input/safety fuse, interview/approval handoffs.
+- Allow-list includes tool-loop/tool-call budget, tool follow-up, recovery exhausted, harness-visible final response miss, per-turn tool limit, read cap, budget exhausted.
+- Deny-list keeps verification-pending, context-capacity, contract-violation, unmatched tool result, permission/user-input/safety fuse, interview/approval handoffs.
 
 **Safety-handoff** (`completion.rs::tracker_final_text_is_safety_handoff`):
 
-- Expand `budget_like` with the same tool-budget / tool-loop / read-cap tokens as the in-turn classifier.
-- Narrow `"tool policy"` over-match to explicit denial shapes: `"denied by tool policy"`, `"denied by workspace tool policy"`, `"blocked by policy"`, `"execution denied by policy"`, `"policy block"`.
+- Expanded `budget_like` with tool-budget/loop/read-cap tokens.
+- Narrowed `"tool policy"` to explicit denial shapes.
 
 **Plan-mode** (`helpers.rs::plan_mode_recoverable_block`):
 
-- Evaluate the **allow-list first** for production recovery constants, especially `PLANNING_COMPLETED_TURN_FALLBACK_REASON` (“Planning turn ended via recovery fallback … approval-ready plan …”). Matching `"recovery fallback"` makes the reason recoverable.
-- Deny-list applies only when the allow-list does not match. Narrow deny tokens so they do not shadow the fallback constant: interview/approval waits (`"approval-ready plan remains"`, `"planning interview"`, `"awaiting approval"`, `request_user_input`, permission/policy) stay denied.
-- Completed planning turns remain **never** auto-continued (interview/approval risk). Never auto-approves.
+- Allow-list first for production recovery constants, especially `PLANNING_COMPLETED_TURN_FALLBACK_REASON`.
+- Interview/approval/permission handoffs denied after allow-list miss.
+- Completed planning turns are never auto-continued. Never auto-approves.
 
 ### B. In-turn override wiring
 
-- Apply the tracker override on **tool-free recovery** status text when tracker is incomplete (tools are already disabled; a status recap must not strand the session).
-- Gate in-turn override on `auto_continue_tracker` only — **do not** require `cross_turn_turns > 0` (that knob disables only cross-turn queue).
-- Cache last-known incomplete tracker items (session-scoped, updated whenever `incomplete_tracker_items` succeeds). Outer/in-turn gates fall back to the cache when the live probe fails, so a transient tracker read error does not drop auto-queue.
+- Applies on **tool-free recovery** status text when tracker is incomplete.
+- Gated on `auto_continue_tracker` only.
+- `TrackerProbeOutcome` live probe: Incomplete replaces cache, **Complete clears**, Unavailable keeps last.
 
 ### C. Outer queue + budget
 
 ```toml
 [agent.harness.continuation]
 auto_continue_tracker = true   # unchanged default
-cross_turn_turns = 32          # NEW default (was 8)
+cross_turn_turns = 32          # default (was 8); progress-resets on tracker step completion
 ```
 
-- **Progress-reset:** `record_tracker_continuation_turn_*` / outer gate treat a completed tracker step since the episode started as a reset of `tracker_continuation_turns` to 0 before queueing. Implementation: track `last_seen_completed_tracker_count` in `SessionStats`; when live completed-count increases, call `reset_tracker_continuation_budget()`.
-- Queue-first then record budget (unchanged). Queue-full / truly exhausted budget may still mention `continue`, but only when no continuation turn was queued.
-- **True handoffs only** for stop conditions listed in S2 decisions. `should_queue_tracker_auto_continue` keeps: kill-switch, planning_active (tracker path), empty incomplete, safety-handoff, verification-block (separate recovery path), non-recoverable blocked reason, `cross_turn_turns == 0`.
-- No new config keys beyond the default change for `cross_turn_turns`.
+- Progress-reset via `SessionStats::note_tracker_completed_count` + `reset_tracker_continuation_budget`.
+- Queue-first then record budget. Queue-full / truly exhausted budget may mention `continue` only when nothing was queued.
+- True-handoff stop list as in S2 decisions.
 
 ### D. Planning path + resume
 
-- After A’s plan-mode classifier fix, recoverable blocked planning ends auto-queue `plan_mode_continue_follow_up()` via existing `should_queue_plan_mode_auto_continue`.
-- **Resume:** when a session restores with a live blocked-handoff reason that `plan_mode_recoverable_block` accepts and planning is still active with no approval-ready plan, auto-queue plan continuation (in addition to existing tracker resume auto-queue).
-- Resume tracker path unchanged aside from classifier/budget fixes.
+- Recoverable blocked planning ends auto-queue `plan_mode_continue_follow_up()`.
+- Resume: plan-recoverable blocked handoff + planning active + no approval-ready plan → auto-queue plan continuation.
+- Tracker resume path unchanged aside from classifier/budget/probe fixes.
 
 ### E. UX + shipped guidance
 
-- When tracker or plan auto-queue **succeeds**, render an Info line that work is continuing (`[i] Tracker auto-continue turn N/M…` / plan equivalent). **Never** print “Type `continue`” on a path that queued.
-- “Type `continue`” remains only for true handoffs / queue-full / budget exhausted after progress-reset rules.
-- Compiled `runtime_guidance.rs`: strengthen the existing tracker line so status-only recaps and “next step on resume” language are forbidden while `task_tracker` steps remain; keep presence/budget test in sync.
-- Docs: `docs/guides/agent-loop-contract.md`, `docs/config/CONFIG_FIELD_REFERENCE.md` (default 32 + progress-reset + true-handoff stop list).
+- Successful auto-queue: Info lines only — never “Type `continue`”.
+- Compiled `runtime_guidance.rs` forbids status-only recaps / “next step on resume” while tracker steps remain.
+- Docs: `docs/guides/agent-loop-contract.md`, `docs/config/CONFIG_FIELD_REFERENCE.md`.
 
 ### True-handoff stop list (normative)
 
@@ -98,8 +120,6 @@ End turn and wait for the user when tracker work remains **only if**:
 2. Permission / policy / safety fuse / missing credentials handoff, or
 3. Verification block after autonomous recovery budget is exhausted / escalated, or
 4. Session exit / hard interrupt.
-
-Everything else with incomplete tracker steps continues (in-turn and/or outer queue).
 
 ## [S3] Out of Scope
 
@@ -112,9 +132,9 @@ Everything else with incomplete tracker steps continues (in-turn and/or outer qu
 
 ## Tasks
 
-- [ ] T1: Expand recoverable classifiers (in-turn phrasing, outer allow-list, safety-handoff `budget_like` + narrow `"tool policy"`, plan-mode allow-list-first for recovery fallback) — acceptance: unit tests for production constants including planning fallback, tool-loop/tool-call budget, and deny cases still denied (covers: S2A)
-- [ ] T2: In-turn override — tool-free recovery path, `auto_continue_tracker`-only gate, trailing-question handoff filter while tracker incomplete, cached incomplete-items fallback — acceptance: pure tests for each gate; override applies on tool-free status text (covers: S2B; depends: T1)
-- [ ] T3: Progress-resetting cross-turn budget + default `cross_turn_turns=32` — acceptance: config default test; `SessionStats` resets episode when completed tracker count increases; queue-full still falls through to handoff text only when nothing queued (covers: S2C; depends: T1)
-- [ ] T4: Planning recoverable-block + resume auto-queue; suppress “Type continue” whenever a continuation turn was queued — acceptance: planning fallback constant auto-queues; resume plan path test; no nudge string on successful queue paths (covers: S2D,S2E; depends: T1)
-- [ ] T5: Runtime guidance + docs (agent-loop-contract, CONFIG_FIELD_REFERENCE) — acceptance: presence test for strengthened guidance; docs mention default 32, progress-reset, true-handoff stop list (covers: S2E; depends: T3)
-- [ ] T6: Integration/pure gate regression suite + `./scripts/check-dev.sh` — acceptance: targeted nextest filters pass; check-dev PASS on this worktree (covers: S2; depends: T1–T5)
+- [x] T1: Expand recoverable classifiers (in-turn phrasing, outer allow-list, safety-handoff `budget_like` + narrow `"tool policy"`, plan-mode allow-list-first for recovery fallback) — acceptance: unit tests for production constants including planning fallback, tool-loop/tool-call budget, and deny cases still denied (covers: S2A)
+- [x] T2: In-turn override — tool-free recovery path, `auto_continue_tracker`-only gate, trailing-question handoff filter while tracker incomplete, probe/cached incomplete-items fallback — acceptance: pure tests for each gate; Complete probe clears cache (covers: S2B; depends: T1)
+- [x] T3: Progress-resetting cross-turn budget + default `cross_turn_turns=32` — acceptance: config default test; `SessionStats` resets episode when completed tracker count increases; queue-full still falls through to handoff text only when nothing queued (covers: S2C; depends: T1)
+- [x] T4: Planning recoverable-block + resume auto-queue; suppress “Type continue” whenever a continuation turn was queued — acceptance: planning fallback constant auto-queues; resume plan path present; no nudge string on successful queue paths (covers: S2D,S2E; depends: T1)
+- [x] T5: Runtime guidance + docs (agent-loop-contract, CONFIG_FIELD_REFERENCE) — acceptance: presence test for strengthened guidance; docs mention default 32, progress-reset, true-handoff stop list (covers: S2E; depends: T3)
+- [x] T6: Integration/pure gate regression suite + `./scripts/check-dev.sh` — acceptance: targeted nextest filters pass; check-dev PASS on this worktree; review critical B1 fixed and re-verified (covers: S2; depends: T1–T5)
