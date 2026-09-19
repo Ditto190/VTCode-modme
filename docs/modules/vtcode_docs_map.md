@@ -943,6 +943,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Planning Workflow + Tracker Continuity (Dedupe, Scope/Task, Continuation, Progress)?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/planning-verify-commands.md`
+  - **Content**: Planning verify commands accept common inspection tools
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Planning verify commands accept common inspection tools?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/harness/prompt-architecture.md`
   - **Content**: Prompt Architecture
   - **Topics**: Cache-stable segments, Assembly order, Few-shot management (Section 18.3.3), Tool description contract (Section 18.3.4)
@@ -965,8 +970,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/harness/SESSION_LOG_REVIEW.md`
   - **Content**: Session Log Review
-  - **Topics**: 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse (turns 912–913), 2026-08-12 | Checkpoints 862–911 stabilization, 2026-08-11 | Harness token-waste and startup-noise audit
-  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit work?", "How does 2026-08-16 | Checkpoints 912–917 diagnostics audit work?"
+  - **Topics**: 2026-09-19 | Planning recovery rejects inspection-command verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse (turns 912–913), 2026-08-12 | Checkpoints 862–911 stabilization
+  - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-09-19 | Planning recovery rejects inspection-command verifies work?", "How does 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit work?"
 
 - **File**: `docs/features/SHELL_SNAPSHOT.md`
   - **Content**: Shell Environment Snapshot

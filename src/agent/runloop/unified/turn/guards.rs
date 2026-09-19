@@ -309,7 +309,7 @@ fn normalize_turn_balancer_tool_name(name: &str) -> Cow<'_, str> {
 /// they must instruct the same `<proposed_plan>` contract. Without the format
 /// the model emits research prose that fails validation and the turn ends
 /// `Blocked` even though the evidence was present.
-const PLANNING_SYNTHESIS_FORMAT_HINT: &str = "Synthesize exactly one complete `<proposed_plan>` NOW from the evidence already gathered: include Summary, numbered steps as `Action -> files: [path] -> verify: [command]`, Validation, and Assumptions. Every implementation step must name a concrete file, symbol, or behavior target and a concrete `verify:` command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, or `verify: [after launch confirm startup timing is reported]`. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; vague prose and generic VCS-only checks fail validation. If a list has multiple comma-separated checks, every item must independently be concrete. Do not emit tool calls or tool-call markup.";
+const PLANNING_SYNTHESIS_FORMAT_HINT: &str = "Synthesize exactly one complete `<proposed_plan>` NOW from the evidence already gathered: include Summary, numbered steps as `Action -> files: [path] -> verify: [command]`, Validation, and Assumptions. Every implementation step must name a concrete file, symbol, or behavior target and a concrete `verify:` command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, `verify: [grep -n 'symbol' src/file.rs]`, or `verify: [after launch confirm startup timing is reported]`. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; vague prose and generic VCS-only checks fail validation. If a list has multiple comma-separated checks, every item must independently be concrete. Do not emit tool calls or tool-call markup.";
 
 fn navigation_loop_guidance(planning_active: bool, repetition: usize) -> &'static str {
     if repetition >= 2 {
@@ -931,6 +931,11 @@ mod tests {
             .content
             .as_text();
         assert!(recovery_prompt.contains("Valid examples: `verify: [cargo nextest run -p vtcode]`"));
+        assert!(
+            recovery_prompt.contains("verify: [sed -n '1,40p' docs/file.md]")
+                && recovery_prompt.contains("verify: [grep -n 'symbol' src/file.rs]"),
+            "synthesis hint must include inspection-command valid examples: {recovery_prompt}"
+        );
         assert!(recovery_prompt.contains("Invalid examples: `verify: [run checks]`"));
         assert!(recovery_prompt.contains("observable check"));
         assert_eq!(tracker.consecutive_low_signal_navigations, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD);

@@ -1,5 +1,24 @@
 # Session Log Review
 
+## 2026-09-19 | Planning recovery rejects inspection-command verifies
+
+### Baseline
+
+Live blocker `session-vtcode-20260918T101837Z_175560-33614` ended planning via recovery fallback without an approval-ready plan (324k prompt tokens). Checkpoints `turn_1234`–`turn_1243` show the same class of failure on README/docs plans: `invalid plan artifact: invalid implementation steps: … verification item 1 must be a concrete command or check`. Rejected `verify:` values were ordinary inspection commands (`sed -n`, `grep -n`) that planning research itself uses. The validator allowlist `COMMAND_NAMES` in `crates/codegen/vtcode-core/src/tools/handlers/planning_workflow/artifacts.rs` included `cargo`/`rg`/`python3` but omitted `sed`, `grep`, `head`, `tail`, `wc`, `cat`, `find`, and related inspection tools, so recovery synthesis produced concrete drafts that failed validation and burned the bounded repair budget.
+
+| Observation | Disposition |
+| --- | --- |
+| `validate_concrete_verification("sed -n '81,88p' README.md")` returned `InvalidItem { ordinal: 1 }`. | Expanded `COMMAND_NAMES` with inspection/verification binaries: `sed`, `grep`, `egrep`, `fgrep`, `head`, `tail`, `wc`, `cat`, `find`, `ls`, `awk`, `sort`, `uniq`, `cut`, `tr`, `diff`, `jq`, `stat`, `file`. `git diff --check` and vague prose stay rejected. |
+| Recovery/repair prompt surfaces only listed `cargo`/`rg` valid examples, steering synthesis away from inspection commands even when they were legal for docs work. | Synced valid examples in `PLANNING_SYNTHESIS_FORMAT_HINT`, `repair_feedback()`, `PLANNING_WORKFLOW_PLAN_QUALITY_LINE`, `PLANNING_COMPLETED_FALLBACK_RESPONSE`, `POST_TOOL_RECOVERY_REASON_PLAN_MODE`, `RECOVERY_TOOL_CALL_RETRY_DIRECTIVE_PLAN_MODE`, and the denied-interview / recovery-handoff directives to include `sed -n` / `grep -n`. |
+| Quoted-comma `sed` ranges already parsed as one bracket item (2026-09-14 fix) but still failed as non-concrete commands. | Regression tests now assert the live checkpoint verifies validate as ready plans; quoted-comma `sed` remains one concrete item. |
+
+### Verification
+
+- `cargo nextest run -p vtcode-core -E 'test(planning_workflow) or test(validate_plan) or test(inspection) or test(quoted_comma) or test(agentic_testing) or test(plan_quality)'`
+- `cargo nextest run -p vtcode -E 'test(repair) or test(planning)'`
+- `cargo check --locked -p vtcode-core -p vtcode`
+- `cargo fmt --all -- --check`
+
 ## 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit
 
 ### Baseline
@@ -18,6 +37,7 @@ Reviewed `.vtcode/sessions/session-vtcode-20260914T031505Z_075199-09813/events.j
 - `cargo check --locked -p vtcode-core`
 
 ## 2026-08-16 | Checkpoints 912–917 diagnostics audit
+
 
 ### Baseline
 

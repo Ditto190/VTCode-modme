@@ -151,7 +151,8 @@ impl PlanValidationReport {
         result.push_str(
             "\nEach step MUST name a concrete file path or symbol (not prose) and one concrete verify command or observable check. \
              Comma-separated verify entries must each be a command or an observable check; commas inside single or double quotes stay inside one item. \
-             Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, or `verify: [rg -n 'symbol' src/file.rs]`. \
+             Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, \
+             `verify: [sed -n '1,40p' docs/file.md]`, or `verify: [grep -n 'symbol' src/file.rs]`. \
              Invalid examples: `verify: [run checks]`, `verify: [check later]`, or `verify: [git diff --check]`; vague prose and generic VCS-only checks do not satisfy this validator.",
         );
         result
@@ -760,16 +761,28 @@ fn is_actual_command_token(raw_word: &str) -> bool {
     let word = raw_word.trim_matches(|character: char| matches!(character, '`' | '"' | '\''));
     let bare_word = word.trim_matches(|character: char| character.is_ascii_punctuation());
     const COMMAND_NAMES: &[&str] = &[
+        "awk",
         "bun",
         "cargo",
+        "cat",
         "cmake",
         "clippy",
+        "cut",
         "deno",
+        "diff",
         "dotnet",
+        "egrep",
         "eslint",
+        "fgrep",
+        "file",
+        "find",
         "go",
         "gradle",
+        "grep",
+        "head",
+        "jq",
         "just",
+        "ls",
         "make",
         "meson",
         "mvn",
@@ -784,9 +797,16 @@ fn is_actual_command_token(raw_word: &str) -> bool {
         "rg",
         "ruff",
         "rustfmt",
+        "sed",
         "shellcheck",
+        "sort",
+        "stat",
         "swiftlint",
+        "tail",
+        "tr",
         "tsc",
+        "uniq",
+        "wc",
         "xcodebuild",
         "yarn",
     ];
@@ -1524,10 +1544,40 @@ mod agentic_testing_tests {
             "[sed -n '/^## Documentation/,/^## Development/p' README.md | wc -l reports fewer lines]",
         );
         assert_eq!(single.len(), 1);
+        assert!(
+            validate_concrete_verification(&single[0]).is_ok(),
+            "quoted-comma sed inspection command must be one concrete verify item"
+        );
 
         let concrete = parse_bracket_list("[rg -n 'a,b' README.md]");
         assert_eq!(concrete.len(), 1);
         assert!(validate_concrete_verification(&concrete[0]).is_ok());
+    }
+
+    #[test]
+    fn inspection_commands_count_as_concrete_verification() {
+        // Live planning drafts (checkpoints turn_1234–1243) emitted sed/grep
+        // verifies for README/docs changes and were rejected as
+        // "verification item 1 must be a concrete command or check".
+        for verify in [
+            "sed -n '81,88p' README.md",
+            "grep -n 'planning-workflow' docs/guides/planning-workflow.md",
+            "head -40 docs/file.md",
+            "tail -20 docs/file.md",
+            "wc -l README.md",
+        ] {
+            assert!(
+                validate_concrete_verification(verify).is_ok(),
+                "inspection command should validate as concrete: {verify}"
+            );
+        }
+
+        for invalid in ["run checks", "check later", "git diff --check", "review docs"] {
+            assert!(
+                validate_concrete_verification(invalid).is_err(),
+                "vague or VCS-only verify must stay rejected: {invalid}"
+            );
+        }
     }
 
     #[test]

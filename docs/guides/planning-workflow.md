@@ -332,8 +332,12 @@ validator tolerates additional sections; only `Summary`, `Implementation Steps`,
 Each comma-separated `verify:` entry must itself be a concrete command or
 observable check. Commas inside single or double quotes stay inside one item,
 so a quoted shell pattern such as `rg -n 'a,b' README.md` remains a single
-check. Prefer concrete `cargo` or `rg` gates over fragile `sed` address ranges
-with embedded commas when a simpler check expresses the same outcome.
+check. Build/test commands (`cargo nextest run -p vtcode`, `cargo check
+--locked`) and common inspection commands (`rg -n`, `sed -n`, `grep -n`,
+`head`, `wc`) are all concrete when they are the command head of a `verify:`
+item. Prefer the simplest check that expresses the same outcome — for docs
+changes, `grep -n 'symbol' path` or `sed -n '1,40p' path` are valid; `verify:
+[run checks]` and `verify: [git diff --check]` are not.
 
 `Next open decision` and `Open question` entries are explicit reopen markers for follow-up planning; use a resolved statement such as `No remaining scope decisions` when none remain.
 
