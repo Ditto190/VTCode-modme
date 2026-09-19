@@ -316,6 +316,28 @@ fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Op
     (!command.is_empty()).then(|| command.lines().map(str::to_string).collect())
 }
 
+/// Full, untruncated URL for web-fetch approval modals. The modal description
+/// must show the exact fetch target (not just the domain) so approval is
+/// informed. No truncation is applied here; modal wrapping handles width.
+fn web_fetch_approval_url(tool_name: &str, tool_args: Option<&Value>) -> Option<String> {
+    let canonical = vtcode_core::tools::names::canonical_tool_name(tool_name);
+    let is_web_fetch = canonical == vtcode_core::config::constants::tools::WEB_FETCH
+        || canonical == vtcode_core::config::constants::tools::FETCH_URL
+        || canonical == vtcode_core::config::constants::tools::FETCH
+        || canonical == vtcode_core::config::constants::tools::DEFUDDLE_FETCH
+        || tool_name == vtcode_core::config::constants::tools::FETCH;
+    if !is_web_fetch {
+        return None;
+    }
+    tool_args?
+        .as_object()?
+        .get("url")?
+        .as_str()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 /// Max logical rows shown for the approved command block; longer commands
 /// collapse behind an overflow count so the popup fits its viewport budget.
 const MAX_COMMAND_PREVIEW_LINES: usize = 8;
@@ -703,6 +725,13 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     let mut description_lines =
         tool_permission_header_lines(tool_name, display_name, command_preview.is_some(), source_thread_label);
 
+    if let Some(url) = web_fetch_approval_url(tool_name, tool_args) {
+        let url_line = format!("URL: {url}");
+        if !description_lines.iter().any(|line| line.contains(&url)) {
+            description_lines.push(url_line);
+        }
+    }
+
     if let Some(command_lines) = command_preview {
         description_lines.extend(format_command_preview_lines(command_lines));
     }
@@ -807,6 +836,7 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
 /// and a "Deny Once" option to skip this invocation.
 pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
     tool_name: &str,
+    tool_args: Option<&Value>,
     diagnostic: Option<Value>,
     _renderer: &mut AnsiRenderer,
     handle: &InlineHandle,
@@ -821,6 +851,10 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
         "## Policy".to_string(),
         "This tool is currently denied by tool policy configuration.".to_string(),
     ];
+
+    if let Some(url) = web_fetch_approval_url(tool_name, tool_args) {
+        description_lines.push(format!("URL: {url}"));
+    }
 
     if let Some(diag) = &diagnostic {
         if let Some(impact) = diag["impact"].as_str() {

@@ -1091,6 +1091,7 @@ pub(crate) async fn ensure_tool_permission_with_call_id<S: UiSession + ?Sized>(
         if let Some(flow) = handle_policy_denied(
             tool_registry,
             tool_name,
+            tool_args,
             tool_permission_cache,
             renderer,
             handle,

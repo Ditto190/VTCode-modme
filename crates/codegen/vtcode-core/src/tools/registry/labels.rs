@@ -61,7 +61,7 @@ pub fn tool_action_label(tool_name: &str, args: &Value) -> Cow<'static, str> {
             "copy" => Cow::Borrowed("Copy file"),
             _ => Cow::Borrowed("File operation"),
         },
-        "fetch" => Cow::Borrowed("Fetch"),
+        "fetch" | tool_names::WEB_FETCH | tool_names::FETCH_URL | tool_names::DEFUDDLE_FETCH => Cow::Borrowed("Fetch"),
         _ => Cow::Owned(humanize_tool_name(actual_tool_name)),
     }
 }

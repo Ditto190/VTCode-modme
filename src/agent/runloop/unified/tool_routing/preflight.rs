@@ -20,6 +20,7 @@ use crate::agent::runloop::unified::turn::tool_outcomes::error_handling::tool_de
 pub(super) async fn handle_policy_denied<S: UiSession + ?Sized>(
     tool_registry: &ToolRegistry,
     tool_name: &str,
+    tool_args: Option<&serde_json::Value>,
     tool_permission_cache: Option<&std::sync::Arc<tokio::sync::RwLock<vtcode_core::acp::ToolPermissionCache>>>,
     renderer: &mut AnsiRenderer,
     handle: &InlineHandle,
@@ -36,17 +37,25 @@ pub(super) async fn handle_policy_denied<S: UiSession + ?Sized>(
     let diagnostic = tool_denial_diagnostic(tool_name);
     let permission_start = std::time::Instant::now();
     emit_permission_requested(harness_emitter, tool_name);
-    let decision =
-        match prompt_policy_denied_tool(tool_name, diagnostic, renderer, handle, ctrl_c_state, ctrl_c_notify, session)
-            .await
-        {
-            Ok(d) => d,
-            Err(e) => {
-                let wait_ms = permission_start.elapsed().as_millis() as u64;
-                emit_permission_resolved(harness_emitter, tool_name, PermissionDecision::Cancelled, wait_ms);
-                return Err(e);
-            }
-        };
+    let decision = match prompt_policy_denied_tool(
+        tool_name,
+        tool_args,
+        diagnostic,
+        renderer,
+        handle,
+        ctrl_c_state,
+        ctrl_c_notify,
+        session,
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            let wait_ms = permission_start.elapsed().as_millis() as u64;
+            emit_permission_resolved(harness_emitter, tool_name, PermissionDecision::Cancelled, wait_ms);
+            return Err(e);
+        }
+    };
     let wait_ms = permission_start.elapsed().as_millis() as u64;
     emit_permission_resolved(
         harness_emitter,

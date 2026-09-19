@@ -11,7 +11,20 @@ pub(super) fn humanize_tool_name(name: &str) -> String {
     humanize_key(name)
 }
 
-pub(super) fn describe_fetch_action(_args: &Value) -> (String, HashSet<String>) {
+pub(super) fn describe_fetch_action(args: &Value) -> (String, HashSet<String>) {
+    if let Some(url) = args
+        .as_object()
+        .and_then(|map| map.get("url"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    {
+        // Approval modals must show the full URL (not just the domain) so the
+        // user can review the exact target before allowing the fetch.
+        let mut used = HashSet::new();
+        used.insert("url".to_string());
+        return (format!("Fetch {url}"), used);
+    }
     ("Use Fetch".into(), HashSet::new())
 }
 

@@ -741,7 +741,12 @@ pub(crate) fn describe_tool_action(
                 None => with_mcp("Apply workspace patch".into(), HashSet::new()),
             }
         }
-        "fetch" | tool_names::WEB_FETCH => {
+        actual_name
+            if actual_name == tool_names::WEB_FETCH
+                || actual_name == tool_names::FETCH_URL
+                || actual_name == tool_names::FETCH
+                || actual_name == tool_names::DEFUDDLE_FETCH =>
+        {
             let (desc, used) = describe_fetch_action(args);
             with_mcp(desc, used)
         }
