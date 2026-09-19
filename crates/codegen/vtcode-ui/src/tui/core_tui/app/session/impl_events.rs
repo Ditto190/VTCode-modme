@@ -826,6 +826,10 @@ impl Session {
     }
 
     /// Explicit expand: click a completed-edit "review full diff" notice row.
+    ///
+    /// Reflow may wrap the notice across several transcript rows, so match the
+    /// clicked row together with a small neighborhood rather than the single
+    /// screen line alone.
     fn open_diff_review_from_visible_text(
         &mut self,
         transcript_width: u16,
@@ -837,11 +841,29 @@ impl Session {
         }
         let height = self.core.transcript_rows.max(1) as usize;
         let visible = self.core.collect_transcript_window_cached(transcript_width, view_top, height);
-        let Some(line) = visible.get(row_in_view) else {
-            return false;
+        let row_text = |index: usize| -> Option<String> {
+            let line = visible.get(index)?;
+            Some(line.line.spans.iter().map(|span| span.content.as_ref()).collect())
         };
-        let text: String = line.line.spans.iter().map(|span| span.content.as_ref()).collect();
-        self.open_diff_review_for_notice(&text)
+        if let Some(text) = row_text(row_in_view)
+            && self.open_diff_review_for_notice(&text)
+        {
+            return true;
+        }
+        // Wrapped notice fragments: scan a short window around the click.
+        let start = row_in_view.saturating_sub(2);
+        let end = (row_in_view + 4).min(visible.len().saturating_sub(1));
+        if start > end {
+            return false;
+        }
+        let mut window = String::new();
+        for index in start..=end {
+            if let Some(text) = row_text(index) {
+                window.push_str(&text);
+                window.push('\n');
+            }
+        }
+        self.open_diff_review_for_notice(&window)
     }
 
     fn handle_input_click(&mut self, mouse_event: MouseEvent) -> bool {

@@ -283,38 +283,24 @@ fn render_diff_entry_details(
     }
 
     if get_bool(diff, "truncated") {
-        let path = {
-            let candidate = diff_path(diff);
-            if candidate.trim().is_empty() {
-                get_string(diff, "path").map(str::to_owned).unwrap_or_else(|| "diff".to_owned())
+        let omitted = get_u64(diff, "omitted_line_count").unwrap_or(0);
+        let inline_tui = renderer.prefers_untruncated_output();
+        // Registry previews are already head/tail excerpts when truncated.
+        // Never advertise full-diff review from an excerpt body.
+        if !inline_tui {
+            if omitted > 0 {
+                render_tree_detail(renderer, &format!("… +{omitted} lines (use exec_command with sed for full view)"))?;
             } else {
-                candidate.to_owned()
+                render_tree_detail(renderer, "… diff truncated")?;
             }
-        };
-        let content = get_string(diff, "content").unwrap_or("").to_string();
-        if let Some(omitted) = get_u64(diff, "omitted_line_count") {
-            let notice = format!("… +{omitted} lines — review full diff for {path}");
-            render_tree_detail(renderer, &notice)?;
-            if !content.is_empty() {
-                renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
-                    file_path: path.clone(),
-                    unified: content,
-                    omitted_lines: omitted,
-                    notice,
-                });
-            }
-        } else {
-            let notice = format!("… diff truncated — review full diff for {path}");
-            render_tree_detail(renderer, &notice)?;
-            if !content.is_empty() {
-                renderer.record_diff_review(vtcode_commons::ui_protocol::DiffReviewAnchor {
-                    file_path: path,
-                    unified: content,
-                    omitted_lines: 0,
-                    notice,
-                });
-            }
+            return Ok(());
         }
+        if omitted > 0 {
+            render_tree_detail(renderer, &format!("… +{omitted} lines omitted (preview excerpt retained)"))?;
+        } else {
+            render_tree_detail(renderer, "… diff truncated")?;
+        }
+        return Ok(());
     }
     Ok(())
 }
