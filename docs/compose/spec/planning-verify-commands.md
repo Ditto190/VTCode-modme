@@ -1,6 +1,6 @@
 ---
 feature: planning-verify-commands
-status: in-progress
+status: delivered
 updated: 2026-09-19
 branch: fix/planning-verify-review
 commits: 9c2ac1f8c..HEAD
@@ -10,9 +10,29 @@ commits: 9c2ac1f8c..HEAD
 
 ## Report
 
-**Prior delivery (merged)** — Inspection commands accepted in plan verification; recovery/repair prompts synced; live checkpoint regressions covered.
+**What was built** — Post-merge review of the planning-verify merge found a Medium validation regression: expanding `COMMAND_NAMES` with English-word binaries let prose verifies such as `file changes` / `sort order` pass the command-head rule (multi-token only). The amendment keeps real inspection verifies valid while requiring command evidence for ambiguous heads.
 
-**This amendment (post-merge review)** — Tighten the expanded allowlist against English-phrase false positives and reduce example-list drift across prompt surfaces.
+1. **Ambiguous command heads** (`artifacts.rs`): heads in `AMBIGUOUS_COMMAND_HEADS` (`cat`, `cut`, `diff`, `file`, `find`, `head`, `just`, `ls`, `make`, `sort`, `stat`, `tr`, `uniq`, `wc`) now need a later flag (`-n`, `--locked`) or filename/path-like token (`src/file.rs`, `README.md`, `./scripts/…`). Unambiguous heads (`cargo`, `rg`, `sed`, `grep`) keep the multi-token rule so `cargo test` stays valid. `git` remains absent; `git diff --check` stays rejected. Flag-shaped tokens keep their leading hyphen in `verification_words` so `-l` is not stripped to prose.
+2. **Shared example constants**: `PLANNING_VERIFY_VALID_EXAMPLES` / `PLANNING_VERIFY_INVALID_EXAMPLES` in `planning_workflow::artifacts`, embedded by `repair_feedback()` and `build_plan_repair_directive()`. Binary recovery/repair prompt constants keep compile-time literals; module-local presence tests assert inspection examples and `git diff --check`.
+3. **Filtered false positives**: `cargo test` without flags; `git diff --check` still invalid; `COMMAND_NAMES` is plan-validation only (not shell safety); pre-existing UI modal commit and uncommitted main edits out of scope.
+4. **Docs**: quality line + planning-workflow.md + SESSION_LOG_REVIEW note the ambiguous-head rule.
+
+**Verification** — commands run and observed results:
+
+- `cargo nextest run -p vtcode-core -E 'test(inspection) or test(english_phrase) or test(validate_plan) or test(repair_feedback) or test(plan_quality)'` — PASS (55)
+- `cargo nextest run -p vtcode -E 'test(repair_directive) or test(quality_line) or test(planning_recovery_prompt) or test(missing_plan)'` — PASS (9)
+- `cargo check --locked -p vtcode-core -p vtcode` — PASS
+- `cargo fmt --all -- --check` — PASS
+- Independent re-review (2026-09-19): AC1–AC5 met; no critical findings. Residual `wc README.md`/`head README.md` slash-less filename false-reject closed in the delivery follow-up.
+
+**Journey log** — at most 5 entries that help future work:
+
+1. Expanding a command-head allowlist with English words requires a second token of command evidence; multi-token length alone is insufficient.
+2. Keep `git` out of plan-verify `COMMAND_NAMES` or `git diff --check` re-approves as a multi-token head.
+3. Tokenizers that strip ASCII punctuation must preserve leading hyphens on flag-shaped tokens or flag-evidence gates fail closed (`wc -l`).
+4. Compiled prompt constants cannot `concat!`; shared fragments + substring presence tests are the maintainable multi-surface pattern.
+5. Ambiguous-head path evidence should accept slash-less filenames (`README.md`), not only `/` or `./` shapes.
+
 
 ## [S1] Problem
 

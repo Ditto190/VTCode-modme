@@ -846,6 +846,29 @@ fn is_flag_like_token(raw_word: &str) -> bool {
     word.len() > 1 && word.starts_with('-')
 }
 
+/// Filename-shaped evidence for ambiguous command heads: `README.md`,
+/// `notes.txt`, `Cargo.toml`. `is_pathlike_command_token` only accepts
+/// slash/`./`/absolute shapes, so slash-less inspection args would otherwise
+/// false-reject (`wc README.md`).
+fn is_filename_like_token(raw_word: &str) -> bool {
+    let word = raw_word.trim_matches(|character: char| matches!(character, '`' | '"' | '\''));
+    if word.is_empty() || word.starts_with('-') {
+        return false;
+    }
+    match word.rsplit_once('.') {
+        Some((stem, suffix)) => {
+            !stem.is_empty()
+                && !suffix.is_empty()
+                && suffix.len() <= 12
+                && suffix.chars().all(|character| character.is_ascii_alphanumeric())
+                && stem
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.'))
+        }
+        None => false,
+    }
+}
+
 /// True when a command-head phrase still looks like a real invocation after
 /// the allowlist match. Ambiguous English heads need flag/path evidence;
 /// unambiguous heads keep existing semantics.
@@ -862,10 +885,12 @@ fn command_head_has_invocation_shape(words: &[&str]) -> bool {
     {
         return true;
     }
-    words
-        .iter()
-        .skip(1)
-        .any(|word| is_flag_like_token(word) || is_pathlike_command_token(word) || word.contains('/'))
+    words.iter().skip(1).any(|word| {
+        is_flag_like_token(word)
+            || is_pathlike_command_token(word)
+            || word.contains('/')
+            || is_filename_like_token(word)
+    })
 }
 
 fn is_safe_workspace_relative_command_token(raw_word: &str) -> bool {
@@ -1622,6 +1647,8 @@ mod agentic_testing_tests {
             "head -40 docs/file.md",
             "tail -20 docs/file.md",
             "wc -l README.md",
+            "wc README.md",
+            "head README.md",
             "file src/main.rs",
             "ls src/",
             "cargo test",
