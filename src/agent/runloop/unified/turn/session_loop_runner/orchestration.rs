@@ -1637,8 +1637,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 {
                     use crate::agent::runloop::unified::turn::tool_outcomes::helpers as tracker_continue;
                     let planning_active = tool_registry.is_planning_active();
-                    let auto_continue_enabled =
-                        tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref()) && !planning_active;
+                    let tracker_kill_switch = tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref());
                     let is_verification_block = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { reason }
                     if reason.as_deref().is_some_and(|r| {
                         r.contains(
@@ -1650,14 +1649,14 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         RunLoopTurnLoopResult::Blocked { reason } => reason.as_deref(),
                         _ => None,
                     };
-                    let incomplete = if auto_continue_enabled && !planning_active {
+                    let incomplete = if tracker_kill_switch && !planning_active {
                         tracker_continue::incomplete_tracker_items(&tool_registry).await
                     } else {
                         None
                     };
                     let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
                     let should_queue = tracker_continue::should_queue_tracker_auto_continue(
-                        auto_continue_enabled && !planning_active,
+                        tracker_kill_switch,
                         planning_active,
                         turn_completed,
                         blocked_reason,
@@ -1669,8 +1668,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     // planning ends (budget/safety-cap/tool-free recovery) queue
                     // another turn. Completed planning turns may be interview or
                     // approval handoffs and must wait for the user. Never auto-approves.
-                    let plan_auto_continue_enabled =
-                        planning_active && tracker_continue::tracker_auto_continue_enabled(vt_cfg.as_ref());
+                    let plan_auto_continue_enabled = planning_active && tracker_kill_switch;
                     let plan_state = tool_registry.planning_workflow_state();
                     let plan_ready_for_approval = planning_active
                         && crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state)
@@ -1690,18 +1688,18 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                              Continue read-only research/synthesis toward one compact `<proposed_plan>` now; \
                              do not ask the user to resume and do not implement."
                             .to_string();
-                        let budget_remaining = session_stats.tracker_continuation_turns() < max_turns;
+                        let budget_remaining = session_stats.plan_continuation_turns() < max_turns;
                         let queued = budget_remaining
                             && match runtime.try_queue_follow_up_input(follow_up) {
                                 Ok(()) => {
-                                    session_stats.record_tracker_continuation_turn_with_limit(max_turns);
+                                    session_stats.record_plan_continuation_turn_with_limit(max_turns);
                                     std::sync::Arc::make_mut(&mut runtime.state.messages)
                                         .push(vtcode_core::llm::provider::Message::system(directive));
                                     let _ = renderer.line(
                                         MessageStyle::Info,
                                         &format!(
                                             "[i] Plan-mode auto-continue turn {}/{}: planning still active.",
-                                            session_stats.tracker_continuation_turns(),
+                                            session_stats.plan_continuation_turns(),
                                             max_turns
                                         ),
                                     );
@@ -1784,6 +1782,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             );
                         }
                     } else if planning_active && plan_ready_for_approval && turn_completed {
+                        session_stats.reset_plan_continuation_budget();
                         let _ =
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", true, 0, 0));
                     } else if planning_active && !plan_ready_for_approval && !turn_completed && !should_queue_plan {
@@ -1792,9 +1791,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
                     } else if !planning_active && incomplete.as_ref().is_none_or(|items| items.is_empty()) {
                         // Tracker work cleared (or none) outside planning: reset the
-                        // episode budget. Planning ends must not silently restore the
+                        // episode budgets. Planning ends must not silently restore the
                         // shared plan/tracker continuation budget.
                         session_stats.reset_tracker_continuation_budget();
+                        session_stats.reset_plan_continuation_budget();
                     }
                 }
                 if let RunLoopTurnLoopResult::Blocked { reason } = &outcome_result {

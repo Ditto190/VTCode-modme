@@ -145,6 +145,29 @@ impl ContinuationController {
         Ok(())
     }
 
+    /// Read-only incomplete-step labels from an existing tracker.
+    ///
+    /// Never creates the internal scaffold and never mutates checklist state.
+    /// Returns an empty list when no tracker exists or every step is completed.
+    pub(super) async fn incomplete_tracker_labels(&self) -> Result<Vec<String>> {
+        let Some(checklist) = self.load_tracker().await? else {
+            return Ok(Vec::new());
+        };
+        Ok(checklist
+            .items
+            .iter()
+            .filter(|item| item.status != "completed")
+            .map(|item| {
+                let index = item.index.unwrap_or(0);
+                if index > 0 {
+                    format!("#{} {} ({})", index, item.description, item.status)
+                } else {
+                    format!("{} ({})", item.description, item.status)
+                }
+            })
+            .collect())
+    }
+
     pub(super) async fn assess_completion(
         &mut self,
         task: &Task,
@@ -576,10 +599,10 @@ pub(super) fn tracker_status_force_continue_eligible(
         return false;
     }
     let reason_lower = assessment_reason.to_ascii_lowercase();
-    reason_lower.contains("incomplete")
-        || reason_lower.contains("task tracker still")
-        || reason_lower.contains("tracker is missing")
-        || reason_lower.contains("tracker could not be loaded")
+    // Only genuine incomplete-tracker signals force another turn. Do not
+    // treat scaffold-missing / load-failure reasons as force-continue here;
+    // the AgentRunner status path uses a read-only probe and never invents work.
+    reason_lower.contains("task tracker is incomplete") || reason_lower.contains("task tracker still has incomplete")
 }
 
 #[cfg(test)]
@@ -717,10 +740,19 @@ mod tests {
     fn tracker_status_force_continue_eligible_gates() {
         use super::tracker_status_force_continue_eligible as eligible;
         assert!(eligible(true, false, false, "Task tracker is incomplete: #2 change (pending)."));
-        assert!(eligible(true, false, false, "Task tracker could not be loaded."));
+        assert!(eligible(true, false, false, "Task tracker still has incomplete steps: #3 verify (pending)."));
+        assert!(!eligible(true, false, false, "Task tracker could not be loaded."));
         assert!(!eligible(false, false, false, "Task tracker is incomplete: #2 change (pending)."));
         assert!(!eligible(true, true, false, "Task tracker is incomplete: #2 change (pending)."));
         assert!(!eligible(true, false, true, "Task tracker is incomplete: #2 change (pending)."));
         assert!(!eligible(true, false, false, "Scaffold created for analysis."));
+    }
+
+    #[tokio::test]
+    async fn incomplete_tracker_labels_are_read_only_when_absent() {
+        let temp = TempDir::new().expect("tempdir");
+        let controller = make_controller(&temp, ContinuationPolicy::All, false);
+        let labels = controller.incomplete_tracker_labels().await.expect("labels");
+        assert!(labels.is_empty(), "absent tracker must not invent incomplete work");
     }
 }
