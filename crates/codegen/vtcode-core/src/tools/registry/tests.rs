@@ -15,6 +15,8 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tempfile::TempDir;
 use vtcode_commons::canonicalize;
@@ -575,6 +577,8 @@ async fn harness_exec_reuses_public_output_normalization() -> Result<()> {
 async fn harness_terminal_runs_retain_completed_sessions_until_close() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let active_pty_sessions = Arc::new(AtomicUsize::new(0));
+    registry.set_active_pty_sessions(Arc::clone(&active_pty_sessions));
 
     let response = registry
         .execute_harness_command_session_terminal_run(json!({
@@ -591,11 +595,92 @@ async fn harness_terminal_runs_retain_completed_sessions_until_close() -> Result
         .to_string();
     assert_eq!(response["exit_code"], 0);
     assert_eq!(response["output"].as_str(), Some("vtcode-terminal"));
+    assert_eq!(active_pty_sessions.load(Ordering::Relaxed), 1);
     assert_eq!(registry.harness_exec_session_completed(&session_id).await?, Some(0));
 
     registry.close_harness_exec_session(&session_id).await?;
+    assert_eq!(active_pty_sessions.load(Ordering::Relaxed), 0);
     registry.harness_exec_session_completed(&session_id).await.unwrap_err();
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn background_terminal_runs_do_not_mark_the_ui_busy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    let active_pty_sessions = Arc::new(AtomicUsize::new(0));
+    registry.set_active_pty_sessions(Arc::clone(&active_pty_sessions));
+
+    let response = registry
+        .execute_harness_command_session_terminal_run(json!({
+            "action": "run",
+            "command": ["/bin/sh", "-lc", "sleep 5"],
+            "tty": true,
+            "background": true,
+            "yield_time_ms": 200,
+        }))
+        .await?;
+    let session_id = response["session_id"]
+        .as_str()
+        .expect("background terminal run should expose session_id");
+
+    assert_eq!(response["background"], true);
+    assert_eq!(active_pty_sessions.load(Ordering::Relaxed), 0);
+
+    registry.close_harness_exec_session(session_id).await?;
+    assert_eq!(active_pty_sessions.load(Ordering::Relaxed), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn background_exec_returns_reusable_session_metadata_and_drains_on_wait() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let registry = ToolRegistry::new(temp_dir.path().to_path_buf()).await;
+    registry.allow_all_tools().await?;
+
+    let initial = tokio::time::timeout(
+        Duration::from_secs(3),
+        registry.execute_harness_command_session(json!({
+            "action": "run",
+            "command": "printf first; sleep 0.4; printf second",
+            "tty": false,
+            "background": true,
+            "yield_time_ms": 250,
+        })),
+    )
+    .await??;
+    let session_id = initial["session_id"]
+        .as_str()
+        .expect("background run should expose session_id")
+        .to_string();
+
+    assert_eq!(initial["background"], true);
+    assert_eq!(initial["lifecycle_state"], "running");
+    assert!(initial["child_pid"].as_u64().is_some_and(|pid| pid > 0));
+    assert_eq!(initial["next_wait_args"]["session_id"], session_id);
+    assert_eq!(initial["next_continue_args"]["session_id"], session_id);
+    assert!(initial["output"].as_str().unwrap_or_default().contains("first"));
+
+    let completed = tokio::time::timeout(
+        Duration::from_secs(5),
+        registry.execute_harness_command_session(json!({
+            "action": "wait",
+            "session_id": session_id,
+            "wait_timeout_seconds": 3,
+        })),
+    )
+    .await??;
+    assert_eq!(completed["background"], true);
+    assert_eq!(completed["exit_code"], 0);
+    assert!(completed["output"].as_str().unwrap_or_default().contains("second"));
+
+    registry
+        .execute_harness_command_session(json!({
+            "action": "close",
+            "session_id": session_id,
+        }))
+        .await?;
     Ok(())
 }
 

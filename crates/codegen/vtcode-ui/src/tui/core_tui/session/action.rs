@@ -502,8 +502,6 @@ pub(crate) fn is_readline_editing_key(key: &KeyEvent) -> bool {
             key.code,
             KeyCode::Char('f')
                 | KeyCode::Char('F')
-                | KeyCode::Char('b')
-                | KeyCode::Char('B')
                 | KeyCode::Char('p')
                 | KeyCode::Char('P')
                 | KeyCode::Char('n')

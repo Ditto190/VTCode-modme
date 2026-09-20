@@ -364,7 +364,10 @@ async fn handle_codex_exec_command_impl(
 
     let completed = match codex_result {
         Ok(completed) => {
-            let turn_completed = ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() });
+            let turn_completed = ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            });
             emit_canonical_event(&canonical, &turn_completed, "turn.completed").await?;
             event_processor.process_event(&turn_completed);
             let thread_completed = ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {

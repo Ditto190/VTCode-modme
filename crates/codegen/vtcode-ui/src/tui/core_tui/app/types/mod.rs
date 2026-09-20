@@ -19,7 +19,7 @@ pub use protocol::{
 pub use slash::SlashCommandItem;
 
 pub use crate::tui::core_tui::types::{
-    ContentPart, FocusChangeCallback, InlineHeaderBadge, InlineHeaderContext, InlineHeaderHighlight,
+    ContentPart, ExecSessionAction, FocusChangeCallback, InlineHeaderBadge, InlineHeaderContext, InlineHeaderHighlight,
     InlineHeaderStatusBadge, InlineHeaderStatusTone, InlineLinkRange, InlineLinkTarget, InlineListItem,
     InlineListSearchConfig, InlineListSelection, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme,
     LocalAgentEntry, LocalAgentKind, OpenAIServiceTierChoice, OverlayEvent, OverlaySelectionChange, PreviewCallback,

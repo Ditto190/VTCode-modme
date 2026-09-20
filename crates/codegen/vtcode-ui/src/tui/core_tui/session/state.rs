@@ -271,8 +271,10 @@ impl Session {
         }
     }
 
-    pub(crate) fn has_delegated_local_agents(&self) -> bool {
-        self.local_agents.iter().any(|entry| entry.kind == LocalAgentKind::Delegated)
+    pub(crate) fn has_local_agents(&self) -> bool {
+        self.local_agents
+            .iter()
+            .any(|entry| matches!(entry.kind, LocalAgentKind::Delegated | LocalAgentKind::ExecSession))
     }
 
     pub(crate) fn set_local_agents_drawer_visible(&mut self, visible: bool) {
@@ -296,6 +298,14 @@ impl Session {
 
     pub(crate) fn input_area(&self) -> Option<Rect> {
         self.areas.input()
+    }
+
+    pub(crate) fn set_input_status_area(&mut self, area: Option<Rect>) {
+        self.areas.set_input_status(area);
+    }
+
+    pub(crate) fn input_status_area(&self) -> Option<Rect> {
+        self.areas.input_status()
     }
 
     pub(crate) fn set_bottom_panel_area(&mut self, area: Option<Rect>) {

@@ -9,6 +9,7 @@ use vtcode_ui::tui::app::{AgentPaletteItem, InlineListItem, InlineListSearchConf
 use super::ui::{ensure_selection_ui_available, wait_for_list_modal_selection};
 use super::{SlashCommandContext, SlashCommandControl};
 use crate::agent::runloop::slash_commands::{AgentDefinitionScope, AgentManagerAction, SubprocessManagerAction};
+use crate::agent::runloop::unified::session_setup::refresh_local_agents;
 
 #[path = "agents_authoring.rs"]
 mod authoring;
@@ -104,6 +105,17 @@ pub(crate) async fn handle_manage_subprocesses(
     mut ctx: SlashCommandContext<'_>,
     action: SubprocessManagerAction,
 ) -> Result<SlashCommandControl> {
+    if matches!(&action, SubprocessManagerAction::List) && ctx.renderer.supports_inline_ui() {
+        let controller = ctx.tool_registry.subagent_controller();
+        if let Err(error) =
+            refresh_local_agents(ctx.handle, controller.as_ref(), ctx.tool_registry.exec_session_manager()).await
+        {
+            tracing::warn!(%error, "Failed to refresh local agents before opening subprocesses");
+        }
+        ctx.handle.show_local_agents();
+        return Ok(SlashCommandControl::Continue);
+    }
+
     let Some(controller) = ctx.tool_registry.subagent_controller() else {
         return render_missing_subagent_controller(&mut ctx);
     };

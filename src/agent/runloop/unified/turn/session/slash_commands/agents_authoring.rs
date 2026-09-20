@@ -583,7 +583,7 @@ async fn save_native_agent(
 
     if let Some(controller) = ctx.tool_registry.subagent_controller() {
         let _ = controller.reload().await;
-        refresh_local_agents(ctx.handle, &controller).await?;
+        refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager()).await?;
         super::refresh_agent_palette(ctx.handle, controller.as_ref()).await;
     }
 

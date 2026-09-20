@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub enum LocalAgentKind {
     Delegated,
     Background,
+    ExecSession,
 }
 
 impl LocalAgentKind {
@@ -12,8 +13,19 @@ impl LocalAgentKind {
         match self {
             Self::Delegated => "delegated",
             Self::Background => "background",
+            Self::ExecSession => "exec-session",
         }
     }
+}
+
+/// Actions that the runloop performs for a raw background exec session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecSessionAction {
+    Inspect,
+    GracefulTerminate,
+    ForceTerminateOrClose,
+    Focus,
+    Preview,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +49,7 @@ impl LocalAgentEntry {
                 matches!(self.status.as_str(), "queued" | "running" | "waiting")
             }
             LocalAgentKind::Background => matches!(self.status.as_str(), "starting" | "running"),
+            LocalAgentKind::ExecSession => self.status == "running",
         }
     }
 }

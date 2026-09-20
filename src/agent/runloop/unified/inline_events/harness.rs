@@ -493,7 +493,17 @@ pub(crate) fn turn_started_event() -> ThreadEvent {
 }
 
 pub(crate) fn turn_completed_event(usage: Usage) -> ThreadEvent {
-    ThreadEvent::TurnCompleted(TurnCompletedEvent { usage })
+    turn_completed_event_with_sessions(usage, Vec::new())
+}
+
+pub(crate) fn turn_completed_event_with_sessions(usage: Usage, sessions: Vec<String>) -> ThreadEvent {
+    ThreadEvent::TurnCompleted(TurnCompletedEvent {
+        usage,
+        in_progress_exec_sessions: sessions
+            .into_iter()
+            .take(vtcode_core::exec::events::MAX_IN_PROGRESS_EXEC_SESSIONS)
+            .collect(),
+    })
 }
 
 pub(crate) fn turn_failed_event(message: impl Into<String>, usage: Option<Usage>) -> ThreadEvent {
@@ -883,7 +893,7 @@ mod tests {
             output_tokens: 9,
         });
 
-        let ThreadEvent::TurnCompleted(TurnCompletedEvent { usage }) = event else {
+        let ThreadEvent::TurnCompleted(TurnCompletedEvent { usage, .. }) = event else {
             panic!("expected turn.completed");
         };
 
@@ -891,6 +901,37 @@ mod tests {
         assert_eq!(usage.cached_input_tokens, 7);
         assert_eq!(usage.cache_creation_tokens, 0);
         assert_eq!(usage.output_tokens, 9);
+    }
+
+    #[test]
+    fn turn_completed_event_with_sessions_caps_ids() {
+        let sessions = vec![
+            "run-1".to_string(),
+            "run-2".to_string(),
+            "run-3".to_string(),
+            "run-4".to_string(),
+            "run-5".to_string(),
+            "run-6".to_string(),
+        ];
+        let event = turn_completed_event_with_sessions(Usage::default(), sessions);
+        let ThreadEvent::TurnCompleted(completed) = event else {
+            panic!("expected turn.completed");
+        };
+        assert_eq!(
+            completed.in_progress_exec_sessions,
+            vec![
+                "run-1".to_string(),
+                "run-2".to_string(),
+                "run-3".to_string(),
+                "run-4".to_string(),
+            ]
+        );
+
+        let empty = turn_completed_event(Usage::default());
+        let ThreadEvent::TurnCompleted(empty_completed) = empty else {
+            panic!("expected turn.completed");
+        };
+        assert!(empty_completed.in_progress_exec_sessions.is_empty());
     }
 
     #[test]

@@ -20,7 +20,10 @@ fn sample_turn() -> Vec<ThreadEvent> {
     vec![
         ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "thread".to_string() }),
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-        ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
         ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
             thread_id: "thread".to_string(),
             session_id: "session".to_string(),
@@ -65,8 +68,11 @@ fn event_log_batches_appends_until_turn_boundary() {
         .expect("append turn start");
     assert_eq!(fs::metadata(&events_path).expect("metadata").len(), 0);
 
-    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-        .expect("append turn completion");
+    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+        usage: Usage::default(),
+        in_progress_exec_sessions: Vec::new(),
+    }))
+    .expect("append turn completion");
     assert!(fs::metadata(&events_path).expect("metadata").len() > 0);
     assert_eq!(log.reconstruct_turn(1).expect("reconstruct").len(), 2);
 }
@@ -135,7 +141,10 @@ fn reopening_mid_turn_preserves_state_for_completion() {
 
     let reopened = open(dir.path(), "sess-mid-turn-resume", DEFAULT_MAX_EVENTS).expect("reopen");
     reopened
-        .append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
+        .append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }))
         .expect("append turn completion");
 
     assert_eq!(reopened.turn_count(), 1);
@@ -474,7 +483,10 @@ fn current_manifest_rejects_a_stale_but_well_formed_turn_index() {
     let log = open(dir.path(), session_id, DEFAULT_MAX_EVENTS).expect("open");
     for event in [
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-        ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
     ] {
         log.append(&event).expect("append first turn");
     }
@@ -482,7 +494,10 @@ fn current_manifest_rejects_a_stale_but_well_formed_turn_index() {
     let first_turn_index = fs::read(&index_path).expect("read first index");
     for event in [
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-        ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
     ] {
         log.append(&event).expect("append second turn");
     }
@@ -531,8 +546,11 @@ fn legacy_manifest_uses_valid_index_base_when_scanning() {
         for _ in 0..3 {
             log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
                 .expect("append turn start");
-            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-                .expect("append turn completion");
+            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }))
+            .expect("append turn completion");
         }
         log.flush().expect("flush");
     }
@@ -583,7 +601,10 @@ fn cap_rewrite_keeps_event_log_appendable_and_reopenable() {
     let turn = || {
         [
             ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-            ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+            ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }),
         ]
     };
 
@@ -622,12 +643,18 @@ fn cap_eviction_summary_contains_bounded_grounded_facts() {
         },
     }))
     .expect("append message");
-    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-        .expect("complete first turn");
+    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+        usage: Usage::default(),
+        in_progress_exec_sessions: Vec::new(),
+    }))
+    .expect("complete first turn");
     log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
         .expect("append second turn start");
-    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-        .expect("complete second turn");
+    log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+        usage: Usage::default(),
+        in_progress_exec_sessions: Vec::new(),
+    }))
+    .expect("complete second turn");
 
     let derived = sessions_root(dir.path()).join("sess-grounded-summary/derived");
     let summary_path = fs::read_dir(&derived)
@@ -653,8 +680,11 @@ fn cap_eviction_counts_session_records_removed_with_oldest_turn() {
     for _ in 0..2 {
         log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
             .expect("append turn start");
-        log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-            .expect("append turn completion");
+        log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }))
+        .expect("append turn completion");
     }
 
     assert_eq!(log.event_count(), 2, "eviction count must include thread.started in the removed prefix");
@@ -678,8 +708,11 @@ fn scan_after_cap_rewrite_crash_preserves_retained_turn_ordinals() {
         for _ in 0..3 {
             log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
                 .expect("append turn start");
-            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-                .expect("append turn completion");
+            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }))
+            .expect("append turn completion");
         }
         log.flush().expect("flush before simulated rewrite");
     }
@@ -711,7 +744,10 @@ fn scan_after_full_cap_rewrite_crash_preserves_next_turn_ordinal() {
         let log = open(dir.path(), "sess-cap-crash-empty", 0).expect("open");
         for event in [
             ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-            ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+            ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }),
         ] {
             log.append(&event).expect("append");
         }
@@ -729,7 +765,10 @@ fn scan_after_full_cap_rewrite_crash_preserves_next_turn_ordinal() {
         .append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
         .expect("append next turn start");
     reopened
-        .append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
+        .append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }))
         .expect("append next turn completion");
     assert_eq!(reopened.turn_count(), 2);
     assert_eq!(reopened.reconstruct_turn(2).expect("reconstruct next turn").len(), 2);
@@ -746,8 +785,11 @@ fn pending_cap_rewrite_recovers_when_index_is_missing() {
         for _ in 0..3 {
             log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
                 .expect("append turn start");
-            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-                .expect("append turn completion");
+            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }))
+            .expect("append turn completion");
         }
         log.flush().expect("flush before simulated rewrite");
     }
@@ -793,8 +835,11 @@ fn pending_cap_rewrite_recovers_when_index_is_invalid() {
         for _ in 0..3 {
             log.append(&ThreadEvent::TurnStarted(TurnStartedEvent::default()))
                 .expect("append turn start");
-            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }))
-                .expect("append turn completion");
+            log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }))
+            .expect("append turn completion");
         }
         log.flush().expect("flush before simulated rewrite");
     }
@@ -837,13 +882,19 @@ fn multiple_open_handles_share_turn_state_and_file_lock() {
 
     for event in [
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-        ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
     ] {
         first.append(&event).expect("append first turn");
     }
     for event in [
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-        ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
     ] {
         second.append(&event).expect("append second turn");
     }
@@ -862,12 +913,18 @@ fn failed_eviction_summary_keeps_canonical_events() {
     let log = open_with_eviction_summary(dir.path(), "sess-summary-failure", 2, hook).expect("open");
     for event in [
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-        ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+        ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
         ThreadEvent::TurnStarted(TurnStartedEvent::default()),
     ] {
         let _ = log.append(&event);
     }
-    let error = log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }));
+    let error = log.append(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+        usage: Usage::default(),
+        in_progress_exec_sessions: Vec::new(),
+    }));
     assert!(error.is_err());
     let events_path = sessions_root(dir.path()).join("sess-summary-failure/events.jsonl");
     assert_eq!(fs::read_to_string(events_path).expect("read canonical log").lines().count(), 4);
@@ -906,7 +963,10 @@ fn scan_fallback_when_manifest_missing() {
     let events = [
         VersionedThreadEvent::new(ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "t-1".to_string() })),
         VersionedThreadEvent::new(ThreadEvent::TurnStarted(TurnStartedEvent::default())),
-        VersionedThreadEvent::new(ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() })),
+        VersionedThreadEvent::new(ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        })),
     ];
     let lines: Vec<String> = events.iter().map(|v| serde_json::to_string(v).expect("ser")).collect();
     fs::write(&events_path, lines.join("\n") + "\n").expect("write raw events");
@@ -926,7 +986,10 @@ fn scan_skips_malformed_lifecycle_payloads() {
 
     let valid_events = [
         VersionedThreadEvent::new(ThreadEvent::TurnStarted(TurnStartedEvent::default())),
-        VersionedThreadEvent::new(ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() })),
+        VersionedThreadEvent::new(ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        })),
     ];
     let mut lines = vec![
         r#"{"schema_version":"0.11.0","event":{"type":"thread.started","thread_id":123}}"#.to_string(),

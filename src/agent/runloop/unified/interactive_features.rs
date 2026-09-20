@@ -22,14 +22,6 @@ pub(crate) struct PromptSuggestion {
     pub(crate) badge: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BackgroundJobSummary {
-    pub(crate) id: String,
-    pub(crate) command: String,
-    pub(crate) working_dir: Option<String>,
-    pub(crate) status: String,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PromptSuggestionSource {
     Llm,
@@ -335,31 +327,6 @@ fn normalize_inline_prompt_suggestion(content: &str, draft: &str) -> Option<Stri
     }
 
     trimmed.to_lowercase().starts_with(&draft.to_lowercase()).then_some(trimmed)
-}
-
-pub(crate) fn collect_background_jobs(tool_registry: &ToolRegistry) -> Vec<BackgroundJobSummary> {
-    let mut jobs = tool_registry
-        .pty_manager()
-        .list_sessions()
-        .into_iter()
-        .map(|session| {
-            let status = match tool_registry.pty_manager().is_session_completed(&session.id) {
-                Ok(Some(0)) => "done".to_string(),
-                Ok(Some(code)) => format!("exit {code}"),
-                Ok(None) => "running".to_string(),
-                Err(_) => "unknown".to_string(),
-            };
-            BackgroundJobSummary {
-                id: session.id,
-                command: session.command,
-                working_dir: session.working_dir,
-                status,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    jobs.sort_by(|left, right| left.id.cmp(&right.id));
-    jobs
 }
 
 fn last_error_like_message(message: &uni::Message) -> Option<String> {

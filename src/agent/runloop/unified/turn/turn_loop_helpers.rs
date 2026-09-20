@@ -481,7 +481,7 @@ fn push_steered_user_message(working_history: &mut Vec<uni::Message>, intent_id:
 }
 
 async fn cancel_for_steering_stop(tool_registry: &mut vtcode_core::tools::ToolRegistry, result: &mut TurnLoopResult) {
-    if let Err(err) = tool_registry.terminate_all_exec_sessions_async().await {
+    if let Err(err) = tool_registry.terminate_active_exec_sessions_async().await {
         tracing::warn!(error = %err, "Failed to terminate exec sessions after steering stop");
     }
     *result = TurnLoopResult::Cancelled;

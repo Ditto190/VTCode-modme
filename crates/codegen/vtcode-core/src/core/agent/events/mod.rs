@@ -528,7 +528,7 @@ impl ExecEventRecorder {
     }
 
     pub fn turn_completed(&mut self, usage: Usage) {
-        self.record(ThreadEvent::TurnCompleted(TurnCompletedEvent { usage }));
+        self.record(ThreadEvent::TurnCompleted(TurnCompletedEvent { usage, in_progress_exec_sessions: Vec::new() }));
         self.finish_turn();
     }
 
@@ -995,7 +995,10 @@ mod tests {
         let events = vec![
             ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "thread".to_string() }),
             ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-            ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+            ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }),
         ];
 
         for (index, event) in events.iter().enumerate() {
@@ -1130,7 +1133,10 @@ mod tests {
             health: Arc::new(SessionStoreSinkHealth::default()),
         };
         let first = ThreadEvent::TurnStarted(TurnStartedEvent::default());
-        let second = ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() });
+        let second = ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        });
 
         enqueue_session_event(&state, &first).expect("first event should fit");
         assert!(enqueue_session_event(&state, &second).is_err(), "queue saturation must fail closed");

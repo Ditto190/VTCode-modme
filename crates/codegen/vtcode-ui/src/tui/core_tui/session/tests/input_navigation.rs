@@ -489,14 +489,14 @@ fn ctrl_f_moves_forward_one_character() {
 }
 
 #[test]
-fn ctrl_b_moves_backward_one_character() {
+fn ctrl_b_dispatches_background_operation() {
     let mut session = session_with_input("hello", 3);
 
     let event = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
     let result = session.process_key(event);
 
-    assert!(result.is_none());
-    assert_eq!(session.input_manager.cursor(), 2);
+    assert!(matches!(result, Some(InlineEvent::BackgroundOperation)));
+    assert_eq!(session.input_manager.cursor(), 3);
 }
 
 #[test]

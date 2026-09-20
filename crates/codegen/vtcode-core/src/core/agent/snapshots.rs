@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
-use vtcode_exec_events::{Usage, deserialize_null_as_default};
+use vtcode_exec_events::{MAX_IN_PROGRESS_EXEC_SESSIONS, Usage, deserialize_null_as_default};
 
 use crate::core::pending_actions::ExpectedOutcome;
 use crate::core::state_schema::{SchemaVersion, VersionedState};
@@ -135,6 +135,8 @@ impl SnapshotTurnDiagnostics {
     ///
     /// Kept as a builder step because the ids come from the live exec-session
     /// registry (async), not from the synchronous turn-state counters.
+    /// Bound shares `vtcode_exec_events::MAX_IN_PROGRESS_EXEC_SESSIONS` with
+    /// `TurnCompletedEvent` so checkpoint and event streams cannot drift.
     #[must_use]
     pub fn with_in_progress_exec_sessions(mut self, sessions: Vec<crate::tools::types::VTCodeExecSession>) -> Self {
         self.in_progress_exec_sessions = sessions
@@ -145,9 +147,6 @@ impl SnapshotTurnDiagnostics {
         self
     }
 }
-
-/// Bound on exec session ids recorded in one turn's diagnostics.
-const MAX_IN_PROGRESS_EXEC_SESSIONS: usize = 4;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotTurnContext {

@@ -4,35 +4,54 @@ use vtcode_core::subagents::{
     BackgroundSubprocessEntry, BackgroundSubprocessSnapshot, BackgroundSubprocessStatus, SubagentController,
     SubagentStatus, SubagentStatusEntry, SubagentThreadSnapshot,
 };
+use vtcode_core::tools::exec_session::ExecSessionManager;
+use vtcode_core::tools::types::{VTCodeExecSession, VTCodeSessionLifecycleState};
 use vtcode_core::{CommandExecutionStatus, ThreadEvent, ThreadItemDetails, ToolCallStatus};
 use vtcode_ui::tui::app::{InlineHandle, LocalAgentEntry, LocalAgentKind};
 
-pub(crate) async fn refresh_local_agents(handle: &InlineHandle, controller: &Arc<SubagentController>) -> Result<()> {
-    let background_entries = controller.refresh_background_processes().await?;
-    let delegated_entries = controller.status_entries().await;
-    let local_agents = build_local_agent_entries(controller, delegated_entries, background_entries).await;
+pub(crate) async fn refresh_local_agents(
+    handle: &InlineHandle,
+    controller: Option<&Arc<SubagentController>>,
+    exec_sessions: ExecSessionManager,
+) -> Result<()> {
+    let (delegated_entries, background_entries, refresh_error) = if let Some(controller) = controller {
+        let delegated_entries = controller.status_entries().await;
+        match controller.refresh_background_processes().await {
+            Ok(background_entries) => (delegated_entries, background_entries, None),
+            Err(error) => (delegated_entries, controller.background_status_entries().await, Some(error)),
+        }
+    } else {
+        (Vec::new(), Vec::new(), None)
+    };
+    let local_agents =
+        build_local_agent_entries(controller, delegated_entries, background_entries, &exec_sessions).await;
     handle.set_local_agents(local_agents);
-    Ok(())
+    refresh_error.map_or(Ok(()), Err)
 }
 
 async fn build_local_agent_entries(
-    controller: &Arc<SubagentController>,
+    controller: Option<&Arc<SubagentController>>,
     delegated_entries: Vec<SubagentStatusEntry>,
     background_entries: Vec<BackgroundSubprocessEntry>,
+    exec_sessions: &ExecSessionManager,
 ) -> Vec<LocalAgentEntry> {
     let mut entries = Vec::new();
 
     for entry in visible_delegated_local_agents(delegated_entries) {
-        let snapshot = match controller.snapshot_for_thread(&entry.id).await {
-            Ok(snapshot) => Some(snapshot),
-            Err(err) => {
-                tracing::debug!(
-                    subagent_id = entry.id.as_str(),
-                    "Failed to snapshot delegated agent for local-agents UI: {}",
-                    err
-                );
-                None
+        let snapshot = if let Some(controller) = controller {
+            match controller.snapshot_for_thread(&entry.id).await {
+                Ok(snapshot) => Some(snapshot),
+                Err(err) => {
+                    tracing::debug!(
+                        subagent_id = entry.id.as_str(),
+                        "Failed to snapshot delegated agent for local-agents UI: {}",
+                        err
+                    );
+                    None
+                }
             }
+        } else {
+            None
         };
         let preview = snapshot
             .as_ref()
@@ -42,7 +61,7 @@ async fn build_local_agent_entries(
             .as_ref()
             .map(|snapshot| delegated_local_agent_summary(&entry, snapshot));
         entries.push((
-            entry.updated_at,
+            Some(entry.updated_at),
             LocalAgentEntry {
                 id: entry.id.clone(),
                 display_label: entry.display_label.clone(),
@@ -58,23 +77,27 @@ async fn build_local_agent_entries(
     }
 
     for entry in visible_background_local_agents(background_entries) {
-        let snapshot = match controller.background_snapshot(&entry.id).await {
-            Ok(snapshot) => Some(snapshot),
-            Err(err) => {
-                tracing::debug!(
-                    subprocess_id = entry.id.as_str(),
-                    "Failed to snapshot background subprocess for local-agents UI: {}",
-                    err
-                );
-                None
+        let snapshot = if let Some(controller) = controller {
+            match controller.background_snapshot(&entry.id).await {
+                Ok(snapshot) => Some(snapshot),
+                Err(err) => {
+                    tracing::debug!(
+                        subprocess_id = entry.id.as_str(),
+                        "Failed to snapshot background subprocess for local-agents UI: {}",
+                        err
+                    );
+                    None
+                }
             }
+        } else {
+            None
         };
         let preview = snapshot
             .as_ref()
             .map(background_local_agent_preview)
             .unwrap_or_else(|| background_local_agent_preview_placeholder(&entry));
         entries.push((
-            entry.updated_at,
+            Some(entry.updated_at),
             LocalAgentEntry {
                 id: entry.id.clone(),
                 display_label: entry.display_label.clone(),
@@ -89,8 +112,51 @@ async fn build_local_agent_entries(
         ));
     }
 
+    for snapshot in exec_sessions.background_session_snapshots().await {
+        let metadata = snapshot.metadata;
+        entries.push((
+            metadata.started_at,
+            LocalAgentEntry {
+                id: metadata.id.as_str().to_string(),
+                display_label: exec_session_command_label(&metadata),
+                agent_name: "exec-session".to_string(),
+                color: None,
+                kind: LocalAgentKind::ExecSession,
+                status: exec_session_status(&metadata),
+                summary: Some(exec_session_summary(&metadata)),
+                preview: snapshot.preview,
+                transcript_path: None,
+            },
+        ));
+    }
+
     entries.sort_by(|left, right| right.0.cmp(&left.0));
     entries.into_iter().map(|(_, entry)| entry).collect()
+}
+
+fn exec_session_command_label(metadata: &VTCodeExecSession) -> String {
+    std::iter::once(metadata.command.as_str())
+        .chain(metadata.args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn exec_session_status(metadata: &VTCodeExecSession) -> String {
+    match metadata.lifecycle_state {
+        Some(VTCodeSessionLifecycleState::Running) => "running".to_string(),
+        Some(VTCodeSessionLifecycleState::Exited) => metadata
+            .exit_code
+            .map_or_else(|| "exited".to_string(), |code| format!("exited ({code})")),
+        None => "unknown".to_string(),
+    }
+}
+
+fn exec_session_summary(metadata: &VTCodeExecSession) -> String {
+    format!(
+        "cwd {} · pid {}",
+        metadata.working_dir.as_deref().unwrap_or("unknown"),
+        metadata.child_pid.map_or_else(|| "-".to_string(), |pid| pid.to_string())
+    )
 }
 
 pub(super) fn visible_delegated_local_agents(entries: Vec<SubagentStatusEntry>) -> Vec<SubagentStatusEntry> {

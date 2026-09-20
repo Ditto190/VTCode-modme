@@ -27,7 +27,7 @@ pub(super) async fn close_subagent_entry(
     display_label: &str,
 ) -> Result<SlashCommandControl> {
     controller.close(id).await?;
-    refresh_local_agents(ctx.handle, controller).await?;
+    refresh_local_agents(ctx.handle, Some(controller), ctx.tool_registry.exec_session_manager()).await?;
     ctx.renderer
         .line(MessageStyle::Info, &format!("Closed delegated agent {display_label}."))?;
     Ok(SlashCommandControl::Continue)
@@ -44,7 +44,7 @@ pub(super) async fn apply_background_subprocess_action(
     } else {
         controller.graceful_stop_background(id).await?
     };
-    refresh_local_agents(ctx.handle, controller).await?;
+    refresh_local_agents(ctx.handle, Some(controller), ctx.tool_registry.exec_session_manager()).await?;
     Ok(entry)
 }
 
@@ -135,7 +135,8 @@ pub(super) async fn show_threads_modal(mut ctx: SlashCommandContext<'_>) -> Resu
                 }
                 if confirm_subagent_cancellation(&mut ctx, entry.display_label.as_str()).await? {
                     controller.close(&entry.id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     ctx.renderer
                         .line(MessageStyle::Info, &format!("Closed delegated agent {}.", entry.display_label))?;
                 }
@@ -328,7 +329,8 @@ pub(super) async fn show_active_agent_inspector(
             InspectorActionKind::GracefulStop | InspectorActionKind::ForceCancel => {
                 if confirm_subagent_cancellation(ctx, current_entry.display_label.as_str()).await? {
                     controller.close(&agent_id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     ctx.renderer.line(
                         MessageStyle::Info,
                         &format!("Closed delegated agent {}.", current_entry.display_label),
@@ -346,7 +348,8 @@ pub(super) async fn show_active_agent_inspector(
                     && confirm_subagent_cancellation(ctx, current_entry.display_label.as_str()).await?
                 {
                     controller.close(&agent_id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     ctx.renderer.line(
                         MessageStyle::Info,
                         &format!("Closed delegated agent {}.", current_entry.display_label),
@@ -453,7 +456,8 @@ pub(super) async fn show_background_subprocess_inspector(
             InspectorActionKind::GracefulStop => {
                 if confirm_subprocess_action(ctx, current_entry.display_label.as_str(), false).await? {
                     let updated = controller.graceful_stop_background(&record_id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     render_subprocess_status(ctx, &updated)?;
                 }
                 return Ok(SlashCommandControl::Continue);
@@ -461,7 +465,8 @@ pub(super) async fn show_background_subprocess_inspector(
             InspectorActionKind::ForceCancel => {
                 if confirm_subprocess_action(ctx, current_entry.display_label.as_str(), true).await? {
                     let updated = controller.force_cancel_background(&record_id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     render_subprocess_status(ctx, &updated)?;
                 }
                 return Ok(SlashCommandControl::Continue);
@@ -483,14 +488,16 @@ pub(super) async fn show_background_subprocess_inspector(
                     && confirm_subprocess_action(ctx, current_entry.display_label.as_str(), false).await?
                 {
                     let updated = controller.graceful_stop_background(&record_id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     render_subprocess_status(ctx, &updated)?;
                 }
                 if selection_config_action(action.selection.as_ref(), SUBPROCESS_CANCEL_PREFIX).is_some()
                     && confirm_subprocess_action(ctx, current_entry.display_label.as_str(), true).await?
                 {
                     let updated = controller.force_cancel_background(&record_id).await?;
-                    refresh_local_agents(ctx.handle, &controller).await?;
+                    refresh_local_agents(ctx.handle, Some(&controller), ctx.tool_registry.exec_session_manager())
+                        .await?;
                     render_subprocess_status(ctx, &updated)?;
                 }
                 return Ok(SlashCommandControl::Continue);

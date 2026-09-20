@@ -632,7 +632,7 @@ impl Session {
             Span::styled(" complete", label),
         ];
 
-        if self.has_delegated_local_agents() {
+        if self.has_local_agents() {
             spans.push(Span::styled("  │  ", dim));
             spans.push(Span::styled("Alt+S", key));
             spans.push(Span::styled(" agents", label));

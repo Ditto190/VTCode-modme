@@ -648,6 +648,54 @@ mod tests {
         registry.close_harness_exec_session(&session_id).await.expect("close session");
     }
 
+    #[tokio::test]
+    async fn append_transient_turn_notes_omits_resume_hint_without_sessions() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+        let mut history: Vec<vtcode_core::llm::provider::Message> = Vec::new();
+
+        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None).await;
+        assert!(!transient.iter().any(|note| note.starts_with("Exec session resume:")));
+        assert!(history.is_empty(), "no hint must leave history untouched");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn append_transient_turn_notes_injects_bounded_resume_hint() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+        let run = registry
+            .execute_public_tool_ref(
+                vtcode_core::config::constants::tools::EXEC_COMMAND,
+                &json!({"cmd": "sleep 5", "yield_time_ms": 100}),
+            )
+            .await
+            .expect("run should start");
+        let session_id = run["session_id"].as_str().expect("session id present").to_string();
+
+        let mut history: Vec<vtcode_core::llm::provider::Message> = Vec::new();
+        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None).await;
+
+        let hint = transient
+            .iter()
+            .find(|note| note.starts_with("Exec session resume:"))
+            .expect("transient list must carry the resume hint");
+        assert!(hint.contains(&session_id));
+        assert!(hint.len() < 1_024);
+        assert_eq!(history.len(), 1, "hint must append exactly one system message");
+        let last = history.last().expect("history has hint");
+        assert_eq!(last.role, vtcode_core::llm::provider::MessageRole::System);
+        assert!(last.tool_calls.is_none(), "hint must never auto-execute a wait");
+        assert!(last.content.as_text().contains(&session_id), "history hint must carry the session id");
+
+        // Hint suggests the wait; it must not settle the session on its own.
+        assert!(
+            !registry.in_progress_exec_sessions(4).await.is_empty(),
+            "injection must not auto-wait the live session"
+        );
+        registry.close_harness_exec_session(&session_id).await.expect("close session");
+    }
+
     #[test]
     fn pending_approved_plan_checklist_cannot_be_completed() {
         let checklist = json!({

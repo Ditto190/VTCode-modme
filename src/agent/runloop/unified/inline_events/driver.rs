@@ -220,15 +220,15 @@ impl<'a> InlineEventLoop<'a> {
     }
 
     async fn process_buffered_event(&mut self, event: InlineEvent) -> Result<InlineLoopAction> {
-        if let InlineEvent::Submit(ref input) | InlineEvent::WebmcpSubmit(ref input) = event {
-            if !input.is_empty() {
-                let source = match event {
-                    InlineEvent::Submit(_) => InterjectionSource::Direct,
-                    _ => InterjectionSource::Queue,
-                };
-                self.emit_interjected(source, Self::count_images(input));
+        let interjection = match &event {
+            InlineEvent::Submit(input) if !input.is_empty() => {
+                Some((InterjectionSource::Direct, Self::count_images(input)))
             }
-        }
+            InlineEvent::WebmcpSubmit(input) if !input.is_empty() => {
+                Some((InterjectionSource::Queue, Self::count_images(input)))
+            }
+            _ => None,
+        };
 
         let interrupts = self.interrupts;
         let handle = self.handle;
@@ -278,7 +278,13 @@ impl<'a> InlineEventLoop<'a> {
         if let Some(exec_sessions) = self.exec_sessions.clone() {
             context.set_exec_session_manager(exec_sessions);
         }
-        context.process_event(event, &mut self.queue).await
+        let action = context.process_event(event, &mut self.queue).await?;
+        if let Some((source, image_count)) = interjection
+            && matches!(&action, InlineLoopAction::Submit(_) | InlineLoopAction::SubmitPrompt(_))
+        {
+            self.emit_interjected(source, image_count);
+        }
+        Ok(action)
     }
 
     fn ensure_interrupt_notice(&mut self) -> Result<Option<InlineLoopAction>> {

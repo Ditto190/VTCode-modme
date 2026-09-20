@@ -91,6 +91,28 @@ reads. Exited
 sessions with an unfinished spool retain the session and defer the reference
 until a later wait can safely observe the complete file.
 
+Background execution is owned by `ExecSessionManager`, the single registry for
+pipe and PTY sessions. `exec_command` accepts `background: true`, and `Ctrl+B`
+promotes the active foreground session into the same registry without replacing
+its `session_id`. The launch response keeps the bounded preview and provides
+the lifecycle state, child PID when available, and reusable wait/continuation
+arguments. At most three live background processes are reserved per VT Code
+runtime; the fourth launch fails before spawning and existing sessions are not
+evicted. Exited background metadata remains inspectable until explicit close,
+while runtime shutdown closes all process groups and descendants. The runtime
+continues to emit the existing `ThreadEvent` item lifecycle events rather than
+introducing a parallel background-process event contract.
+
+Cross-turn resume is transient, not compiled guidance: when a turn ends with a
+live session, the next turn start injects a bounded `Exec session resume:` hint
+via `append_transient_turn_notes` (same path for normal next-turn and session
+restore/resume). The hint carries at most 4 session lines (160 bytes per
+command, <1 KiB single-session) plus a pre-filled `write_stdin` wait, and the
+runtime never auto-executes the wait. Turn-end `turn.completed` (schema 0.15.0)
+and `SnapshotTurnDiagnostics` both record `in_progress_exec_sessions` (bounded
+to 4) for ATIF correlation. This note stays out of `runtime_guidance.rs` so the
+320-token universal section is not taxed on turns with no live session.
+
 The provider-facing history also has an aggregate tool-preview budget per
 turn (32 KiB execution, 96 KiB planning). After exhaustion, new payload bodies are replaced by bounded metadata,
 but scalar control signals such as success, exit code, completion status,

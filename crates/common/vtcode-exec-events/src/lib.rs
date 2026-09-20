@@ -24,7 +24,7 @@ pub mod atif;
 pub mod trace;
 
 /// Semantic version of the serialized event schema exported by this crate.
-pub const EVENT_SCHEMA_VERSION: &str = "0.14.0";
+pub const EVENT_SCHEMA_VERSION: &str = "0.15.0";
 
 /// Wraps a [`ThreadEvent`] with schema metadata so downstream consumers can
 /// negotiate compatibility before processing an event stream.
@@ -637,11 +637,26 @@ pub struct TokenBreakdown {
     subagent_bootstrap_tokens: Option<u64>,
 }
 
+/// Bound on exec session ids recorded in one turn's `turn.completed` event.
+/// Mirrors `SnapshotTurnDiagnostics::in_progress_exec_sessions` (cap 4,
+/// newest first) so `ThreadEvent` and checkpoint diagnostics cannot drift.
+pub const MAX_IN_PROGRESS_EXEC_SESSIONS: usize = 4;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct TurnCompletedEvent {
     /// Token usage summary for the completed turn.
     pub usage: Usage,
+    /// Exec sessions still running when the turn ended (bounded, newest
+    /// first). Empty when every command settled within the turn. Correlates
+    /// with the next turn's transient exec-session resume hint without
+    /// requiring session-id reconstruction.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_null_as_default"
+    )]
+    pub in_progress_exec_sessions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1354,6 +1369,7 @@ mod tests {
                 cache_creation_tokens: 0,
                 output_tokens: 3,
             },
+            in_progress_exec_sessions: Vec::new(),
         });
 
         let json = serde_json::to_string(&event)?;
@@ -1385,6 +1401,51 @@ mod tests {
         let legacy = serde_json::json!({"type": "turn.blocked", "message": "blocked"});
         let parsed: ThreadEvent = serde_json::from_value(legacy)?;
         assert!(matches!(parsed, ThreadEvent::TurnBlocked(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn turn_completed_in_progress_sessions_default_empty_and_omitted() -> Result<(), Box<dyn Error>> {
+        // Legacy payload without the new field must deserialize to empty.
+        let legacy = serde_json::json!({
+            "type": "turn.completed",
+            "usage": {"input_tokens": 1, "cached_input_tokens": 0, "cache_creation_tokens": 0, "output_tokens": 2}
+        });
+        let parsed: ThreadEvent = serde_json::from_value(legacy)?;
+        let ThreadEvent::TurnCompleted(completed) = parsed else {
+            panic!("expected turn.completed");
+        };
+        assert!(completed.in_progress_exec_sessions.is_empty());
+
+        // Empty ids are omitted from output so steady-state streams stay small.
+        let json = serde_json::to_value(ThreadEvent::TurnCompleted(completed))?;
+        assert!(json.get("in_progress_exec_sessions").is_none());
+
+        // Explicit null degrades to empty instead of failing.
+        let null_field = serde_json::json!({
+            "type": "turn.completed",
+            "usage": {"input_tokens": 0, "cached_input_tokens": 0, "cache_creation_tokens": 0, "output_tokens": 0},
+            "in_progress_exec_sessions": null
+        });
+        let parsed_null: ThreadEvent = serde_json::from_value(null_field)?;
+        let ThreadEvent::TurnCompleted(null_completed) = parsed_null else {
+            panic!("expected turn.completed");
+        };
+        assert!(null_completed.in_progress_exec_sessions.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn turn_completed_in_progress_sessions_round_trip_and_bound() -> Result<(), Box<dyn Error>> {
+        assert_eq!(MAX_IN_PROGRESS_EXEC_SESSIONS, 4);
+        let event = ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: vec!["run-1".to_string(), "run-2".to_string()],
+        });
+        let json = serde_json::to_string(&event)?;
+        assert!(json.contains("in_progress_exec_sessions"));
+        let restored: ThreadEvent = serde_json::from_str(&json)?;
+        assert_eq!(restored, event);
         Ok(())
     }
 

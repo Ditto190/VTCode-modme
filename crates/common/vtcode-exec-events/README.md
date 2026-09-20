@@ -39,7 +39,9 @@ for tracking AI-generated code attribution. See the `trace` module for details.
 - `VersionedThreadEvent` — schema-versioned event wrapper
 - `ThreadEvent` — concrete event enum (started, completed, item updates, turn lifecycle,
   plan approval lifecycle, …)
-- `EVENT_SCHEMA_VERSION` — current schema version (`"0.14.0"`)
+- `EVENT_SCHEMA_VERSION` — current schema version (`"0.15.0"`; adds optional
+  `turn.completed.in_progress_exec_sessions`, bounded to 4, for cross-turn
+  exec-session resume correlation)
 - `EventEmitter` trait — sink for processing events
 
 ## Usage

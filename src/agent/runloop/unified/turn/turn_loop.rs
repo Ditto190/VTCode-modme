@@ -27,7 +27,8 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
 use crate::agent::runloop::unified::inline_events::harness::{
-    HarnessEventEmitter, harness_event, turn_blocked_event, turn_completed_event, turn_failed_event, turn_started_event,
+    HarnessEventEmitter, harness_event, turn_blocked_event, turn_completed_event, turn_completed_event_with_sessions,
+    turn_failed_event, turn_started_event,
 };
 use crate::agent::runloop::unified::planning_workflow::maybe_handle_planning_exit_trigger;
 use crate::agent::runloop::unified::planning_workflow_state::PlanningWorkflowSessionState;
@@ -1909,15 +1910,38 @@ async fn finalize_turn(
             "turn handoff metric"
         );
     }
-    if matches!(result, TurnLoopResult::Cancelled | TurnLoopResult::Exit)
+    if matches!(result, TurnLoopResult::Cancelled)
+        && let Err(err) = ctx.tool_registry.terminate_active_exec_sessions_async().await
+    {
+        tracing::warn!(error = %err, "Failed to terminate active exec sessions after turn cancellation");
+    } else if matches!(result, TurnLoopResult::Exit)
         && let Err(err) = ctx.tool_registry.terminate_all_exec_sessions_async().await
     {
-        tracing::warn!(error = %err, "Failed to terminate all exec sessions after turn stop");
+        tracing::warn!(error = %err, "Failed to terminate all exec sessions after turn exit");
     }
     if let Some(emitter) = ctx.harness_emitter {
         // Exit is a graceful user-initiated action, not a failure
         let event = match result {
-            TurnLoopResult::Completed { .. } | TurnLoopResult::Exit => turn_completed_event(turn_usage.clone()),
+            TurnLoopResult::Completed { .. } | TurnLoopResult::Exit => {
+                // Capture live exec sessions only for the completed path so
+                // `turn.completed` carries the same bounded id set as
+                // `SnapshotTurnDiagnostics` for cross-turn resume correlation.
+                // Backend-checked, newest first, capped at 4 by the helper.
+                // Queried after Cancelled/Exit termination above, so the ids
+                // reflect what actually survived shutdown.
+                let in_progress_ids: Vec<String> = ctx
+                    .tool_registry
+                    .in_progress_exec_sessions(vtcode_core::exec::events::MAX_IN_PROGRESS_EXEC_SESSIONS)
+                    .await
+                    .into_iter()
+                    .map(|session| session.id.as_str().to_string())
+                    .collect();
+                if in_progress_ids.is_empty() {
+                    turn_completed_event(turn_usage.clone())
+                } else {
+                    turn_completed_event_with_sessions(turn_usage.clone(), in_progress_ids)
+                }
+            }
             TurnLoopResult::Aborted => {
                 turn_failed_event("turn aborted", has_turn_usage(turn_usage).then_some(turn_usage.clone()))
             }

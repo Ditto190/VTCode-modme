@@ -55,7 +55,7 @@ impl ToolRegistry {
         session_env.extend(request.env_overrides);
         let session_metadata = self
             .exec_sessions
-            .create_pty_session_with_sandbox(
+            .create_pty_session_with_sandbox_and_background(
                 request.session_id.clone().into(),
                 request.prepared_command.command,
                 request.working_dir_path,
@@ -69,21 +69,24 @@ impl ToolRegistry {
                 zsh_exec_bridge,
                 trusted_bridge_env,
                 request.sandbox_active,
+                request.background,
             )
             .await
             .context("Maximum PTY sessions reached; cannot start new session")?;
-        self.increment_active_pty_sessions();
-
         let capture = self
             .wait_for_exec_yield(session_metadata.id.as_str(), request.yield_duration, Some(tools::UNIFIED_EXEC), true)
             .await;
 
+        let session_metadata = self
+            .exec_session_metadata(session_metadata.id.as_str())
+            .await
+            .unwrap_or(session_metadata);
         self.finalize_exec_run_response(
             &session_metadata,
             &request.prepared_command.requested_command_display,
             &request.output_config,
             request.is_git_diff,
-            retain_completed_session,
+            retain_completed_session || session_metadata.background,
             capture,
         )
         .await
@@ -105,12 +108,13 @@ impl ToolRegistry {
         let session_env = self.build_pipe_session_env(&request.shell_program, request.env_overrides);
         let session_metadata = self
             .exec_sessions
-            .create_pipe_session_with_sandbox(
+            .create_pipe_session_with_sandbox_and_background(
                 request.session_id.clone().into(),
                 request.prepared_command.command,
                 request.working_dir_path,
                 session_env,
                 request.sandbox_active,
+                request.background,
             )
             .await?;
 
@@ -119,16 +123,20 @@ impl ToolRegistry {
                 session_metadata.id.as_str(),
                 request.yield_duration,
                 Some(tools::UNIFIED_EXEC),
-                exec_settlement_mode.settle_noninteractive(),
+                exec_settlement_mode.settle_noninteractive() && !request.background,
             )
             .await?;
 
+        let session_metadata = self
+            .exec_session_metadata(session_metadata.id.as_str())
+            .await
+            .unwrap_or(session_metadata);
         self.finalize_exec_run_response(
             &session_metadata,
             &request.prepared_command.requested_command_display,
             &request.output_config,
             request.is_git_diff,
-            false,
+            session_metadata.background,
             capture,
         )
         .await
@@ -242,15 +250,24 @@ impl ToolRegistry {
         let capture = self
             .wait_for_exec_yield(session.metadata.id.as_str(), deadline, Some(tools::WRITE_STDIN), true)
             .await;
+        let session_metadata = self
+            .exec_session_metadata(session.metadata.id.as_str())
+            .await
+            .unwrap_or_else(|_| session.metadata.clone());
         let mut response =
-            build_exec_passthrough_response(&session.metadata, &session.command_display, &capture, max_tokens);
+            build_exec_passthrough_response(&session_metadata, &session.command_display, &capture, max_tokens);
         response["waited_seconds"] = json!(capture.duration.as_secs_f64());
         response["wait_deadline_seconds"] = json!(deadline.as_secs());
         let spool_safe_to_prune = self
             .attach_pipe_output_metadata(&mut response, session.metadata.id.as_str(), capture.exit_code.is_some())
             .await?;
-        self.prune_session_if_exited(session.metadata.id.as_str(), capture.exit_code, false, spool_safe_to_prune)
-            .await?;
+        self.prune_session_if_exited(
+            session.metadata.id.as_str(),
+            capture.exit_code,
+            session_metadata.background,
+            spool_safe_to_prune,
+        )
+        .await?;
         Ok(response)
     }
 
@@ -427,23 +444,13 @@ impl ToolRegistry {
         Ok(true)
     }
 
-    fn handle_closed_exec_session(&self, session_metadata: &VTCodeExecSession) {
-        if is_pty_exec_session(session_metadata) {
-            self.decrement_active_pty_sessions();
-        }
-    }
-
     async fn prune_completed_exec_session(&self, session_id: &str) -> Result<()> {
-        if let Some(session_metadata) = self.exec_sessions.prune_exited_session(session_id).await? {
-            self.handle_closed_exec_session(&session_metadata);
-        }
+        let _ = self.exec_sessions.prune_exited_session(session_id).await?;
         Ok(())
     }
 
     pub(crate) async fn close_exec_session(&self, session_id: &str) -> Result<VTCodeExecSession> {
-        let session_metadata = self.exec_sessions.close_session(session_id).await?;
-        self.handle_closed_exec_session(&session_metadata);
-        Ok(session_metadata)
+        self.exec_sessions.close_session(session_id).await
     }
 
     async fn wait_for_exec_yield(
@@ -458,7 +465,6 @@ impl ToolRegistry {
         let start = Instant::now();
         let poll_interval = Duration::from_millis(50);
         let mut activity_rx = self.exec_session_activity_receiver(session_id).await.ok().flatten();
-
         let progress_callback = self.progress_callback();
         let mut last_ui_update = Instant::now();
         let ui_update_interval = Duration::from_millis(100);
@@ -466,6 +472,23 @@ impl ToolRegistry {
 
         loop {
             let observed_activity = activity_rx.as_mut().map(|receiver| *receiver.borrow_and_update());
+
+            let promoted = self.exec_sessions.promote_requested_session(session_id).await.unwrap_or(false);
+            let promoted_by_foreground_watcher =
+                self.exec_sessions.take_foreground_promotion(session_id).await.unwrap_or(false);
+            if promoted || promoted_by_foreground_watcher {
+                if let Ok(Some(final_output)) =
+                    self.next_exec_session_output(session_id, drain_output, &mut peeked_bytes).await
+                {
+                    append_bounded_capture(&mut output, &final_output);
+                    if let Some(tool_name) = tool_name
+                        && let Some(ref callback) = progress_callback
+                    {
+                        callback(tool_name, &final_output);
+                    }
+                }
+                return PtyEphemeralCapture { output, exit_code: None, duration: start.elapsed() };
+            }
 
             if let Ok(Some(code)) = self.exec_session_completed(session_id).await {
                 if let Ok(Some(final_output)) =
@@ -611,9 +634,13 @@ impl ToolRegistry {
                 });
             }
 
-            self.exec_session_metadata(session_id)
+            let session_metadata = self
+                .exec_session_metadata(session_id)
                 .await
                 .with_context(|| format!("exec session '{session_id}' disappeared during settlement"))?;
+            if session_metadata.background {
+                return Ok(PtyEphemeralCapture { output, exit_code: None, duration: start.elapsed() });
+            }
         }
     }
 
@@ -689,14 +716,23 @@ impl ToolRegistry {
                 settle_until_terminal,
             )
             .await?;
+        let session_metadata = self
+            .exec_session_metadata(session.metadata.id.as_str())
+            .await
+            .unwrap_or_else(|_| session.metadata.clone());
         let mut response =
-            build_exec_passthrough_response(&session.metadata, &session.command_display, &capture, max_tokens);
+            build_exec_passthrough_response(&session_metadata, &session.command_display, &capture, max_tokens);
 
         let spool_safe_to_prune = self
             .attach_pipe_output_metadata(&mut response, session.metadata.id.as_str(), capture.exit_code.is_some())
             .await?;
-        self.prune_session_if_exited(session.metadata.id.as_str(), capture.exit_code, false, spool_safe_to_prune)
-            .await?;
+        self.prune_session_if_exited(
+            session.metadata.id.as_str(),
+            capture.exit_code,
+            session_metadata.background,
+            spool_safe_to_prune,
+        )
+        .await?;
 
         Ok(response)
     }

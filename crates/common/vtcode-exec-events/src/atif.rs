@@ -400,6 +400,11 @@ impl AtifTrajectoryBuilder {
                 let mut step = Step::system(self.next_step_id, "turn_completed");
                 step.timestamp = Some(ts_str);
                 step.metrics = Some(StepMetrics::from_usage(&e.usage));
+                if !e.in_progress_exec_sessions.is_empty() {
+                    step.extra = Some(serde_json::json!({
+                        "in_progress_exec_sessions": e.in_progress_exec_sessions,
+                    }));
+                }
                 self.push_step(step);
             }
             ThreadEvent::TurnFailed(e) => {
@@ -797,6 +802,7 @@ mod tests {
                 cache_creation_tokens: 0,
                 output_tokens: 200,
             },
+            in_progress_exec_sessions: Vec::new(),
         });
         builder.process_event_at(&event, fixed_ts());
 
@@ -805,6 +811,31 @@ mod tests {
         assert_eq!(fm.total_prompt_tokens, Some(500));
         assert_eq!(fm.total_completion_tokens, Some(200));
         assert_eq!(fm.total_cached_tokens, Some(100));
+    }
+
+    #[test]
+    fn builder_turn_completed_preserves_in_progress_sessions_for_resume() {
+        let mut builder = AtifTrajectoryBuilder::new(AtifAgent::vtcode());
+        let event = ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: vec!["run-7".to_string()],
+        });
+        builder.process_event_at(&event, fixed_ts());
+
+        let trajectory = builder.finish(None);
+        let step = trajectory.steps.last().expect("turn_completed step");
+        let extra = step.extra.clone().expect("extra carries resume ids");
+        assert_eq!(extra["in_progress_exec_sessions"], serde_json::json!(["run-7"]));
+
+        // Empty ids stay omitted so steady-state export is unchanged.
+        let mut empty_builder = AtifTrajectoryBuilder::new(AtifAgent::vtcode());
+        let empty = ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        });
+        empty_builder.process_event_at(&empty, fixed_ts());
+        let empty_trajectory = empty_builder.finish(None);
+        assert!(empty_trajectory.steps.last().expect("step").extra.is_none());
     }
 
     #[test]

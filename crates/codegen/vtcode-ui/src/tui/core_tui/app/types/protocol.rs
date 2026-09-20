@@ -21,8 +21,9 @@ use super::overlay::{
 use crate::tui::core_tui::session::config::AppearanceConfig;
 pub use crate::tui::core_tui::types::SubmittedInput;
 use crate::tui::core_tui::types::{
-    ActivityState, InlineHeaderContext, InlineLinkRange, InlineListItem, InlineListSearchConfig, InlineListSelection,
-    InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, LocalAgentEntry, SecurePromptConfig,
+    ActivityState, ExecSessionAction, InlineHeaderContext, InlineLinkRange, InlineListItem, InlineListSearchConfig,
+    InlineListSelection, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, LocalAgentEntry,
+    SecurePromptConfig,
 };
 
 const MAX_DEFERRED_EVENTS: usize = 32;
@@ -236,6 +237,10 @@ pub enum InlineEvent {
     Pause,
     Resume,
     BackgroundOperation,
+    ExecSessionAction {
+        id: String,
+        action: ExecSessionAction,
+    },
     ScrollLineUp,
     ScrollLineDown,
     ScrollPageUp,
@@ -278,6 +283,9 @@ impl From<crate::tui::core_tui::types::InlineEvent> for InlineEvent {
             crate::tui::core_tui::types::InlineEvent::Pause => Self::Pause,
             crate::tui::core_tui::types::InlineEvent::Resume => Self::Resume,
             crate::tui::core_tui::types::InlineEvent::BackgroundOperation => Self::BackgroundOperation,
+            crate::tui::core_tui::types::InlineEvent::ExecSessionAction { id, action } => {
+                Self::ExecSessionAction { id, action }
+            }
             crate::tui::core_tui::types::InlineEvent::ScrollLineUp => Self::ScrollLineUp,
             crate::tui::core_tui::types::InlineEvent::ScrollLineDown => Self::ScrollLineDown,
             crate::tui::core_tui::types::InlineEvent::ScrollPageUp => Self::ScrollPageUp,

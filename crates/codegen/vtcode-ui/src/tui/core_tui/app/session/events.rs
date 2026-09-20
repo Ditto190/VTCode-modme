@@ -751,7 +751,8 @@ pub(super) fn process_key_with_clipboard_image_reader(
             Some(InlineEvent::Exit)
         }
         KeyCode::Char('b') if has_control && !has_alt && !has_command => {
-            // Ctrl+B: Move back a character (Readline) - overrides background operation
+            // If the user explicitly unbinds background_operation, preserve the
+            // traditional Readline fallback.
             if session.core.input_enabled() {
                 session.move_left();
                 session.mark_dirty();

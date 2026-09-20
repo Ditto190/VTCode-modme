@@ -83,6 +83,7 @@ fn sample_timeline() -> Vec<ThreadEvent> {
                 cache_creation_tokens: 0,
                 output_tokens: 32,
             },
+            in_progress_exec_sessions: Vec::new(),
         }),
     ]
 }

@@ -216,6 +216,10 @@ pub enum InlineEvent {
     Pause,
     Resume,
     BackgroundOperation,
+    ExecSessionAction {
+        id: String,
+        action: super::local_agents::ExecSessionAction,
+    },
     ScrollLineUp,
     ScrollLineDown,
     ScrollPageUp,

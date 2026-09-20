@@ -136,7 +136,7 @@ async fn terminate_group_exec_sessions_if_needed(
     group_has_exec_sessions: bool,
     log_message: &str,
 ) {
-    if group_has_exec_sessions && let Err(err) = registry.terminate_all_exec_sessions_async().await {
+    if group_has_exec_sessions && let Err(err) = registry.terminate_active_exec_sessions_async().await {
         tracing::warn!(error = %err, "{log_message}");
     }
 }

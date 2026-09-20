@@ -292,6 +292,7 @@ mod tests {
             warnings: Vec::new(),
             thread_events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
             })],
             outcome: TaskOutcome::Success,
             turns_executed: 2,

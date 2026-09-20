@@ -287,6 +287,16 @@ impl Session {
                         return;
                     }
 
+                    if !self.has_active_overlay()
+                        && self.footer_jump_contains(mouse_event.column, mouse_event.row)
+                        && self.jump_to_last_change()
+                    {
+                        self.mouse_selection.clear_click_history();
+                        self.mouse_drag_target = MouseDragTarget::None;
+                        self.emit_inline_event(&InlineEvent::JumpToLastChange, events, callback);
+                        return;
+                    }
+
                     let is_double_click =
                         self.mouse_selection
                             .register_click(mouse_event.column, mouse_event.row, Instant::now());

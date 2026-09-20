@@ -168,14 +168,26 @@ pub fn kill_process_group_by_pid_with_signal(pid: u32, signal: KillSignal) -> io
     Ok(())
 }
 
-/// No-op on non-Unix platforms.
-#[cfg(not(unix))]
+/// Use Windows' process-tree termination as the process-group equivalent.
+#[cfg(windows)]
+pub fn kill_process_group_by_pid(pid: u32) -> io::Result<()> {
+    kill_process(pid)
+}
+
+/// Use Windows' process-tree termination as the process-group equivalent.
+#[cfg(windows)]
+pub fn kill_process_group_by_pid_with_signal(pid: u32, _signal: KillSignal) -> io::Result<()> {
+    kill_process(pid)
+}
+
+/// No-op on platforms without process-group or process-tree support.
+#[cfg(all(not(unix), not(windows)))]
 pub fn kill_process_group_by_pid(_pid: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// No-op on non-Unix platforms.
-#[cfg(not(unix))]
+/// No-op on platforms without process-group or process-tree support.
+#[cfg(all(not(unix), not(windows)))]
 pub fn kill_process_group_by_pid_with_signal(_pid: u32, _signal: KillSignal) -> io::Result<()> {
     Ok(())
 }
@@ -202,14 +214,26 @@ pub fn kill_process_group_with_signal(process_group_id: u32, signal: KillSignal)
     Ok(())
 }
 
-/// No-op on non-Unix platforms.
-#[cfg(not(unix))]
+/// Use Windows' process-tree termination as the process-group equivalent.
+#[cfg(windows)]
+pub fn kill_process_group(process_group_id: u32) -> io::Result<()> {
+    kill_process(process_group_id)
+}
+
+/// Use Windows' process-tree termination as the process-group equivalent.
+#[cfg(windows)]
+pub fn kill_process_group_with_signal(process_group_id: u32, _signal: KillSignal) -> io::Result<()> {
+    kill_process(process_group_id)
+}
+
+/// No-op on platforms without process-group or process-tree support.
+#[cfg(all(not(unix), not(windows)))]
 pub fn kill_process_group(_process_group_id: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// No-op on non-Unix platforms.
-#[cfg(not(unix))]
+/// No-op on platforms without process-group or process-tree support.
+#[cfg(all(not(unix), not(windows)))]
 pub fn kill_process_group_with_signal(_process_group_id: u32, _signal: KillSignal) -> io::Result<()> {
     Ok(())
 }
@@ -380,7 +404,10 @@ pub fn graceful_kill_process_group(
         match std::process::Command::new("taskkill").args(["/PID", &pid_arg, "/T"]).status() {
             Ok(status) if status.success() => {
                 std::thread::sleep(grace_period);
-                GracefulTerminationResult::GracefulExit
+                match kill_process(pid) {
+                    Ok(()) => GracefulTerminationResult::ForcefulKill,
+                    Err(_) => GracefulTerminationResult::AlreadyExited,
+                }
             }
             Ok(_) => match kill_process(pid) {
                 Ok(()) => GracefulTerminationResult::ForcefulKill,

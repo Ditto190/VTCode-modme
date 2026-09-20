@@ -190,21 +190,62 @@ impl PtySessionHandle {
     pub(super) fn graceful_terminate(&self) {
         let mut child = self.child.lock();
 
-        // Check if already exited
-        if let Ok(Some(_)) = child.try_wait() {
-            return;
-        }
+        let child_running = match child.try_wait() {
+            Ok(Some(_)) => false,
+            Ok(None) | Err(_) => true,
+        };
 
         // Kill the process group and the direct child process handle.
         // vtcode_bash_runner::graceful_kill_process_group_default now handles
         // the robust 'more kills' pattern which ensures descendants do not survive.
         if let Some(pid) = self.child_pid {
-            vtcode_bash_runner::graceful_kill_process_group_default(pid);
-        } else {
+            if child_running {
+                vtcode_bash_runner::graceful_kill_process_group_default(pid);
+            }
+            // The direct child can exit during the graceful window while a
+            // descendant still owns the PTY. Finish with the cached group id,
+            // and retain the direct-child fallback for platforms without
+            // Unix process-group support.
+            let _ = vtcode_bash_runner::kill_process_group(pid);
+            if child_running {
+                let _ = child.kill();
+            }
+        } else if child_running {
             let _ = child.kill();
         }
 
-        let _ = child.wait();
+        if child_running {
+            let _ = child.wait();
+        }
+    }
+
+    /// Forcefully terminate the child process without waiting for a graceful
+    /// shutdown window.
+    pub(super) fn force_terminate(&self) {
+        let mut child = self.child.lock();
+
+        let child_running = match child.try_wait() {
+            Ok(Some(_)) => false,
+            Ok(None) | Err(_) => true,
+        };
+
+        if let Some(pid) = self.child_pid {
+            if child_running {
+                let _ = vtcode_bash_runner::kill_process_group_by_pid(pid);
+            } else {
+                let _ = vtcode_bash_runner::kill_process_group(pid);
+            }
+            if child_running {
+                // The process-group helpers are no-ops on unsupported
+                // platforms, so keep the direct-child fallback as well.
+                let _ = child.kill();
+            }
+        } else if child_running {
+            let _ = child.kill();
+        }
+        if child_running {
+            let _ = child.wait();
+        }
     }
 }
 
@@ -227,11 +268,22 @@ impl Drop for PtySessionHandle {
         // which ensures descendants from interactive shells/REPLs do not survive.
         {
             let mut child = self.child.lock();
-            if let Ok(None) = child.try_wait() {
-                if let Some(pid) = self.child_pid {
-                    vtcode_bash_runner::graceful_kill_process_group_default(pid);
-                } else {
-                    let _ = child.kill();
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    // The direct child may have exited while a descendant
+                    // still owns the PTY descriptors.
+                    if let Some(pid) = self.child_pid {
+                        let _ = vtcode_bash_runner::kill_process_group(pid);
+                    }
+                }
+                Ok(None) | Err(_) => {
+                    if let Some(pid) = self.child_pid {
+                        vtcode_bash_runner::graceful_kill_process_group_default(pid);
+                        let _ = vtcode_bash_runner::kill_process_group(pid);
+                        let _ = child.kill();
+                    } else {
+                        let _ = child.kill();
+                    }
                 }
             }
         }

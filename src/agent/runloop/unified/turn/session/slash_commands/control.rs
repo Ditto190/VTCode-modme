@@ -95,7 +95,7 @@ async fn show_settings_at_path_from_context_with_reset(
 }
 
 pub(crate) async fn handle_stop_agent(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
-    if ctx.tool_registry.active_pty_sessions() == 0
+    if ctx.tool_registry.active_pty_sessions_count() == 0
         && !ctx.ctrl_c_state.is_cancel_requested()
         && !ctx.ctrl_c_state.is_exit_requested()
     {

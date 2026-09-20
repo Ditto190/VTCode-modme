@@ -7,10 +7,12 @@ use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 use vtcode_core::hooks::LifecycleHookEngine;
 use vtcode_core::llm::provider::{self as uni};
+use vtcode_core::tools::exec_session::ExecSessionManager;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
+use vtcode_ui::tui::app::ExecSessionAction;
 use vtcode_ui::tui::app::{
-    InlineEvent, InlineHandle, InlineHeaderContext, TransientEvent, TransientHotkeyAction, TransientSelectionChange,
-    TransientSubmission,
+    InlineEvent, InlineHandle, InlineHeaderContext, SubmittedInput, TransientEvent, TransientHotkeyAction,
+    TransientSelectionChange, TransientSubmission,
 };
 
 use crate::agent::runloop::model_picker::ModelPickerState;
@@ -31,6 +33,7 @@ use super::queue::InlineQueueState;
 use super::state::InlineEventState;
 
 pub(crate) struct InlineEventContext<'a> {
+    handle: &'a InlineHandle,
     state: InlineEventState<'a>,
     modal: InlineModalProcessor<'a>,
     ctrl_c_state: &'a Arc<crate::agent::runloop::unified::state::CtrlCState>,
@@ -38,6 +41,7 @@ pub(crate) struct InlineEventContext<'a> {
     editor_workspace: PathBuf,
     editor_open_sender: Option<EditorOpenRequestSender>,
     editor_open_dispatcher: Option<Arc<EditorOpenDispatcher>>,
+    exec_sessions: Option<ExecSessionManager>,
 }
 
 impl<'a> InlineEventContext<'a> {
@@ -94,6 +98,7 @@ impl<'a> InlineEventContext<'a> {
         );
 
         Self {
+            handle,
             state,
             modal,
             ctrl_c_state,
@@ -101,7 +106,12 @@ impl<'a> InlineEventContext<'a> {
             editor_workspace,
             editor_open_sender: None,
             editor_open_dispatcher: None,
+            exec_sessions: None,
         }
+    }
+
+    pub(crate) fn set_exec_session_manager(&mut self, exec_sessions: ExecSessionManager) {
+        self.exec_sessions = Some(exec_sessions);
     }
 
     pub(crate) fn set_editor_open_sink(
@@ -119,7 +129,7 @@ impl<'a> InlineEventContext<'a> {
         queue: &mut InlineQueueState<'_>,
     ) -> Result<InlineLoopAction> {
         let action = match event {
-            InlineEvent::Submit(text) => self.input_processor().submit(text),
+            InlineEvent::Submit(text) => self.submit_to_focused_exec_session(text).await?,
             InlineEvent::WebmcpSubmit(text) => self.input_processor().submit_prompt(text),
             InlineEvent::QueueSubmit(text) => {
                 let primary_agent = self.modal.active_primary_agent_name();
@@ -215,7 +225,28 @@ impl<'a> InlineEventContext<'a> {
             InlineEvent::ForceCancelPtySession => self.control_processor().force_cancel_pty_session()?,
             InlineEvent::Exit => self.control_processor().exit()?,
             InlineEvent::Interrupt => self.handle_interrupt(),
-            InlineEvent::BackgroundOperation => self.input_processor().submit("/subprocesses toggle".into()),
+            InlineEvent::BackgroundOperation => {
+                if let Some(exec_sessions) = self.exec_sessions.as_ref()
+                    && let Some(result) = exec_sessions.take_background_shortcut_result()
+                {
+                    match result {
+                        vtcode_core::tools::exec_session::BackgroundShortcutResult::Requested => {
+                            self.handle.show_local_agents();
+                            self.input_processor().passive()
+                        }
+                        vtcode_core::tools::exec_session::BackgroundShortcutResult::AtCapacity => {
+                            self.state.renderer().line(
+                                MessageStyle::Warning,
+                                "Cannot background the foreground process: the runtime already has three live background processes. Wait for or close one first.",
+                            )?;
+                            self.input_processor().passive()
+                        }
+                    }
+                } else {
+                    self.input_processor().submit("/subprocesses toggle".into())
+                }
+            }
+            InlineEvent::ExecSessionAction { id, action } => self.handle_exec_session_action(id, action).await?,
             InlineEvent::LaunchEditor { draft } => {
                 if draft.is_empty() {
                     self.input_processor().submit("/edit".into())
@@ -292,6 +323,156 @@ impl<'a> InlineEventContext<'a> {
         Ok(action)
     }
 
+    async fn submit_to_focused_exec_session(&mut self, input: SubmittedInput) -> Result<InlineLoopAction> {
+        // Slash commands are application actions, not stdin for the focused
+        // process. This also keeps keyboard-generated commands such as
+        // `/subprocesses` and `/model` usable while a session is focused.
+        if input.text.trim_start().starts_with('/') {
+            return Ok(self.input_processor().submit(input));
+        }
+
+        let Some(exec_sessions) = self.exec_sessions.clone() else {
+            return Ok(self.input_processor().submit(input));
+        };
+        let Some(session_id) = exec_sessions.focused_session_id() else {
+            return Ok(self.input_processor().submit(input));
+        };
+
+        if input.has_attachments() {
+            self.state.renderer().line(
+                MessageStyle::Warning,
+                "Focused exec sessions accept text input only; remove attachments before sending a line.",
+            )?;
+            self.modal.restore_input_draft(input);
+            return Ok(self.input_processor().passive());
+        }
+
+        let line = input.text.clone();
+        match exec_sessions.send_input_to_session(&session_id, line.as_bytes(), true).await {
+            Ok(_) => {
+                self.state
+                    .renderer()
+                    .line(MessageStyle::Info, &format!("Sent input to exec session {session_id}."))?;
+            }
+            Err(error) => {
+                exec_sessions.clear_focused_session();
+                self.modal.restore_input_draft(input);
+                self.state.renderer().line(
+                    MessageStyle::Error,
+                    &format!("Failed to send input to exec session {session_id}: {error}"),
+                )?;
+            }
+        }
+        Ok(self.input_processor().passive())
+    }
+
+    async fn handle_exec_session_action(
+        &mut self,
+        session_id: String,
+        action: ExecSessionAction,
+    ) -> Result<InlineLoopAction> {
+        self.state.reset_interrupt_state();
+        let Some(exec_sessions) = self.exec_sessions.clone() else {
+            self.state
+                .renderer()
+                .line(MessageStyle::Error, "Exec session manager is not available.")?;
+            return Ok(self.input_processor().passive());
+        };
+
+        self.handle.hide_local_agents();
+        match action {
+            ExecSessionAction::Inspect => {
+                let snapshot = match exec_sessions.background_session_snapshot(&session_id).await {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => return self.render_exec_session_error(&session_id, error),
+                };
+                self.render_exec_session_inspection(&snapshot)?;
+            }
+            ExecSessionAction::Preview => {
+                let snapshot = match exec_sessions.background_session_snapshot(&session_id).await {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => return self.render_exec_session_error(&session_id, error),
+                };
+                self.handle.show_modal(
+                    format!("Exec session {}", snapshot.metadata.id.as_str()),
+                    exec_session_modal_lines(&snapshot),
+                    None,
+                );
+            }
+            ExecSessionAction::GracefulTerminate => {
+                if let Err(error) = exec_sessions.terminate_session(&session_id).await {
+                    return self.render_exec_session_error(&session_id, error);
+                }
+                self.state.renderer().line(
+                    MessageStyle::Info,
+                    &format!("Requested graceful termination for exec session {session_id}."),
+                )?;
+            }
+            ExecSessionAction::ForceTerminateOrClose => {
+                let already_exited = match exec_sessions.force_terminate_or_close(&session_id).await {
+                    Ok(already_exited) => already_exited,
+                    Err(error) => return self.render_exec_session_error(&session_id, error),
+                };
+                let message = if already_exited {
+                    format!("Closed completed exec session {session_id}.")
+                } else {
+                    format!("Force-terminated exec session {session_id}; it remains visible until closed.")
+                };
+                self.state.renderer().line(MessageStyle::Info, &message)?;
+            }
+            ExecSessionAction::Focus => {
+                if exec_sessions.focused_session_id().as_deref() == Some(session_id.as_str()) {
+                    exec_sessions.clear_focused_session();
+                    self.state.renderer().line(
+                        MessageStyle::Info,
+                        &format!("Unfocused exec session {session_id}; submitted lines return to the composer."),
+                    )?;
+                } else {
+                    if let Err(error) = exec_sessions.focus_background_session(&session_id).await {
+                        return self.render_exec_session_error(&session_id, error);
+                    }
+                    self.state.renderer().line(
+                        MessageStyle::Info,
+                        &format!("Focused exec session {session_id}; submitted lines go to its stdin."),
+                    )?;
+                }
+            }
+        }
+
+        Ok(self.input_processor().passive())
+    }
+
+    fn render_exec_session_error(&mut self, session_id: &str, error: anyhow::Error) -> Result<InlineLoopAction> {
+        self.state
+            .renderer()
+            .line(MessageStyle::Error, &format!("Exec session {session_id} action failed: {error}"))?;
+        Ok(self.input_processor().passive())
+    }
+
+    fn render_exec_session_inspection(
+        &mut self,
+        snapshot: &vtcode_core::tools::exec_session::ExecSessionUiSnapshot,
+    ) -> Result<()> {
+        let metadata = &snapshot.metadata;
+        self.state.renderer().line(
+            MessageStyle::Info,
+            &format!("Exec session {}: {}", metadata.id.as_str(), exec_session_command_label(metadata)),
+        )?;
+        self.state.renderer().line(
+            MessageStyle::Output,
+            &format!(
+                "Status: {} · cwd {} · pid {}",
+                exec_session_status(metadata),
+                metadata.working_dir.as_deref().unwrap_or("unknown"),
+                metadata.child_pid.map_or_else(|| "-".to_string(), |pid| pid.to_string())
+            ),
+        )?;
+        for line in bounded_preview_or_placeholder(&snapshot.preview).lines() {
+            self.state.renderer().line(MessageStyle::Output, line)?;
+        }
+        Ok(())
+    }
+
     fn handle_interrupt(&mut self) -> InlineLoopAction {
         let _ = self.modal.handle_cancel(self.state.renderer());
         // Esc / Ctrl+C from the TUI is a local cancellation request. In raw
@@ -309,4 +490,40 @@ impl<'a> InlineEventContext<'a> {
     fn control_processor(&mut self) -> InlineControlProcessor<'_, 'a> {
         InlineControlProcessor::new(&mut self.state)
     }
+}
+
+fn exec_session_command_label(metadata: &vtcode_core::tools::types::VTCodeExecSession) -> String {
+    std::iter::once(metadata.command.as_str())
+        .chain(metadata.args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn exec_session_status(metadata: &vtcode_core::tools::types::VTCodeExecSession) -> String {
+    match metadata.lifecycle_state {
+        Some(vtcode_core::tools::types::VTCodeSessionLifecycleState::Running) => "running".to_string(),
+        Some(vtcode_core::tools::types::VTCodeSessionLifecycleState::Exited) => metadata
+            .exit_code
+            .map_or_else(|| "exited".to_string(), |code| format!("exited ({code})")),
+        None => "unknown".to_string(),
+    }
+}
+
+fn bounded_preview_or_placeholder(preview: &str) -> &str {
+    if preview.trim().is_empty() {
+        "(no output yet)"
+    } else {
+        preview
+    }
+}
+
+fn exec_session_modal_lines(snapshot: &vtcode_core::tools::exec_session::ExecSessionUiSnapshot) -> Vec<String> {
+    let metadata = &snapshot.metadata;
+    vec![
+        format!("Command: {}", exec_session_command_label(metadata)),
+        format!("Status: {}", exec_session_status(metadata)),
+        format!("Working dir: {}", metadata.working_dir.as_deref().unwrap_or("unknown")),
+        format!("PID: {}", metadata.child_pid.map_or_else(|| "-".to_string(), |pid| pid.to_string())),
+        format!("Preview:\n{}", bounded_preview_or_placeholder(&snapshot.preview)),
+    ]
 }

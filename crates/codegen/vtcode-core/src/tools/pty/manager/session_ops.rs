@@ -121,6 +121,12 @@ impl PtyManager {
         Ok(())
     }
 
+    pub fn force_terminate_session(&self, session_id: &str) -> Result<()> {
+        let handle = self.session_handle(session_id)?;
+        handle.force_terminate();
+        Ok(())
+    }
+
     /// Sync all terminal sessions to files for dynamic context discovery
     ///
     /// This implements Cursor-style dynamic context discovery:

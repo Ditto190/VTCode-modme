@@ -1247,6 +1247,7 @@ mod tests {
                     cache_creation_tokens: 0,
                     output_tokens: 25,
                 },
+                in_progress_exec_sessions: Vec::new(),
             }),
             &mut emitter,
         );
@@ -1809,8 +1810,13 @@ mod tests {
             &ThreadEvent::TurnFailed(vtcode_exec_events::TurnFailedEvent { message: "boom".to_string(), usage: None }),
             &mut emitter,
         );
-        builder
-            .process_event(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }), &mut emitter);
+        builder.process_event(
+            &ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }),
+            &mut emitter,
+        );
 
         assert_eq!(builder.response().status, ResponseStatus::Failed);
         let events = emitter.into_events();

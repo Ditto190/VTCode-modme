@@ -218,3 +218,61 @@ fn middle_removal_clears_stale_tracking_when_empty_and_dedupes() {
     assert_eq!(session.jump_highlight_line_idx, None);
     assert!(!session.should_show_jump_to_last_change());
 }
+
+#[test]
+fn footer_rect_only_when_gated_and_inside_status() {
+    let mut session = prepare_sized_session(10);
+    // No status area before a full frame render.
+    assert_eq!(session.footer_jump_rect(), None);
+
+    let _ = rendered_session_lines(&mut session, VIEW_ROWS);
+    // At the live bottom edge the footer affordance hides.
+    assert_eq!(session.footer_jump_rect(), None);
+
+    session.scroll_page_up();
+    let _ = rendered_session_lines(&mut session, VIEW_ROWS);
+    let status = session.input_status_area().expect("full render sets status area");
+    let footer = session.footer_jump_rect().expect("scrolled + >=2 shows footer affordance");
+    assert_eq!(footer.height, 1);
+    assert_eq!(footer.y, status.y);
+    assert!(footer.x >= status.x);
+    assert!(footer.right() <= status.right());
+    assert!(session.footer_jump_contains(footer.x, footer.y));
+    // Left edge of the status row is outside the jump affordance.
+    assert!(!session.footer_jump_contains(status.x, status.y));
+}
+
+#[test]
+fn footer_click_jumps_to_last_change() {
+    use ratatui::crossterm::event::KeyModifiers;
+
+    let mut session = prepare_sized_session(10);
+    session.scroll_page_up();
+    let _ = rendered_session_lines(&mut session, VIEW_ROWS);
+    let footer = session.footer_jump_rect().expect("footer affordance must be visible");
+    assert!(session.scroll_offset() > 0);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    left_click_session(&mut session, &tx, footer.x, footer.y, KeyModifiers::NONE);
+    assert_eq!(session.scroll_offset(), 0, "footer click pins to live bottom");
+    assert_eq!(session.jump_highlight_line_idx, Some(9));
+    assert!(matches!(rx.try_recv(), Ok(InlineEvent::JumpToLastChange)));
+}
+
+#[test]
+fn footer_click_outside_jump_text_does_not_jump() {
+    use ratatui::crossterm::event::KeyModifiers;
+
+    let mut session = prepare_sized_session(10);
+    session.scroll_page_up();
+    let _ = rendered_session_lines(&mut session, VIEW_ROWS);
+    let status = session.input_status_area().expect("status area");
+    assert!(session.footer_jump_rect().is_some());
+    let offset_before = session.scroll_offset();
+    assert!(offset_before > 0);
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    left_click_session(&mut session, &tx, status.x, status.y, KeyModifiers::NONE);
+    assert_eq!(session.jump_highlight_line_idx, None, "left status click must not arm highlight");
+    assert_eq!(session.scroll_offset(), offset_before, "offset must not snap to bottom");
+}

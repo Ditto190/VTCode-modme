@@ -1,13 +1,11 @@
 use anyhow::Result;
+use vtcode_core::subagents::{BackgroundSubprocessStatus, SubagentStatus};
+use vtcode_core::tools::types::{VTCodeExecSession, VTCodeSessionLifecycleState};
 use vtcode_core::utils::ansi::MessageStyle;
-use vtcode_ui::tui::app::{
-    InlineListItem, InlineListSearchConfig, InlineListSelection, ListOverlayRequest, TransientEvent, TransientHotkey,
-    TransientHotkeyAction, TransientHotkeyKey, TransientRequest, TransientSelectionChange, TransientSubmission,
-};
 
 use super::ui::ensure_selection_ui_available;
 use super::{SlashCommandContext, SlashCommandControl};
-use crate::agent::runloop::unified::interactive_features::{BackgroundJobSummary, collect_background_jobs};
+use crate::agent::runloop::unified::session_setup::refresh_local_agents;
 
 pub(crate) async fn handle_toggle_tasks_panel(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
     let visible = !ctx.session_stats.task_panel_visible;
@@ -31,288 +29,100 @@ pub(crate) async fn handle_show_jobs_panel(mut ctx: SlashCommandContext<'_>) -> 
         return Ok(SlashCommandControl::Continue);
     }
 
-    let jobs = collect_background_jobs(ctx.tool_registry);
-    if jobs.is_empty() {
-        ctx.renderer.line(MessageStyle::Info, "No active background jobs.")?;
-        return Ok(SlashCommandControl::Continue);
+    if !ctx.renderer.supports_inline_ui() {
+        return render_jobs_text(&mut ctx).await;
     }
 
-    let items = jobs.iter().map(background_job_item).collect::<Vec<_>>();
-    let selected = items.first().and_then(|item| item.selection.clone());
-    ctx.handle.show_transient(TransientRequest::List(ListOverlayRequest {
-        title: "Jobs".to_string(),
-        lines: vec!["Active/background command sessions.".to_string()],
-        footer_hint: Some("ctrl-r focus output · ctrl-p preview snapshot · ctrl-x interrupt selected job".to_string()),
-        items,
-        selected: selected.clone(),
-        search: Some(InlineListSearchConfig {
-            label: "Search jobs".to_string(),
-            placeholder: Some("command, cwd, status".to_string()),
-        }),
-        hotkeys: vec![
-            TransientHotkey {
-                key: TransientHotkeyKey::CtrlChar('r'),
-                action: TransientHotkeyAction::FocusJobOutput,
-            },
-            TransientHotkey {
-                key: TransientHotkeyKey::CtrlChar('p'),
-                action: TransientHotkeyAction::PreviewJobSnapshot,
-            },
-            TransientHotkey {
-                key: TransientHotkeyKey::CtrlChar('x'),
-                action: TransientHotkeyAction::InterruptJob,
-            },
-        ],
-    }));
+    let controller = ctx.tool_registry.subagent_controller();
+    let exec_sessions = ctx.tool_registry.exec_session_manager();
+    if let Err(error) = refresh_local_agents(ctx.handle, controller.as_ref(), exec_sessions).await {
+        tracing::warn!(%error, "Failed to refresh local agents before opening jobs");
+    }
+    ctx.handle.show_local_agents();
+    Ok(SlashCommandControl::Continue)
+}
 
-    let Some(action) =
-        wait_for_jobs_modal_action(ctx.handle, ctx.session, ctx.ctrl_c_state, ctx.ctrl_c_notify, selected).await
-    else {
-        return Ok(SlashCommandControl::Continue);
-    };
-    let job_id = match action.selection {
-        Some(InlineListSelection::ConfigAction(action)) => match action.strip_prefix("job:") {
-            Some(job_id) => job_id.to_string(),
-            None => return Ok(SlashCommandControl::Continue),
-        },
-        _ => return Ok(SlashCommandControl::Continue),
-    };
+async fn render_jobs_text(ctx: &mut SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    let mut rendered = false;
 
-    match action.kind {
-        JobModalActionKind::Focus => focus_job_output(&mut ctx, &job_id)?,
-        JobModalActionKind::Preview => preview_job_snapshot(&mut ctx, &job_id)?,
-        JobModalActionKind::Interrupt => interrupt_job(&mut ctx, &job_id)?,
+    if let Some(controller) = ctx.tool_registry.subagent_controller() {
+        for entry in controller.status_entries().await {
+            if matches!(entry.status, SubagentStatus::Completed | SubagentStatus::Closed) {
+                continue;
+            }
+            rendered = true;
+            ctx.renderer
+                .line(MessageStyle::Info, &format!("{} {} (delegated)", entry.display_label, entry.status.as_str()))?;
+            if let Some(summary) = entry.summary.as_deref().or(entry.error.as_deref()) {
+                ctx.renderer.line(MessageStyle::Output, &format!("Summary: {summary}"))?;
+            }
+        }
+
+        let entries = match controller.refresh_background_processes().await {
+            Ok(entries) => entries,
+            Err(error) => {
+                tracing::warn!(%error, "Failed to refresh managed background jobs for text output");
+                controller.background_status_entries().await
+            }
+        };
+        for entry in entries {
+            if !(matches!(entry.status, BackgroundSubprocessStatus::Starting | BackgroundSubprocessStatus::Running)
+                || entry.desired_enabled && matches!(entry.status, BackgroundSubprocessStatus::Error))
+            {
+                continue;
+            }
+            rendered = true;
+            ctx.renderer.line(
+                MessageStyle::Info,
+                &format!(
+                    "{} {} pid {} (managed)",
+                    entry.display_label,
+                    entry.status.as_str(),
+                    entry.pid.map_or_else(|| "-".to_string(), |pid| pid.to_string())
+                ),
+            )?;
+            if let Some(summary) = entry.summary.as_deref().or(entry.error.as_deref()) {
+                ctx.renderer.line(MessageStyle::Output, &format!("Summary: {summary}"))?;
+            }
+        }
+    }
+
+    for snapshot in ctx.tool_registry.exec_session_manager().background_session_snapshots().await {
+        rendered = true;
+        let metadata = &snapshot.metadata;
+        ctx.renderer.line(
+            MessageStyle::Info,
+            &format!("{} {} (exec-session)", exec_session_label(metadata), exec_session_status(metadata)),
+        )?;
+        ctx.renderer.line(
+            MessageStyle::Output,
+            &format!(
+                "Summary: cwd {} · pid {}",
+                metadata.working_dir.as_deref().unwrap_or("unknown"),
+                metadata.child_pid.map_or_else(|| "-".to_string(), |pid| pid.to_string())
+            ),
+        )?;
+    }
+
+    if !rendered {
+        ctx.renderer.line(MessageStyle::Info, "No active background jobs.")?;
     }
     Ok(SlashCommandControl::Continue)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct JobModalAction {
-    kind: JobModalActionKind,
-    selection: Option<InlineListSelection>,
+fn exec_session_label(metadata: &VTCodeExecSession) -> String {
+    std::iter::once(metadata.command.as_str())
+        .chain(metadata.args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum JobModalActionKind {
-    Focus,
-    Interrupt,
-    Preview,
-}
-
-async fn wait_for_jobs_modal_action(
-    handle: &vtcode_ui::tui::app::InlineHandle,
-    session: &mut vtcode_ui::tui::app::InlineSession,
-    ctrl_c_state: &std::sync::Arc<crate::agent::runloop::unified::state::CtrlCState>,
-    ctrl_c_notify: &std::sync::Arc<tokio::sync::Notify>,
-    initial_selection: Option<InlineListSelection>,
-) -> Option<JobModalAction> {
-    let mut current_selection = initial_selection;
-    loop {
-        if ctrl_c_state.is_cancel_requested() {
-            handle.close_transient();
-            handle.force_redraw();
-            return None;
-        }
-
-        let notify = ctrl_c_notify.clone();
-        let maybe_event = tokio::select! {
-            _ = notify.notified() => None,
-            event = session.next_event() => event,
-        };
-
-        let Some(event) = maybe_event else {
-            handle.close_transient();
-            handle.force_redraw();
-            return None;
-        };
-
-        match event {
-            vtcode_ui::tui::app::InlineEvent::Transient(TransientEvent::SelectionChanged(
-                TransientSelectionChange::List(selection),
-            )) => {
-                current_selection = Some(selection);
-            }
-            vtcode_ui::tui::app::InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Selection(
-                selection,
-            ))) => {
-                ctrl_c_state.reset();
-                return Some(JobModalAction {
-                    kind: JobModalActionKind::Focus,
-                    selection: Some(selection),
-                });
-            }
-            vtcode_ui::tui::app::InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Hotkey(
-                action,
-            ))) => {
-                ctrl_c_state.reset();
-                let kind = match action {
-                    TransientHotkeyAction::FocusJobOutput => JobModalActionKind::Focus,
-                    TransientHotkeyAction::PreviewJobSnapshot => JobModalActionKind::Preview,
-                    TransientHotkeyAction::InterruptJob => JobModalActionKind::Interrupt,
-                    _ => continue,
-                };
-                return Some(JobModalAction { kind, selection: current_selection.clone() });
-            }
-            vtcode_ui::tui::app::InlineEvent::Transient(TransientEvent::Cancelled)
-            | vtcode_ui::tui::app::InlineEvent::Cancel
-            | vtcode_ui::tui::app::InlineEvent::Exit => {
-                ctrl_c_state.reset();
-                return None;
-            }
-            vtcode_ui::tui::app::InlineEvent::Interrupt => {
-                handle.close_transient();
-                handle.force_redraw();
-                return None;
-            }
-            _ => {}
-        }
-    }
-}
-
-fn focus_job_output(ctx: &mut SlashCommandContext<'_>, job_id: &str) -> Result<()> {
-    let snapshot = match ctx.tool_registry.pty_manager().snapshot_session(job_id) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            ctx.renderer
-                .line(MessageStyle::Error, &format!("Failed to inspect job {job_id}: {err}"))?;
-            return Ok(());
-        }
-    };
-    let output = read_job_output(ctx, job_id);
-    ctx.renderer
-        .line(MessageStyle::Info, &format!("Focused job {}: {}", snapshot.id, snapshot.command))?;
-    ctx.renderer.line(
-        MessageStyle::Output,
-        &format!("Working dir: {}", snapshot.working_dir.unwrap_or_else(|| "unknown".to_string())),
-    )?;
-    for line in truncate_job_output(&output).lines() {
-        ctx.renderer.line(MessageStyle::Output, line)?;
-    }
-    Ok(())
-}
-
-fn preview_job_snapshot(ctx: &mut SlashCommandContext<'_>, job_id: &str) -> Result<()> {
-    let snapshot = match ctx.tool_registry.pty_manager().snapshot_session(job_id) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            ctx.renderer
-                .line(MessageStyle::Error, &format!("Failed to inspect job {job_id}: {err}"))?;
-            return Ok(());
-        }
-    };
-    let output = read_job_output(ctx, job_id);
-
-    ctx.handle.show_modal(
-        format!("Job {}", snapshot.id),
-        vec![
-            format!("Command: {}", snapshot.command),
-            format!("Working dir: {}", snapshot.working_dir.unwrap_or_else(|| "unknown".to_string())),
-            format!("Preview:\n{}", truncate_job_output(&output)),
-        ],
-        None,
-    );
-    Ok(())
-}
-
-fn interrupt_job(ctx: &mut SlashCommandContext<'_>, job_id: &str) -> Result<()> {
-    match ctx.tool_registry.pty_manager().send_input_to_session(job_id, &[3], false) {
-        Ok(_) => ctx
-            .renderer
-            .line(MessageStyle::Info, &format!("Sent interrupt to job {job_id}."))?,
-        Err(err) => ctx
-            .renderer
-            .line(MessageStyle::Error, &format!("Failed to interrupt job {job_id}: {err}"))?,
-    }
-    Ok(())
-}
-
-fn read_job_output(ctx: &SlashCommandContext<'_>, job_id: &str) -> String {
-    ctx.tool_registry
-        .pty_manager()
-        .read_session_output(job_id, false)
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-}
-fn background_job_item(job: &BackgroundJobSummary) -> InlineListItem {
-    let subtitle = match &job.working_dir {
-        Some(dir) => format!("{} • {}", job.status, dir),
-        None => job.status.clone(),
-    };
-    InlineListItem {
-        title: job.command.clone(),
-        subtitle: Some(subtitle),
-        badge: Some(job.id.clone()),
-        indent: 0,
-        selection: Some(InlineListSelection::ConfigAction(format!("job:{}", job.id))),
-        search_value: Some(format!(
-            "{} {} {} {}",
-            job.id,
-            job.command,
-            job.status,
-            job.working_dir.clone().unwrap_or_default()
-        )),
-    }
-}
-
-fn truncate_job_output(output: &str) -> String {
-    let trimmed = output.trim();
-    if trimmed.is_empty() {
-        return "(no output yet)".to_string();
-    }
-    let lines = trimmed.lines().rev().take(20).collect::<Vec<_>>();
-    let mut preview = lines.into_iter().rev().collect::<Vec<_>>().join("\n");
-    if preview.chars().count() > 1200 {
-        preview = preview.chars().take(1199).collect::<String>();
-        preview.push('…');
-    }
-    preview
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use tokio::sync::{Notify, mpsc};
-    use vtcode_ui::tui::app::{InlineEvent, InlineHandle, InlineSession};
-
-    use crate::agent::runloop::unified::state::CtrlCState;
-
-    #[tokio::test]
-    async fn jobs_modal_hotkey_uses_latest_selection() {
-        let (command_tx, _command_rx) = mpsc::unbounded_channel();
-        let handle = InlineHandle::new_for_tests(command_tx);
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let mut session = InlineSession {
-            handle: handle.clone(),
-            events: event_rx,
-            worker: None,
-        };
-        let ctrl_c_state = Arc::new(CtrlCState::new());
-        let ctrl_c_notify = Arc::new(Notify::new());
-
-        event_tx
-            .send(InlineEvent::Transient(TransientEvent::SelectionChanged(TransientSelectionChange::List(
-                InlineListSelection::ConfigAction("job:session-2".to_string()),
-            ))))
-            .expect("selection change");
-        event_tx
-            .send(InlineEvent::Transient(TransientEvent::Submitted(TransientSubmission::Hotkey(
-                TransientHotkeyAction::InterruptJob,
-            ))))
-            .expect("hotkey submission");
-
-        let action = wait_for_jobs_modal_action(
-            &handle,
-            &mut session,
-            &ctrl_c_state,
-            &ctrl_c_notify,
-            Some(InlineListSelection::ConfigAction("job:session-1".to_string())),
-        )
-        .await
-        .expect("job action");
-
-        assert_eq!(action.kind, JobModalActionKind::Interrupt);
-        assert_eq!(action.selection, Some(InlineListSelection::ConfigAction("job:session-2".to_string())));
+fn exec_session_status(metadata: &VTCodeExecSession) -> String {
+    match metadata.lifecycle_state {
+        Some(VTCodeSessionLifecycleState::Running) => "running".to_string(),
+        Some(VTCodeSessionLifecycleState::Exited) => metadata
+            .exit_code
+            .map_or_else(|| "exited".to_string(), |code| format!("exited ({code})")),
+        None => "unknown".to_string(),
     }
 }

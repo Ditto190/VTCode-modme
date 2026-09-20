@@ -86,6 +86,7 @@ pub fn generate_tool_guidelines_with_capabilities(
             }
             if has(TOOL_EXEC_COMMAND) {
                 lines.push(shell_task_guidance(shell_profile).to_owned());
+                lines.push(background_exec_guidance().to_owned());
             }
             if has(TOOL_WRITE_STDIN) {
                 lines.push("- `write_stdin` needs an active `session_id`; prefer returned `next_wait_args` and repeat wait after an in-progress deadline.".to_owned());
@@ -156,6 +157,7 @@ pub fn generate_tool_guidelines_for_profile(
     }
     if has_exec {
         lines.push(shell_task_guidance(shell_profile).to_string());
+        lines.push(background_exec_guidance().to_string());
         // Verifier discipline: the anti-blind-editing gate only clears on a
         // truthful exit 0. Runtime owns truncator elision and unverified
         // classification (`tool_intent/activity.rs`, spool processing); the
@@ -513,6 +515,10 @@ fn shell_task_guidance(shell_profile: ResolvedShellPromptProfile) -> &'static st
     }
 }
 
+fn background_exec_guidance() -> &'static str {
+    "- For long-lived commands, set `background: true` on `exec_command`; it returns a bounded preview plus a stable `session_id` and wait arguments. At most three live background processes are retained per runtime, with no automatic eviction; reuse the session operations to wait, poll, write, inspect, terminate, or close."
+}
+
 fn read_only_batching_guidance(has_read_file: bool) -> &'static str {
     if has_read_file {
         "- Batch independent read-only calls; use bounded `read_file` ranges, order dependencies, serialize mutations; narrow the range on `line_truncated`."
@@ -708,6 +714,7 @@ mod tests {
             );
         }
         assert!(guidelines.contains("`write_stdin`"));
+        assert!(guidelines.contains("At most three live background processes"));
         assert!(guidelines.contains("`apply_patch`"));
         assert!(!guidelines.contains("task_tracker"));
         assert!(!guidelines.contains("list_files"));
@@ -737,6 +744,7 @@ mod tests {
         assert!(guidelines.contains("write full command arguments explicitly"));
         assert!(guidelines.contains("conversation or tool results"));
         assert!(guidelines.contains("existing `session_id`"));
+        assert!(guidelines.contains("background: true"));
         assert!(guidelines.contains("Bash `histverify`"));
         assert!(guidelines.contains("zsh `HIST_VERIFY`"));
         // No `code_search` in this profile: the search-preference clause

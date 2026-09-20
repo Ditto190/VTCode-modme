@@ -54,12 +54,19 @@ impl ToolRegistry {
         self.exec_sessions.terminate_all_sessions_async()
     }
 
+    /// Inline-delegating wrapper that terminates only foreground exec sessions
+    /// after a turn interruption, preserving user-owned background sessions.
+    pub fn terminate_active_exec_sessions_async(&self) -> impl Future<Output = Result<()>> + '_ {
+        self.exec_sessions.terminate_active_sessions_async()
+    }
+
     pub fn exec_session_manager(&self) -> ExecSessionManager {
         self.exec_sessions.clone()
     }
 
     /// Set the active PTY sessions counter for tracking
     pub fn set_active_pty_sessions(&self, counter: Arc<std::sync::atomic::AtomicUsize>) {
+        self.exec_sessions.set_foreground_pty_counter(Arc::clone(&counter));
         if let Ok(mut guard) = self.active_pty_sessions.write() {
             *guard = Some(counter);
         }

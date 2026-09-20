@@ -6,7 +6,7 @@ mod selection;
 mod style;
 
 pub use content::ContentPart;
-pub use local_agents::{LocalAgentEntry, LocalAgentKind};
+pub use local_agents::{ExecSessionAction, LocalAgentEntry, LocalAgentKind};
 pub use overlay::{
     ListOverlayRequest, ModalOverlayRequest, OverlayEvent, OverlayHotkey, OverlayHotkeyAction, OverlayHotkeyKey,
     OverlayRequest, OverlaySelectionChange, OverlaySubmission, WizardOverlayRequest,

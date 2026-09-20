@@ -52,6 +52,7 @@ struct PreparedExecRunRequest {
     rows: Option<u16>,
     cols: Option<u16>,
     sandbox_active: bool,
+    background: bool,
 }
 
 struct ResolvedExecSandboxRequest {
@@ -292,6 +293,7 @@ impl ToolRegistry {
         let payload = args
             .as_object()
             .ok_or_else(|| anyhow!("command execution requires a JSON object"))?;
+        let background = payload.get("background").and_then(Value::as_bool).unwrap_or(false);
 
         let (command, auto_raw_command) = parse_command_parts(payload, missing_error, empty_error)?;
         let shell_program = match backend {
@@ -366,10 +368,13 @@ impl ToolRegistry {
             prepared_command,
             working_dir_path: sandbox_request.working_dir_path,
             output_config,
-            yield_duration: Duration::from_millis(clamp_exec_yield_ms(
-                payload.get("yield_time_ms").and_then(Value::as_u64),
-                10_000,
-            )),
+            yield_duration: Duration::from_millis(
+                clamp_exec_yield_ms(
+                    payload.get("yield_time_ms").and_then(Value::as_u64),
+                    if background { 250 } else { 10_000 },
+                )
+                .min(if background { 1_000 } else { 30_000 }),
+            ),
             session_id: resolve_exec_run_session_id(payload)?,
             shell_program,
             env_overrides: parse_exec_env_overrides(payload)?,
@@ -378,6 +383,7 @@ impl ToolRegistry {
             rows,
             cols,
             sandbox_active,
+            background,
         })
     }
 
@@ -905,6 +911,7 @@ mod pty_context_tests {
             command: "zsh".to_string(),
             args: vec!["-l".to_string(), "-c".to_string(), "cargo check".to_string()],
             working_dir: Some(".".to_string()),
+            background: false,
             rows: Some(24),
             cols: Some(80),
             child_pid: None,
@@ -925,6 +932,7 @@ mod pty_context_tests {
             command: "zsh".to_string(),
             args: vec!["-l".to_string(), "-c".to_string(), "cargo check".to_string()],
             working_dir: Some(".".to_string()),
+            background: false,
             rows: Some(30),
             cols: Some(120),
             child_pid: None,
@@ -973,6 +981,7 @@ mod pty_context_tests {
             command: "cargo".to_string(),
             args: vec!["check".to_string()],
             working_dir: Some(".".to_string()),
+            background: false,
             rows: None,
             cols: None,
             child_pid: None,
@@ -1012,6 +1021,7 @@ mod pty_context_tests {
             command: "cargo".to_string(),
             args: vec!["build".to_string()],
             working_dir: Some(".".to_string()),
+            background: false,
             rows: None,
             cols: None,
             child_pid: None,
@@ -1216,6 +1226,7 @@ mod unified_action_error_tests {
             command: "zsh".to_string(),
             args: vec!["-c".to_string(), "pip install pymupdf".to_string()],
             working_dir: Some(".".to_string()),
+            background: false,
             rows: None,
             cols: None,
             child_pid: None,
@@ -1334,6 +1345,7 @@ mod unified_action_error_tests {
                 "vtcode-core".to_string(),
             ],
             working_dir: Some(".".to_string()),
+            background: false,
             rows: None,
             cols: None,
             child_pid: None,

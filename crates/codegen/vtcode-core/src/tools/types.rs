@@ -263,6 +263,8 @@ pub struct VTCodeExecSession {
     pub command: String,
     pub args: Vec<String>,
     pub working_dir: Option<String>,
+    #[serde(default)]
+    pub background: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,6 +287,7 @@ impl From<VTCodePtySession> for VTCodeExecSession {
             command: session.command,
             args: session.args,
             working_dir: session.working_dir,
+            background: false,
             rows: Some(session.rows),
             cols: Some(session.cols),
             child_pid: session.child_pid,

@@ -648,7 +648,7 @@ impl SubagentController {
         let metadata = if launch.use_pty {
             self.config
                 .exec_sessions
-                .create_pty_session(
+                .create_pty_session_for_managed_background(
                     exec_session_id.clone().into(),
                     launch.command,
                     self.config.workspace_root.clone(),
@@ -660,12 +660,14 @@ impl SubagentController {
                     },
                     hashbrown::HashMap::new(),
                     None,
+                    hashbrown::HashMap::new(),
+                    false,
                 )
                 .await
         } else {
             self.config
                 .exec_sessions
-                .create_pipe_session(
+                .create_pipe_session_for_managed_background(
                     exec_session_id.clone().into(),
                     launch.command,
                     self.config.workspace_root.clone(),

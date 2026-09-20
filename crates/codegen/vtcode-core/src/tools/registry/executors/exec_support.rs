@@ -179,10 +179,6 @@ pub(super) fn build_exec_session_command_display(session: &VTCodeExecSession) ->
     build_session_command_display_parts(&session.command, &session.args)
 }
 
-pub(super) fn is_pty_exec_session(session: &VTCodeExecSession) -> bool {
-    session.backend == "pty"
-}
-
 pub(super) fn attach_exec_response_context(
     response: &mut Value,
     session: &VTCodeExecSession,
@@ -195,6 +191,14 @@ pub(super) fn attach_exec_response_context(
         response["working_directory"] = json!(value);
     }
     response["backend"] = json!(session.backend);
+    response["background"] = json!(session.background);
+    if let Some(state) = session.lifecycle_state {
+        response["lifecycle_state"] = json!(state);
+    }
+    if let Some(pid) = session.child_pid {
+        response["child_pid"] = json!(pid);
+        response["pid"] = json!(pid);
+    }
     if let Some(rows) = session.rows {
         response["rows"] = json!(rows);
     }

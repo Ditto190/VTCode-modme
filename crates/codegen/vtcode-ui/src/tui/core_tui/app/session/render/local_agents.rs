@@ -10,7 +10,7 @@ use crate::tui::core_tui::session::{
     list_panel::SharedListWidgetModel,
 };
 use crate::tui::core_tui::style::ratatui_color_from_ansi;
-use crate::tui::core_tui::types::LocalAgentEntry;
+use crate::tui::core_tui::types::{LocalAgentEntry, LocalAgentKind};
 use ratatui::widgets::{Clear, Fill, Paragraph, Wrap};
 use tracing::warn;
 use tui_shimmer::shimmer_spans_with_style_at_phase;
@@ -47,7 +47,7 @@ impl SharedListWidgetModel for LocalAgentsPanelModel {
             .map(|(idx, entry)| {
                 let is_selected = self.selected == Some(idx);
                 let row_text = truncate_row(
-                    format!("{} · {} · {}", entry.display_label, entry.kind.as_str(), entry.status),
+                    format!("{} · {} · {} · {}", entry.display_label, entry.kind.as_str(), entry.status, entry.id),
                     max_chars,
                 );
                 let cursor = list_cursor(is_selected);
@@ -127,12 +127,21 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, area: R
         let state = &session.local_agents_state;
         (state.selected(), state.scroll_offset(), state.entries().to_vec())
     };
+    let selected_exec_session = selected_index
+        .and_then(|index| entries.get(index))
+        .is_some_and(|entry| entry.kind == LocalAgentKind::ExecSession);
 
     let info_line = if entries.is_empty() {
         "Background subagents are opt-in. Configure one, then use Ctrl+B or /subprocesses.".to_string()
+    } else if selected_exec_session {
+        format!(
+            "↑↓ Navigate · Enter inspect · Ctrl+K stop · Ctrl+X close · Ctrl+R focus · Ctrl+P preview · Esc close · Showing {} local agent{}",
+            entries.len(),
+            if entries.len() == 1 { "" } else { "s" }
+        )
     } else {
         format!(
-            "↑↓ Navigate · Enter inspect · Alt+O transcript · Esc close · Showing {} local agent{}",
+            "↑↓ Navigate · Enter inspect · Alt+O transcript · Ctrl+K stop · Ctrl+X close · Esc close · Showing {} local agent{}",
             entries.len(),
             if entries.len() == 1 { "" } else { "s" }
         )

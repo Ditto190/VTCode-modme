@@ -487,7 +487,7 @@ async fn run_single_tool_attempt(
 }
 
 async fn terminate_active_exec_sessions(registry: &ToolRegistry, tool_name: &str, reason: &str) {
-    if let Err(err) = registry.terminate_all_exec_sessions_async().await {
+    if let Err(err) = registry.terminate_active_exec_sessions_async().await {
         debug!(
             target: "vtcode.tool.exec",
             tool = tool_name,

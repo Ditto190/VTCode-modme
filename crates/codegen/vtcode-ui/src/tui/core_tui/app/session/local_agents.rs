@@ -1,5 +1,5 @@
 use crate::tui::core_tui::session::list_navigator::ListNavigator;
-use crate::tui::core_tui::types::LocalAgentEntry;
+use crate::tui::core_tui::types::{ExecSessionAction, LocalAgentEntry, LocalAgentKind};
 use hashbrown::HashSet;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -27,10 +27,9 @@ impl LocalAgentsState {
     pub(super) fn set_entries(&mut self, entries: Vec<LocalAgentEntry>) -> LocalAgentsUpdate {
         let previous_id = self.selected_entry().map(|entry| entry.id.clone());
         let next_active_ids = entries.iter().map(|entry| entry.id.clone()).collect::<HashSet<_>>();
-        let has_new_delegated_entries = entries.iter().any(|entry| {
-            entry.kind == crate::tui::core_tui::types::LocalAgentKind::Delegated
-                && !self.active_ids.contains(entry.id.as_str())
-        });
+        let has_new_delegated_entries = entries
+            .iter()
+            .any(|entry| entry.kind == LocalAgentKind::Delegated && !self.active_ids.contains(entry.id.as_str()));
         self.entries = entries;
         self.navigator.set_item_count(self.entries.len());
         self.active_ids = next_active_ids;
@@ -156,10 +155,17 @@ impl AppSession {
                 LocalAgentsKeyResult::Handled
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.local_agents_state.move_selection_up();
-                self.mark_dirty();
-                LocalAgentsKeyResult::Handled
+                if let Some(event) = self.selected_exec_session_action_event(ExecSessionAction::Preview) {
+                    LocalAgentsKeyResult::Emit(event)
+                } else {
+                    self.local_agents_state.move_selection_up();
+                    self.mark_dirty();
+                    LocalAgentsKeyResult::Handled
+                }
             }
+            KeyCode::Char('r') | KeyCode::Char('R') if key.modifiers.contains(KeyModifiers::CONTROL) => self
+                .selected_exec_session_action_event(ExecSessionAction::Focus)
+                .map_or(LocalAgentsKeyResult::NotHandled, LocalAgentsKeyResult::Emit),
             KeyCode::Char('o') | KeyCode::Char('O') if key.modifiers.contains(KeyModifiers::ALT) => self
                 .selected_local_agent_transcript_event()
                 .map_or(LocalAgentsKeyResult::Handled, LocalAgentsKeyResult::Emit),
@@ -186,11 +192,14 @@ impl AppSession {
         self.mark_dirty();
         Some(InlineEvent::Submit(
             match entry.kind {
-                crate::tui::core_tui::types::LocalAgentKind::Delegated => {
+                LocalAgentKind::Delegated => {
                     format!("/agent inspect {}", entry.id)
                 }
-                crate::tui::core_tui::types::LocalAgentKind::Background => {
+                LocalAgentKind::Background => {
                     format!("/subprocesses inspect {}", entry.id)
+                }
+                LocalAgentKind::ExecSession => {
+                    return Some(InlineEvent::ExecSessionAction { id: entry.id, action: ExecSessionAction::Inspect });
                 }
             }
             .into(),
@@ -214,11 +223,17 @@ impl AppSession {
         self.mark_dirty();
         Some(InlineEvent::Submit(
             match entry.kind {
-                crate::tui::core_tui::types::LocalAgentKind::Delegated => {
+                LocalAgentKind::Delegated => {
                     format!("/agent close {}", entry.id)
                 }
-                crate::tui::core_tui::types::LocalAgentKind::Background => {
+                LocalAgentKind::Background => {
                     format!("/subprocesses stop {}", entry.id)
+                }
+                LocalAgentKind::ExecSession => {
+                    return Some(InlineEvent::ExecSessionAction {
+                        id: entry.id,
+                        action: ExecSessionAction::GracefulTerminate,
+                    });
                 }
             }
             .into(),
@@ -230,14 +245,29 @@ impl AppSession {
         self.mark_dirty();
         Some(InlineEvent::Submit(
             match entry.kind {
-                crate::tui::core_tui::types::LocalAgentKind::Delegated => {
+                LocalAgentKind::Delegated => {
                     format!("/agent close {}", entry.id)
                 }
-                crate::tui::core_tui::types::LocalAgentKind::Background => {
+                LocalAgentKind::Background => {
                     format!("/subprocesses cancel {}", entry.id)
+                }
+                LocalAgentKind::ExecSession => {
+                    return Some(InlineEvent::ExecSessionAction {
+                        id: entry.id,
+                        action: ExecSessionAction::ForceTerminateOrClose,
+                    });
                 }
             }
             .into(),
         ))
+    }
+
+    fn selected_exec_session_action_event(&mut self, action: ExecSessionAction) -> Option<InlineEvent> {
+        let entry = self.local_agents_state.selected_entry()?.clone();
+        if entry.kind != LocalAgentKind::ExecSession {
+            return None;
+        }
+        self.mark_dirty();
+        Some(InlineEvent::ExecSessionAction { id: entry.id, action })
     }
 }

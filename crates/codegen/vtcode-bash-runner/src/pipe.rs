@@ -325,6 +325,7 @@ async fn spawn_process_internal(opts: PipeSpawnOptions) -> Result<SpawnedProcess
 
     Ok(SpawnedProcess {
         session: handle,
+        process_id: pid,
         output_rx,
         reliable_output_rx,
         reliable_output_enabled,

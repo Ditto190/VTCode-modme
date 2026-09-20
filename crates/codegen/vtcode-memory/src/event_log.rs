@@ -1236,7 +1236,10 @@ mod borrowed_envelope_tests {
         for event in [
             ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "thread".to_string() }),
             ThreadEvent::TurnStarted(TurnStartedEvent::default()),
-            ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }),
+            ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new(),
+            }),
         ] {
             let canonical =
                 serde_json::to_string(&VersionedThreadEvent::new(event.clone())).expect("canonical serialize");
@@ -1269,7 +1272,10 @@ mod lifecycle_state_machine_tests {
             LifecycleKind::TurnStarted
         );
         assert_eq!(
-            LifecycleKind::from_event(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() })),
+            LifecycleKind::from_event(&ThreadEvent::TurnCompleted(TurnCompletedEvent {
+                usage: Usage::default(),
+                in_progress_exec_sessions: Vec::new()
+            })),
             LifecycleKind::TurnCompleted
         );
         assert_eq!(

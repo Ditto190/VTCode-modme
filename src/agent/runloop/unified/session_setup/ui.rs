@@ -39,6 +39,7 @@ use vtcode_core::notifications::{set_global_notification_hook_engine, set_global
 use vtcode_core::primary_agent::build_primary_agent_hook_config;
 use vtcode_core::prompts::discover_prompt_templates;
 use vtcode_core::subagents::SubagentController;
+use vtcode_core::tools::exec_session::ExecSessionManager;
 use vtcode_core::tools::terminal_app::TerminalAppLauncher;
 use vtcode_core::ui::slash::visible_commands;
 use vtcode_core::ui::theme;
@@ -114,6 +115,7 @@ fn build_session_event_callback(
     steering_sender: Option<UnboundedSender<SteeringMessage>>,
     editor_open: Arc<EditorOpenDispatcher>,
     editor_workspace: PathBuf,
+    exec_sessions: ExecSessionManager,
 ) -> InlineEventCallback {
     Arc::new(move |event: &InlineEvent| match event {
         InlineEvent::OpenFileInEditor(path) => {
@@ -129,6 +131,14 @@ fn build_session_event_callback(
             // entering the emergency double-signal exit state machine used by
             // the OS signal handler.
             request_local_cancel(&state, &notify);
+        }
+        InlineEvent::BackgroundOperation => {
+            // Reserve the background slot synchronously on the TUI thread so
+            // the foreground wait can hand the live process off immediately.
+            // The deferred event consumes the result and preserves the
+            // existing `/subprocesses toggle` fallback when no foreground
+            // exec session exists.
+            let _ = exec_sessions.request_foreground_background();
         }
         InlineEvent::Pause => {
             if let Some(sender) = steering_sender.as_ref() {
@@ -229,6 +239,7 @@ pub(crate) async fn initialize_session_ui(
         steering_sender,
         editor_open_dispatcher.clone(),
         config.workspace.clone(),
+        session_state.tool_registry.exec_session_manager(),
     );
     let focus_callback: FocusChangeCallback = Arc::new(set_global_terminal_focused);
 
@@ -402,11 +413,10 @@ pub(crate) async fn initialize_session_ui(
             }
         }
     }));
-    let mut background_subprocess_task_guard = None;
-    if let Some(controller) = session_state.tool_registry.subagent_controller() {
-        background_subprocess_task_guard =
-            Some(spawn_agent_palette_and_background_refresh(&handle, controller.clone(), vt_cfg));
-    }
+    let controller = session_state.tool_registry.subagent_controller();
+    let exec_sessions = session_state.tool_registry.exec_session_manager();
+    let background_subprocess_task_guard =
+        Some(spawn_agent_palette_and_background_refresh(&handle, controller, exec_sessions, vt_cfg));
 
     transcript::clear();
     render_resume_state_if_present(&mut renderer, resume_state, supports_reasoning)?;
@@ -604,31 +614,35 @@ pub(crate) async fn initialize_session_ui(
 /// controller already exists at UI spawn and when it appears during hydration.
 fn spawn_agent_palette_and_background_refresh(
     handle: &InlineHandle,
-    controller: Arc<SubagentController>,
+    controller: Option<Arc<SubagentController>>,
+    exec_sessions: ExecSessionManager,
     vt_cfg: Option<&VTCodeConfig>,
 ) -> BackgroundTaskGuard {
     let handle_for_agents = handle.clone();
     let controller_for_agents = controller.clone();
-    tokio::spawn(async move {
-        let specs = controller_for_agents.effective_specs().await;
-        if specs.is_empty() {
-            return;
-        }
+    if let Some(controller_for_agents) = controller_for_agents {
+        tokio::spawn(async move {
+            let specs = controller_for_agents.effective_specs().await;
+            if specs.is_empty() {
+                return;
+            }
 
-        handle_for_agents.configure_agent_palette(
-            specs
-                .into_iter()
-                .filter(|spec| spec.is_subagent())
-                .map(|spec| AgentPaletteItem {
-                    name: spec.name,
-                    description: Some(spec.description),
-                })
-                .collect(),
-        );
-    });
+            handle_for_agents.configure_agent_palette(
+                specs
+                    .into_iter()
+                    .filter(|spec| spec.is_subagent())
+                    .map(|spec| AgentPaletteItem {
+                        name: spec.name,
+                        description: Some(spec.description),
+                    })
+                    .collect(),
+            );
+        });
+    }
 
     let handle_for_subprocesses = handle.clone();
     let controller_for_subprocesses = controller;
+    let exec_sessions_for_subprocesses = exec_sessions;
     let refresh_interval_ms = vt_cfg
         .map(|cfg| cfg.subagents.background.refresh_interval_ms)
         .unwrap_or(2_000)
@@ -639,7 +653,13 @@ fn spawn_agent_palette_and_background_refresh(
 
         loop {
             interval.tick().await;
-            if let Err(err) = refresh_local_agents(&handle_for_subprocesses, &controller_for_subprocesses).await {
+            if let Err(err) = refresh_local_agents(
+                &handle_for_subprocesses,
+                controller_for_subprocesses.as_ref(),
+                exec_sessions_for_subprocesses.clone(),
+            )
+            .await
+            {
                 tracing::warn!("Failed to refresh background subprocesses: {}", err);
             }
         }
@@ -724,10 +744,12 @@ pub(crate) fn apply_post_hydration_ui(
     render_full_auto_allowlist_banner(&mut ui_setup.renderer, full_auto, session_state.full_auto_allowlist.as_ref())?;
     maybe_render_system_prompt_budget_warning(&mut ui_setup.renderer, vt_cfg, &session_state.session_bootstrap)?;
 
-    let background_subprocess_task_guard = session_state
-        .tool_registry
-        .subagent_controller()
-        .map(|controller| spawn_agent_palette_and_background_refresh(&handle, controller.clone(), vt_cfg));
+    let background_subprocess_task_guard = Some(spawn_agent_palette_and_background_refresh(
+        &handle,
+        session_state.tool_registry.subagent_controller(),
+        session_state.tool_registry.exec_session_manager(),
+        vt_cfg,
+    ));
 
     Ok(background_subprocess_task_guard)
 }

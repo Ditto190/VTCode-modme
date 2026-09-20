@@ -91,7 +91,13 @@ fn test_streaming_event_sequence_compliance() {
     builder.process_event(&ThreadEvent::ItemCompleted(ItemCompletedEvent { item: final_item }), &mut emitter);
 
     // 5. Response Completed
-    builder.process_event(&ThreadEvent::TurnCompleted(TurnCompletedEvent { usage: Usage::default() }), &mut emitter);
+    builder.process_event(
+        &ThreadEvent::TurnCompleted(TurnCompletedEvent {
+            usage: Usage::default(),
+            in_progress_exec_sessions: Vec::new(),
+        }),
+        &mut emitter,
+    );
 
     let events = emitter.into_events();
 

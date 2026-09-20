@@ -220,6 +220,19 @@ impl ProcessHandle {
         self.terminate_internal();
     }
 
+    /// Kill the child process group without aborting the readers or wait task.
+    ///
+    /// Session owners use this path when they still need to drain output and
+    /// reap the child after termination. Call [`Self::terminate`] when the
+    /// caller is abandoning the session and does not need that final drain.
+    pub fn terminate_process(&self) {
+        if let Ok(mut killer_opt) = self.killer.lock()
+            && let Some(mut killer) = killer_opt.take()
+        {
+            let _ = killer.kill();
+        }
+    }
+
     /// Internal termination that aborts all tasks.
     fn terminate_internal(&self) {
         // Kill the child process
@@ -331,6 +344,8 @@ impl Drop for ProcessHandle {
 pub struct SpawnedProcess {
     /// Handle for interacting with the process.
     pub session: ProcessHandle,
+    /// Operating-system process identifier for the direct child.
+    pub process_id: u32,
     /// Receiver for stdout/stderr output chunks.
     pub output_rx: broadcast::Receiver<Bytes>,
     /// Bounded, lossless receiver for consumers that must spool complete

@@ -4,7 +4,7 @@
 
 ## Modules
 
-`executor` CommandExecutor trait + backends | `runner` BashRunner | `policy` CommandPolicy + WorkspaceGuardPolicy | `pipe` async process spawning | `process` handles | `process_group` kill/cleanup | `background` long-running tasks | `stream` utilities
+`executor` CommandExecutor trait + backends | `runner` BashRunner | `policy` CommandPolicy + WorkspaceGuardPolicy | `pipe` async process spawning | `process` handles and drain-preserving termination | `process_group` kill/cleanup | `background` long-running tasks | `stream` utilities
 
 ## Rules
 
@@ -25,4 +25,4 @@
 - Unsafe env mutation (`set_var`/`remove_var`) is centralized in `vtcode-commons::env_lock`, serialized by a process-wide mutex, single-threaded startup only.
 - `policy` containment delegates to `vtcode_commons::paths::ensure_path_within_workspace` — `..`-traversal paths are rejected (intentionally stricter than the old `starts_with`).
 - Pipe spooling opts into `SpawnedProcess::reliable_output_rx`, a bounded lossless stream; legacy broadcast subscribers must remain independent of that backpressure path.
-- `wait_with_output` bounds post-exit draining even when a descendant inherits the pipe; never turn that drain back into an unbounded wait.
+- Pipe session termination kills the complete process group before final draining; `wait_with_output` still bounds post-exit draining even when a descendant inherits the pipe, and must never become an unbounded wait.

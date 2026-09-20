@@ -111,6 +111,113 @@ fn new_background_local_agent_does_not_auto_open_drawer() {
 }
 
 #[test]
+fn exec_session_entry_does_not_auto_open_drawer() {
+    let mut session = app_session_with_input("", 0);
+
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![sample_local_agent_entry(app_types::LocalAgentKind::ExecSession)],
+    });
+
+    assert!(!session.local_agents_visible());
+}
+
+#[test]
+fn mixed_local_agents_keep_exec_session_selection_when_snapshot_changes() {
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![
+            sample_local_agent_entry_with_id("agent-1", "rust-engineer", app_types::LocalAgentKind::Delegated),
+            sample_local_agent_entry_with_id("managed-1", "managed-worker", app_types::LocalAgentKind::Background),
+            sample_local_agent_entry_with_id("exec-42", "cargo test", app_types::LocalAgentKind::ExecSession),
+        ],
+    });
+    session.handle_command(app_types::InlineCommand::ShowTransient {
+        request: Box::new(app_types::TransientRequest::LocalAgents(app_types::LocalAgentsTransientRequest {
+            visible: Some(true),
+        })),
+    });
+
+    for _ in 0..2 {
+        assert!(session.process_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)).is_none());
+    }
+
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![
+            sample_local_agent_entry_with_id("agent-1", "rust-engineer", app_types::LocalAgentKind::Delegated),
+            sample_local_agent_entry_with_id("managed-1", "managed-worker", app_types::LocalAgentKind::Background),
+            {
+                let mut entry = sample_local_agent_entry_with_id(
+                    "exec-42",
+                    "cargo test --locked",
+                    app_types::LocalAgentKind::ExecSession,
+                );
+                entry.status = "exited (0)".to_string();
+                entry.preview = "finished".to_string();
+                entry
+            },
+        ],
+    });
+
+    let inspect = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(
+        inspect,
+        Some(app_types::InlineEvent::ExecSessionAction { id, action })
+            if id == "exec-42" && action == app_types::ExecSessionAction::Inspect
+    ));
+}
+
+#[test]
+fn exec_session_drawer_actions_route_to_runloop_events() {
+    for (key, expected_action) in [
+        (KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), app_types::ExecSessionAction::Inspect),
+        (
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
+            app_types::ExecSessionAction::GracefulTerminate,
+        ),
+        (
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+            app_types::ExecSessionAction::ForceTerminateOrClose,
+        ),
+        (KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL), app_types::ExecSessionAction::Focus),
+        (KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL), app_types::ExecSessionAction::Preview),
+    ] {
+        let mut session = app_session_with_input("", 0);
+        session.handle_command(app_types::InlineCommand::SetLocalAgents {
+            entries: vec![sample_local_agent_entry_with_id(
+                "exec-42",
+                "cargo test",
+                app_types::LocalAgentKind::ExecSession,
+            )],
+        });
+        session.handle_command(app_types::InlineCommand::ShowTransient {
+            request: Box::new(app_types::TransientRequest::LocalAgents(app_types::LocalAgentsTransientRequest {
+                visible: Some(true),
+            })),
+        });
+
+        let event = session.process_key(key);
+        assert!(matches!(
+            event,
+            Some(app_types::InlineEvent::ExecSessionAction { id, action })
+                if id == "exec-42" && action == expected_action
+        ));
+    }
+}
+
+#[test]
+fn ctrl_r_still_opens_history_picker_for_non_exec_local_agents() {
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![sample_local_agent_entry(app_types::LocalAgentKind::Delegated)],
+    });
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+
+    assert!(event.is_none());
+    assert!(session.history_picker_state.active);
+}
+
+#[test]
 fn auto_opened_local_agents_drawer_closes_after_last_delegated_entry_is_removed() {
     let mut session = app_session_with_input("", 0);
     session.handle_command(app_types::InlineCommand::SetLocalAgents {
