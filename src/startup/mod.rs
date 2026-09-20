@@ -1148,6 +1148,14 @@ mod validation_tests {
             prompt: Some("hi".to_string()),
             output_format: None,
         })));
+        assert!(!command_launches_tui(Some(&Commands::Exec {
+            json: false,
+            dry_run: false,
+            events: None,
+            last_message_file: None,
+            command: None,
+            prompt: Some("hi".to_string()),
+        })));
     }
 
     #[test]
