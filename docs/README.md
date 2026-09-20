@@ -102,6 +102,7 @@ New to VT Code? Start with installation and basic usage:
 - **[Getting Started](./user-guide/getting-started.md)** - Installation, configuration, and first steps
 - **[Subagents](./user-guide/subagents.md)** - Create, configure, invoke, and switch between delegated child agents with VT Code-native tool metadata
 - **[Agent Plugins](./user-guide/agent-plugins.md)** - Install portable plugins that bundle Agent Skills and MCP servers under a `plugin.json` manifest
+- **[Memcode MCP](./guides/memcode-mcp.md)** - Connect a remote memory provider with PKCE OAuth and explicit write consent
 - **[Interactive Mode Reference](./user-guide/interactive-mode.md)** - Terminal workflows (shortcuts: [Keyboard Shortcuts](./user-guide/keyboard-shortcuts.md))
 - **[WebMCP Browser Bridge User Guide](./user-guide/webmcp.md)** - Connect a browser editor to an active VT Code session or a bounded standalone workspace bridge
 - **[Scheduled Tasks](./user-guide/scheduled-tasks.md)** - Reminders and durable `vtcode schedule` automations

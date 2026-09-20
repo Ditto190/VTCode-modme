@@ -141,6 +141,8 @@ discover-timeout penalty on every connect. `vtcode mcp get <name>` reports the c
 `negotiated_protocol_version` per connected server. Custom `headers` values help satisfy hosted provider requirements
 for client identification—check the server's docs for required `Authorization` formats per the MCP
 [authorization guidance](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization.md).
+For a complete PKCE example using VT Code's MCP login command, see the
+[Memcode MCP guide](./memcode-mcp.md).
 The `max_concurrent_requests` guard prevents a single provider from starving the global pool
 configured in `[mcp]`. Two transport-level behaviors are fixed by policy rather than
 configuration: the HTTP client never follows redirects (custom auth headers must not leak to
