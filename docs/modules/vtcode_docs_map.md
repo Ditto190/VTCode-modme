@@ -1252,8 +1252,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/user-guide/commands.md`
   - **Content**: Command Reference
-  - **Topics**: Core command reference, Search, Storage diagnostics, File operations, Session resume and forks
-  - **User Questions**: "What can you tell me about Command Reference?", "How does Core command reference work?", "How does Search work?"
+  - **Topics**: Core command reference, Headless / CI, Search, Storage diagnostics, File operations
+  - **User Questions**: "What can you tell me about Command Reference?", "How does Core command reference work?", "How does Headless / CI work?"
 
 - **File**: `docs/user-guide/interactive-mode.md`
   - **Content**: Interactive Mode Reference

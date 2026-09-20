@@ -806,21 +806,7 @@ fn missing_api_key_message(
 }
 
 fn command_launches_tui(command: Option<&Commands>) -> bool {
-    matches!(
-        command,
-        None | Some(
-            Commands::Chat
-                | Commands::ChatVerbose
-                | Commands::Ask { .. }
-                | Commands::Exec { .. }
-                | Commands::Review(_)
-                | Commands::Benchmark { .. }
-                | Commands::Analyze { .. }
-                | Commands::Schema { .. }
-                | Commands::Continue
-                | Commands::BackgroundSubagent(_)
-        )
-    )
+    matches!(command, None | Some(Commands::Chat | Commands::ChatVerbose | Commands::Continue))
 }
 
 #[cfg(test)]
@@ -1126,6 +1112,42 @@ mod validation_tests {
         eprintln!("MESSAGE: {}", message);
 
         assert!(message.contains("secret migrate"));
+    }
+
+    #[test]
+    fn missing_api_key_message_uses_cli_hint_for_headless_exec() {
+        let cfg = VTCodeConfig::default();
+        let selection = RuntimeModelSelection {
+            model: "gpt-4o".to_string(),
+            provider: "openai".to_string(),
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            model_source: vtcode_core::config::types::ModelSelectionSource::WorkspaceConfig,
+        };
+        let exec_command = Commands::Exec {
+            json: false,
+            dry_run: false,
+            events: None,
+            last_message_file: None,
+            command: None,
+            prompt: Some("hello".to_string()),
+        };
+
+        let message = missing_api_key_message(&cfg, &selection, false, Some(&exec_command), Path::new("/tmp"));
+
+        assert!(message.contains("vtcode secret add"));
+        assert!(!message.contains("/secret add"));
+    }
+
+    #[test]
+    fn command_launches_tui_only_for_interactive_sessions() {
+        assert!(command_launches_tui(None));
+        assert!(command_launches_tui(Some(&Commands::Chat)));
+        assert!(command_launches_tui(Some(&Commands::ChatVerbose)));
+        assert!(command_launches_tui(Some(&Commands::Continue)));
+        assert!(!command_launches_tui(Some(&Commands::Ask {
+            prompt: Some("hi".to_string()),
+            output_format: None,
+        })));
     }
 
     #[test]

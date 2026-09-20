@@ -144,29 +144,12 @@ pub(super) async fn prepare_exec_run(
     run_config.model = run_vt_cfg.agent.default_model.clone();
     run_config.reasoning_effort = run_vt_cfg.agent.reasoning_effort;
 
-    // Auto-trust workspace when full_auto is enabled and trust env var is set,
-    // or when running in non-interactive (exec) mode with full_auto config.
-    // This avoids the interactive trust prompt in CI/eval scenarios.
     let automation_cfg = &run_vt_cfg.automation.full_auto;
-    if automation_cfg.enabled {
-        let current_trust = vtcode_core::utils::dot_config::load_workspace_trust_level(&run_config.workspace)
-            .await
-            .unwrap_or(None);
-        if current_trust.is_none() {
-            vtcode_core::utils::dot_config::update_workspace_trust(
-                &run_config.workspace,
-                vtcode_core::config::WorkspaceTrustLevel::FullAuto,
-            )
-            .await
-            .ok();
-        }
-    }
-
-    require_full_auto_workspace_trust(&run_config.workspace, "exec runs", "exec").await?;
-
     if !automation_cfg.enabled {
         bail!("Automation is disabled in configuration. Enable [automation.full_auto] to continue.");
     }
+
+    require_full_auto_workspace_trust(&run_config.workspace, "exec runs", "exec").await?;
 
     let model_id = ModelId::from_config(
         &run_config.model,
@@ -283,11 +266,7 @@ fn read_prompt_from_stdin(behavior: StdinPromptBehavior, quiet: bool) -> Result<
         }
         StdinPromptBehavior::Forced => {}
         StdinPromptBehavior::OptionalAppend if stdin_is_tty => return Ok(None),
-        StdinPromptBehavior::OptionalAppend => {
-            if !quiet {
-                eprintln!("Reading additional input from stdin...");
-            }
-        }
+        StdinPromptBehavior::OptionalAppend => {}
     }
 
     let mut buffer = String::with_capacity(1024);
@@ -303,6 +282,10 @@ fn read_prompt_from_stdin(behavior: StdinPromptBehavior, quiet: bool) -> Result<
                 Ok(None)
             }
         };
+    }
+
+    if matches!(behavior, StdinPromptBehavior::OptionalAppend) && !quiet {
+        eprintln!("Read additional input from stdin; appending as <stdin> context.");
     }
 
     Ok(Some(buffer))

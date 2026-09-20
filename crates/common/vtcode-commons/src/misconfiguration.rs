@@ -348,9 +348,9 @@ fn auth_guidance() -> ConfigGuidance {
     ConfigGuidance {
         kind: MisconfigurationKind::Authentication,
         setting: "API key / credentials",
-        location: "secure storage (`/secret`) or environment",
+        location: "secure storage (`vtcode secret` or `/secret`) or environment",
         fix: Cow::Borrowed(
-            "Authentication failed. Run `/secret add <provider>` (API-key providers) or `/login <provider>` (managed auth), verify the env var is exported, then retry.",
+            "Authentication failed. Run `vtcode secret add <provider>` (or `/secret add <provider>` in TUI) for API-key providers or `vtcode login <provider>` (or `/login <provider>` in TUI) for managed auth, verify the env var is exported, then retry.",
         ),
     }
 }

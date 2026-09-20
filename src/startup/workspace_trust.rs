@@ -147,7 +147,7 @@ async fn resolve_full_auto_workspace_trust(workspace: &Path, command_name: &str)
                 if !quiet_env_overrides() {
                     let palette = ColorPalette::default();
                     let msg = format!("Workspace trusted via {TRUST_OVERRIDE_ENV}=full-auto for {command_name}.");
-                    println!("{}", render_styled(&msg, palette.success, None));
+                    eprintln!("{}", render_styled(&msg, palette.success, None));
                 }
                 Ok(TrustOutcome::Granted)
             }
