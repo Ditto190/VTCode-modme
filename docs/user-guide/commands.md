@@ -41,6 +41,26 @@ follow.
 | `vtcode update` | Check for and install binary updates from GitHub Releases |
 | `vtcode man` | Generate or display man pages |
 
+## Headless / CI
+
+`exec`, `ask --print`, and `review` are safe with no TTY. `stdout` carries
+only the result (`--json` streams events); diagnostics go to `stderr`.
+Failures exit non-zero and never block on a prompt.
+
+```bash
+vtcode exec "summarize this repo" </dev/null
+echo "fix the failing test" | vtcode exec --json - | jq .
+VTCODE_TRUST_WORKSPACE=full-auto vtcode exec "run the checks" --workspace /tmp/work
+vtcode ask "what is a monad?" </dev/null
+NO_COLOR=1 vtcode --print "summarize this repo" | cat
+```
+
+Workspace trust is fail-closed: untrusted workspaces error out. Grant once
+interactively, or set `VTCODE_TRUST_WORKSPACE=full-auto` in CI
+(`VTCODE_TRUST_WORKSPACE_QUIET=1` silences the notice). Missing credentials
+error out with `vtcode secret add <provider>` / env-var guidance; no silent
+provider fallback. `[automation.full_auto]` must be enabled for `exec`.
+
 ## Search
 
 Use `exec_command.cmd` with `rg` or `grep` for flexible shell text search.
