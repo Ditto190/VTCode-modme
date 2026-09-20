@@ -141,8 +141,6 @@ discover-timeout penalty on every connect. `vtcode mcp get <name>` reports the c
 `negotiated_protocol_version` per connected server. Custom `headers` values help satisfy hosted provider requirements
 for client identification—check the server's docs for required `Authorization` formats per the MCP
 [authorization guidance](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization.md).
-For a complete PKCE example using VT Code's MCP login command, see the
-[Memcode MCP guide](./memcode-mcp.md).
 The `max_concurrent_requests` guard prevents a single provider from starving the global pool
 configured in `[mcp]`. Two transport-level behaviors are fixed by policy rather than
 configuration: the HTTP client never follows redirects (custom auth headers must not leak to
@@ -156,6 +154,68 @@ callers can type the result shape without an extra round trip.
 > `protocol_version`, but servers must expose Server-Sent Events per the transport spec. If an HTTP
 > provider lacks streaming, fall back to a stdio wrapper until the server adopts the reference
 > implementation.
+
+### Memcode long-term memory over OAuth
+
+[Memcode](https://memcode.in) exposes an optional hosted Streamable HTTP server
+for persistent personal memory. VT Code keeps its own `ThreadEvent` log as the
+authoritative session record; Memcode contributes separate MCP tools only when
+you enable this provider.
+
+VT Code currently expects a pre-registered OAuth client. Register its fixed
+loopback callback once and copy the returned `client_id`:
+
+```bash
+curl --request POST https://memory.memcode.in/auth/mcp/oauth/register \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "client_name": "VT Code",
+    "redirect_uris": ["http://localhost:8768/auth/callback"],
+    "token_endpoint_auth_method": "none",
+    "grant_types": ["authorization_code", "refresh_token"],
+    "response_types": ["code"],
+    "scope": "memory:connections:write memory:read memory:write",
+    "application_type": "native"
+  }'
+```
+
+Then add the provider to `vtcode.toml`, replacing the placeholder with that
+public client ID:
+
+```toml
+[mcp]
+enabled = true
+experimental_use_rmcp_client = true
+
+[[mcp.providers]]
+name = "memcode"
+enabled = true
+endpoint = "https://mcp.memcode.in/mcp"
+protocol_version = "2025-11-25"
+
+[mcp.providers.oauth]
+authorization_url = "https://app.memcode.in/oauth/authorize"
+token_url = "https://memory.memcode.in/auth/mcp/oauth/token"
+client_id = "<client-id-from-registration>"
+scopes = ["memory:connections:write", "memory:read", "memory:write"]
+callback_port = 8768
+extra_auth_params = { resource = "https://mcp.memcode.in/mcp" }
+extra_token_params = { resource = "https://mcp.memcode.in/mcp" }
+```
+
+Authorize it interactively before the first session:
+
+```bash
+vtcode mcp login memcode
+```
+
+The browser flow uses PKCE and VT Code stores and refreshes the resulting token
+through its configured credential store. Do not add an API key or static
+`Authorization` header. Apply the normal MCP allowlist and approval controls to
+the memory tools, store only explicitly approved facts or verified outcomes,
+and treat retrieved memories as context rather than instructions. Disabling the
+provider returns VT Code to its built-in session memory with no external
+dependency.
 
 ## Security and validation
 
