@@ -7,6 +7,16 @@ use std::time::Duration;
 use tokio::sync::Notify;
 use vtcode_core::persistent_memory::MemoryCleanupStatus;
 
+fn test_exec_sessions() -> ExecSessionManager {
+    ExecSessionManager::new(
+        PathBuf::from("/tmp"),
+        vtcode_core::tools::registry::PtySessionManager::new(
+            PathBuf::from("/tmp"),
+            vtcode_core::config::PtyConfig::default(),
+        ),
+    )
+}
+
 fn sample_memory_status() -> PersistentMemoryStatus {
     PersistentMemoryStatus {
         enabled: true,
@@ -39,6 +49,7 @@ fn session_tui_interrupt_callback_only_cancels_after_cancel_is_handled() {
         None,
         Arc::new(EditorOpenDispatcher::new(true)),
         PathBuf::from("/tmp"),
+        test_exec_sessions(),
     );
 
     callback(&InlineEvent::Interrupt);
@@ -316,7 +327,8 @@ fn file_open_callback_forwards_out_of_band_without_idle_drain() {
     let (sender, mut receiver) = super::super::bounded_editor_open_requests();
     let dispatcher = Arc::new(EditorOpenDispatcher::new(true));
     dispatcher.set_sender(sender);
-    let callback = build_session_event_callback(state, notify, None, dispatcher, PathBuf::from("/tmp"));
+    let callback =
+        build_session_event_callback(state, notify, None, dispatcher, PathBuf::from("/tmp"), test_exec_sessions());
 
     callback(&InlineEvent::OpenFileInEditor("/tmp/demo.rs".to_string()));
 
@@ -337,6 +349,7 @@ fn file_open_callback_without_sender_is_noop() {
         None,
         Arc::new(EditorOpenDispatcher::new(true)),
         PathBuf::from("/tmp"),
+        test_exec_sessions(),
     );
 
     callback(&InlineEvent::OpenFileInEditor("/tmp/demo.rs".to_string()));
@@ -349,7 +362,14 @@ fn file_open_callback_defers_terminal_editors_to_idle_drain() {
     let (sender, mut receiver) = super::super::bounded_editor_open_requests();
     let dispatcher = Arc::new(EditorOpenDispatcher::new(false));
     dispatcher.set_sender(sender.clone());
-    let callback = build_session_event_callback(state, notify, None, dispatcher.clone(), PathBuf::from("/tmp"));
+    let callback = build_session_event_callback(
+        state,
+        notify,
+        None,
+        dispatcher.clone(),
+        PathBuf::from("/tmp"),
+        test_exec_sessions(),
+    );
 
     callback(&InlineEvent::OpenFileInEditor("/tmp/demo.rs".to_string()));
 

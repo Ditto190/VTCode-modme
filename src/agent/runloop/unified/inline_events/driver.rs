@@ -52,6 +52,7 @@ struct InlineEventLoop<'a> {
     harness_emitter: Option<&'a HarnessEventEmitter>,
     editor_open_sender: &'a EditorOpenRequestSender,
     editor_open_dispatcher: Arc<EditorOpenDispatcher>,
+    exec_sessions: Option<vtcode_core::tools::exec_session::ExecSessionManager>,
     webmcp_prompt_receiver: &'a mut Option<tokio::sync::mpsc::Receiver<String>>,
     idle_wake_delay: Duration,
 }
@@ -92,6 +93,7 @@ impl<'a> InlineEventLoop<'a> {
             harness_emitter,
             editor_open_sender,
             editor_open_dispatcher,
+            exec_sessions,
             webmcp_prompt_receiver,
             idle_wake_delay,
         } = resources;
@@ -124,6 +126,7 @@ impl<'a> InlineEventLoop<'a> {
             harness_emitter,
             editor_open_sender,
             editor_open_dispatcher,
+            exec_sessions,
             webmcp_prompt_receiver,
             idle_wake_delay,
         }
@@ -272,6 +275,9 @@ impl<'a> InlineEventLoop<'a> {
         );
 
         context.set_editor_open_sink(self.editor_open_sender.clone(), self.editor_open_dispatcher.clone());
+        if let Some(exec_sessions) = self.exec_sessions.clone() {
+            context.set_exec_session_manager(exec_sessions);
+        }
         context.process_event(event, &mut self.queue).await
     }
 
@@ -364,6 +370,7 @@ pub(crate) struct InlineEventLoopResources<'a> {
     pub harness_emitter: Option<&'a HarnessEventEmitter>,
     pub editor_open_sender: &'a EditorOpenRequestSender,
     pub editor_open_dispatcher: Arc<EditorOpenDispatcher>,
+    pub exec_sessions: Option<vtcode_core::tools::exec_session::ExecSessionManager>,
     pub webmcp_prompt_receiver: &'a mut Option<tokio::sync::mpsc::Receiver<String>>,
     pub idle_wake_delay: Duration,
 }
@@ -562,6 +569,7 @@ mod tests {
             harness_emitter: None,
             editor_open_sender: &editor_open_sender,
             editor_open_dispatcher: Arc::new(EditorOpenDispatcher::new(true)),
+            exec_sessions: None,
             webmcp_prompt_receiver: &mut webmcp_prompt_receiver,
             idle_wake_delay: Duration::from_millis(5),
             ctrl_c_state: &ctrl_c_state,
@@ -638,6 +646,7 @@ mod tests {
             harness_emitter: None,
             editor_open_sender: &editor_open_sender,
             editor_open_dispatcher: Arc::new(EditorOpenDispatcher::new(true)),
+            exec_sessions: None,
             webmcp_prompt_receiver: &mut webmcp_prompt_receiver,
             idle_wake_delay: Duration::from_millis(5),
             ctrl_c_state: &ctrl_c_state,
