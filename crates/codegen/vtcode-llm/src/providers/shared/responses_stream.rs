@@ -69,6 +69,8 @@ fn response_stream_event_policy_for_type(event_type: &str) -> ResponsesStreamEve
         | "response.reasoning_summary_part.added"
         | "response.reasoning_summary_part.done"
         | "response.reasoning_summary_text.done"
+        | "response.reasoning_part.added"
+        | "response.reasoning_part.done"
         | "response.file_search_call.in_progress"
         | "response.file_search_call.searching"
         | "response.file_search_call.completed"
@@ -1177,6 +1179,68 @@ mod tests {
             .expect("compaction detail should be retained");
         assert_eq!(details.len(), 1);
         assert_eq!(serde_json::from_str::<Value>(&details[0]).unwrap(), completed_item);
+    }
+
+    #[test]
+    fn stepfun_reasoning_part_boundaries_are_tolerated() {
+        // StepFun emits `response.reasoning_part.added`/`.done` (not the
+        // `reasoning_summary_part` variants). They are status markers and must
+        // not abort the normalized stream.
+        let mut options = options();
+        options.provider_name = "StepFun";
+        let mut processor = ResponsesNormalizedStreamProcessor::new(options, parse_response);
+
+        for payload in [
+            json!({
+                "type": "response.reasoning_part.added",
+                "sequence_number": 3,
+                "item_id": "rs_1",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "reasoning_text", "text": ""}
+            }),
+            json!({
+                "type": "response.reasoning_text.delta",
+                "sequence_number": 4,
+                "item_id": "rs_1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "User asked for a greeting."
+            }),
+            json!({
+                "type": "response.reasoning_part.done",
+                "sequence_number": 5,
+                "item_id": "rs_1",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "reasoning_text", "text": "User asked for a greeting."}
+            }),
+            text_delta_fixture("Hello"),
+        ] {
+            processor
+                .handle_payload(payload)
+                .expect("StepFun boundary events should be tolerated");
+        }
+
+        processor
+            .handle_payload(json!({
+                "type": "response.completed",
+                "sequence_number": 6,
+                "response": completed_response_fixture(json!([{
+                    "type": "message",
+                    "id": "msg_1",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Hello"}]
+                }]))
+            }))
+            .expect("completed event should parse");
+
+        let finished = processor.finish().expect("finish should succeed");
+        assert!(matches!(
+            finished.as_slice(),
+            [NormalizedStreamEvent::Done { response }] if response.content.as_deref() == Some("Hello")
+        ));
     }
 
     #[test]

@@ -447,12 +447,15 @@ VT Code provides compatibility with the Anthropic Messages API to help connect e
 
 -   **Provider key:** `stepfun`
 -   **Official docs:** [StepFun Platform](https://platform.stepfun.ai/docs)
--   **Auth:** `STEPFUN_API_KEY` environment variable
+-   **Auth:** `STEPFUN_API_KEY` environment variable (legacy `STEP_API_KEY` still accepted)
+-   **Base URL:** `https://api.stepfun.ai/v1`, override with `STEPFUN_BASE_URL`
+-   **Wire API:** native Responses API (`POST /responses`) — history replays as `input` items, the system prompt travels as `instructions`, reasoning uses `reasoning.effort`, and the output budget uses `max_output_tokens`
 -   **Setup:** Set `STEPFUN_API_KEY` from StepFun platform, then configure `provider = "stepfun"` in `vtcode.toml`
 -   **Models:**
-    -   `step-3.7-flash` — efficient reasoning model based on sparse MoE architecture
+    -   `step-3.7-flash` — efficient reasoning model based on sparse MoE architecture, 256K context
+    -   `step-5-preview` — frontier agent model with 1M context and native image input
 -   **Default:** `step-3.7-flash`
--   **Features:** Streaming, tool calling, reasoning support
+-   **Features:** Streaming, tool calling, reasoning with `low`/`medium`/`high` effort, image input, structured output (`text.format`)
 
 ## MiniMax
 

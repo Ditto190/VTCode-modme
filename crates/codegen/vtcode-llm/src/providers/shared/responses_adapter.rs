@@ -458,6 +458,8 @@ fn response_stream_event_policy_for_type(event_type: &str) -> ResponsesStreamEve
         | "response.reasoning_summary_part.added"
         | "response.reasoning_summary_part.done"
         | "response.reasoning_summary_text.done"
+        | "response.reasoning_part.added"
+        | "response.reasoning_part.done"
         | "response.file_search_call.in_progress"
         | "response.file_search_call.searching"
         | "response.file_search_call.completed"
@@ -586,6 +588,16 @@ mod tests {
         );
         assert_eq!(super::response_stream_event_policy_for_type("response.queued"), Policy::DocumentedStatusMarkerNoop);
         assert_eq!(super::response_stream_event_policy_for_type("keepalive"), Policy::DocumentedStatusMarkerNoop);
+        // StepFun emits the non-summary reasoning part boundaries; they are
+        // status markers because the text arrives via `reasoning_text.delta`.
+        assert_eq!(
+            super::response_stream_event_policy_for_type("response.reasoning_part.added"),
+            Policy::DocumentedStatusMarkerNoop
+        );
+        assert_eq!(
+            super::response_stream_event_policy_for_type("response.reasoning_part.done"),
+            Policy::DocumentedStatusMarkerNoop
+        );
 
         for event_type in [
             "response.code_interpreter_call_code.delta",

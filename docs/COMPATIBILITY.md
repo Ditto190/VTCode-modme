@@ -120,7 +120,7 @@ All VT Code crates require Rust 1.88 or later due to dependencies (ratatui 0.30,
 | Z.AI | Yes | `zai` | GLM-5.3 support |
 | Xiaomi MiMo | Yes | `mimo` | Full support |
 | Evolink | Yes | `evolink` | Full support |
-| StepFun | Yes | `stepfun` | Full support |
+| StepFun | Yes | `stepfun` | Native Responses API (`/responses`); streaming, tools, reasoning effort, image input, structured output |
 | MiniMax | Yes | `minimax` | Full support |
 | Poolside | Yes | `poolside` | Full support |
 | Qwen | Yes | `qwen` | Alibaba Cloud |

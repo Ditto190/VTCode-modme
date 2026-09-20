@@ -74,9 +74,11 @@ impl RigProviderCapabilities {
             Provider::DeepSeek | Provider::ZAI => Some(json!({
                 "thinking": { "type": "enabled" }, "reasoning_effort": effort.as_str()
             })),
-            Provider::HuggingFace | Provider::Meta | Provider::StepFun | Provider::Evolink => {
+            Provider::HuggingFace | Provider::Meta | Provider::Evolink => {
                 Some(json!({ "reasoning_effort": effort.as_str() }))
             }
+            // StepFun speaks the native Responses envelope (`reasoning.effort`).
+            Provider::StepFun => Some(json!({ "reasoning": { "effort": effort.as_str() } })),
             // OpenRouter follows the OpenAI-compatible `reasoning.effort`
             // envelope, including for custom routes whose capabilities are
             // supplied by the Provider trait rather than the built-in catalog.

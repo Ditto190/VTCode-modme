@@ -191,7 +191,8 @@ support them; other models hide those levels instead of aliasing silently.
 | DeepSeek V4 Pro / Flash | Alias to `high` | Native (`low` also native; `medium` maps to `high`) | `thinking: { type: "enabled" }` + `reasoning_effort` |
 | Moonshot Kimi K3 | Alias to `max` | Native (default; `minimal` maps to `low`, `medium`/`high` map to `high`) | Top-level `reasoning_effort` |
 | ZAI GLM-5.3 / 5.3-Flash / 5.2 | Alias to `max` (5.2) | Native (`low`/`high`/`max`; `medium` maps to `high`) | `thinking: { type: "enabled" }` + `reasoning_effort` |
-| Gemini 3.x, Ollama, LlamaCpp, StepFun/Evolink, HuggingFace, Mistral | Hidden (collapse to `high`) | Hidden (collapse to `high`) | `thinking_level` / omitted |
+| StepFun (`step-3.7-flash`, `step-5-preview`) | Hidden (collapse to `high`) | Hidden (collapse to `high`) | `reasoning: { effort }` (native `low`/`medium`/`high`) |
+| Gemini 3.x, Ollama, LlamaCpp, Evolink, HuggingFace, Mistral | Hidden (collapse to `high`) | Hidden (collapse to `high`) | `thinking_level` / omitted |
 
 ### How to use
 
