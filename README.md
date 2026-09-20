@@ -68,8 +68,11 @@ The full documentation catalog lives in the
 [docs overview](./docs/README.md).
 
 > [!NOTE]
-> **Status:** Active development. Local inference and some automation flows
-> are experimental and may change between releases.
+> **Status:** Active development. Some automation flows are experimental and
+> may change between releases. OAuth login for ChatGPT and GitHub Copilot
+> reuses the Codex CLI's public client identity as an unofficial compatibility
+> mechanism — bring your own provider API key if you need a supported path.
+> See [OAuth authentication](./docs/guides/oauth-authentication.md).
 
 <details>
 <summary><strong>Behind the build</strong></summary>
