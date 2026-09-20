@@ -2,6 +2,87 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.163.3 - 2026-09-20
+
+### Highlights
+#### Bug Fixes
+
+- Auto-continue incomplete task_tracker work across turns and resume (00118e99) 
+- Use whole-word matching for fix escalation markers (6dd488fd) 
+- Handle MCP labels, dedupe goal rows, drop muted palette (7ed46f10) 
+- Keep task panel body on visibility-only requests (7972a9c3) 
+- Clear panel metadata on content updates without metadata (63c85b92) 
+- Tail-safe tracker replace and plan-mode blocked-only continue (0fdad640) 
+- Drop dead planning_task_tracker key, guard example with parse test (4aa01687) 
+- Show full plan summary text and hug approval modal height (5606960e) 
+- Accept inspection commands in plan verification (80ecc863) 
+- Drain FIFO without last-only loss and preserve interrupts (54d53538) 
+- Open transcript file links immediately during agent turns (d580ea45) 
+- Reject English-phrase command-head verifies (e1de338e) 
+- Treat slash-less filenames as ambiguous-head verify evidence (b55d4627) 
+- Show full URL in web policy approval modal description (99cc2fdf) 
+- Harden tracker transcript replace and plan-mode continuity (899419fa) 
+- Residual tracker/plan continuity polish (6e3c60f3) 
+- Harden tracker auto-continue classifiers and AgentRunner status path (400939ad) 
+- Apply safety-handoff gate to outer Completed and AgentRunner status paths (b66f828a) 
+- Honest expand notices and single-pass overlay remaining (87a09288) 
+- Preserve hunk range counts in diff previews (616289d8) 
+- Open the plan file in the external editor on Ctrl+G (783d8b19) 
+- Inject wait flag for waiting editor launches (86953ad2) 
+- Harden TODO tracker continuation across turns (9313a186) 
+- Clear tracker incomplete cache on complete probes (fc5e3851) 
+- Raise runtime guidance token budget for merged tracker line (b998eb6f) 
+- Close residual tracker-continuation review gaps (e5d26168) 
+- Merge session identity, timeout floor, memory isolation, blocker forensics (1423f36e) 
+- Openrouter/xai session affinity, merge planning floor, usage cache mapping (a93f7fa3) 
+- Fail fast on misconfiguration before backoff (ee57d0ff) 
+- Open plan file in external editor on Ctrl+G and keep approval overlay (daf964dd) 
+- Enforce dimmed+italic style on thinking blocks (36c2d8de) 
+- Audit slash commands, restore missing /vim and correct usage/docs (700997f9) 
+- Stop full-auto continuation after read-only answers (f9833c6f) 
+#### Documentation
+
+- Finalize tracker-continuation feature report (7f2d1579) 
+- Fix rustdoc refs, document tool loop cap behavior (84bd55f2) 
+- Finalize tracker-user-facing-ui feature report (592c4f22) 
+- Finalize plan-mode-tracker-continuity feature report (da45b86f) 
+- Add turn-diff and hooks rows to Why VT Code table (3db1573e) 
+- Finalize planning-verify-commands and sync residual recovery prompts (c2872921) 
+- Finalize todo-continuation-hardening feature report (edb3d328) 
+- Finalize todo-continuation-hardening after review cycle (d3e5c1fe) 
+- Finalize harness-stability-cost-p1 after review cycle (3abc6978) 
+- Finalize provider-cache-affinity-p2 after review cycle (e2fedcb0) 
+- Clarify command coverage and fix loop-engineering link (ac1c19f5) 
+- Update CLI reference and correct audit schedule example (12113b37) 
+- Fix brew one-liner, operator surface, provider row, arch diagram (25291f24) 
+#### Features
+
+- Accept natural-language instructions with read-only default (055c40f4) 
+- Show title+progress only on user-facing tracker surfaces (1c6c2635) 
+- Dedupe tracker transcript and continue incomplete plan mode (4c16ea08) 
+- Add Jump to last change navigation (7f14c96a) 
+- Open checkpoint picker with double-Escape (39ba8fa7) 
+- Add /feedback and consolidate the command set (2632c5bf) 
+- Show truncated task tree in expanded tool display (806ad645) 
+- Auto-manage verification gate with progress-reset recovery (9f863666) 
+- Style TODO tasks with text effects instead of status glyphs (aa3a5caf) 
+- Stream live command output to status line in compact mode (5fc7ceeb) 
+- Suggest build/auto switch on plan-mode blocked turns (d7ed7fe0) 
+- Surface plan-mode guidance in blocked handoff files (dd7229a2) 
+### Other Changes
+#### Other
+
+- TODO (973309ba) (@vinhnx)
+- Fix(planning) accept inspection commands in plan verification (9c2ac1f8) 
+- Fix(planning) reject English-phrase command-head verifies (80d8fbea) 
+- Update TODO (e01b174a) 
+#### Performance
+
+- Defer subagent discovery and approval-pattern I/O (72b64443) 
+- Cut approval latency with drafting progress and overlay-first gate (c41d32a4) 
+#### Refactors
+
+- Revamp permission popup wording and command highlighting (7089b58d) 
 ## 0.163.2 - 2026-09-18
 
 ### Highlights
