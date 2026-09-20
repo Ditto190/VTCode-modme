@@ -1080,14 +1080,25 @@ impl ExecSessionManager {
 
     /// Bounded snapshot of exec sessions that are still running (not exited).
     ///
-    /// Used for cross-turn resume hints: when a turn ends with a long command
-    /// still in progress, the next turn needs the session identity to settle
-    /// it. Ordered newest-first by `started_at` (sessions without a timestamp
-    /// last), capped so a pathological session count cannot inflate the
-    /// injected hint. Completion is checked against the backend (not the
-    /// cached metadata) so a session that exited after its last metadata
-    /// refresh is correctly excluded.
+    /// Used for turn-end diagnostics and telemetry. Ordered newest-first by
+    /// `started_at` (sessions without a timestamp last), capped so a
+    /// pathological session count cannot inflate the recorded state.
+    /// Completion is checked against the backend (not the cached metadata) so
+    /// a session that exited after its last metadata refresh is correctly
+    /// excluded. Cross-turn resume hints use the foreground-only variant
+    /// below so retained background work does not become mandatory follow-up.
     pub(crate) async fn in_progress_exec_sessions(&self, cap: usize) -> Vec<VTCodeExecSession> {
+        self.collect_in_progress_exec_sessions(cap, true).await
+    }
+
+    /// Bounded snapshot of running foreground sessions for cross-turn resume
+    /// hints. Retained background sessions are deliberately excluded because
+    /// they are not work the next turn must settle before proceeding.
+    pub(crate) async fn in_progress_foreground_exec_sessions(&self, cap: usize) -> Vec<VTCodeExecSession> {
+        self.collect_in_progress_exec_sessions(cap, false).await
+    }
+
+    async fn collect_in_progress_exec_sessions(&self, cap: usize, include_background: bool) -> Vec<VTCodeExecSession> {
         if cap == 0 {
             return Vec::new();
         }
@@ -1100,7 +1111,7 @@ impl ExecSessionManager {
             let Ok(session) = self.snapshot_session(id.as_str()).await else {
                 continue;
             };
-            if session.exit_code.is_none() {
+            if session.exit_code.is_none() && (include_background || !session.background) {
                 in_progress.push(session);
             }
         }

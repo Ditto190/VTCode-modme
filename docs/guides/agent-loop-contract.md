@@ -395,7 +395,7 @@ returned session ID is reusable for a later wait. Wait time is excluded from
 the ordinary per-turn harness wall-clock budget, while cancellation, shutdown,
 safety policy, and the configured long-running-command ceiling remain active.
 
-When a turn ends while a `run-*` exec session is still running, the next turn
+When a turn ends while a foreground `run-*` exec session is still running, the next turn
 start injects a bounded resume hint (`Exec session resume:`, at most 4 sessions
 newest first, per-command display truncated to 160 bytes, single-session hint
 under 1 KiB) with a pre-filled `write_stdin {"session_id", "action": "wait",
@@ -404,7 +404,8 @@ normal next-turn and session restore/resume, so a compacted session needs zero
 identity reconstruction. `wait`/`inspect` stay exempt from the per-turn
 tool-call budget. Turn-end `SnapshotTurnDiagnostics.in_progress_exec_sessions`
 and `turn.completed.in_progress_exec_sessions` (schema 0.15.0, bounded to 4)
-record the same ids for ATIF correlation. See invariant #22 in
+record all live ids, including retained background sessions; the resume hint
+uses the foreground subset. See invariant #22 in
 `docs/harness/ARCHITECTURAL_INVARIANTS.md` and the agent-facing settle shape in
 `docs/harness/AGENT_LEGIBILITY_GUIDE.md`.
 

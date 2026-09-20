@@ -83,7 +83,7 @@ Avoid repeatedly reading files without taking action. If you have read 5 files w
 
 ## Cross-Turn Exec-Session Resume
 
-When a turn starts with a still-running command, you receive a bounded resume hint. Settle before starting new work.
+When a turn starts with a still-running foreground command, you receive a bounded resume hint. Retained background commands continue asynchronously and are not mandatory to settle before starting new work.
 
 | Field | Meaning |
 |-------|---------|

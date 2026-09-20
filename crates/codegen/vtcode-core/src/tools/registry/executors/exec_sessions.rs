@@ -24,7 +24,7 @@ impl ResolvedExecSession {
     }
 
     fn should_settle_noninteractive(&self, exec_settlement_mode: ExecSettlementMode) -> bool {
-        exec_settlement_mode.settle_noninteractive() && self.metadata.backend == "pipe"
+        exec_settlement_mode.settle_noninteractive() && self.metadata.backend == "pipe" && !self.metadata.background
     }
 }
 
@@ -838,8 +838,10 @@ fn resolve_exec_session_id(
 mod tests {
     use serde_json::json;
 
-    use super::attach_spool_metadata;
+    use super::{ResolvedExecSession, attach_spool_metadata};
     use crate::tools::exec_session::PipeOutputStats;
+    use crate::tools::registry::ExecSettlementMode;
+    use crate::tools::types::VTCodeExecSession;
 
     #[test]
     fn incomplete_spool_is_not_advertised_as_a_reusable_reference() {
@@ -951,6 +953,26 @@ mod tests {
         assert!(response.get("spool_path").is_none());
         assert!(response.get("output_spooled").is_none());
         assert!(response.get("spool_pending").is_none());
+    }
+
+    #[test]
+    fn background_poll_does_not_settle_until_exit() {
+        let session = ResolvedExecSession::new(VTCodeExecSession {
+            id: "run-background".to_string().into(),
+            backend: "pipe".to_string(),
+            command: "sleep".to_string(),
+            args: vec!["5".to_string()],
+            working_dir: None,
+            background: true,
+            rows: None,
+            cols: None,
+            child_pid: None,
+            started_at: None,
+            lifecycle_state: None,
+            exit_code: None,
+        });
+
+        assert!(!session.should_settle_noninteractive(ExecSettlementMode::SettleNonInteractive));
     }
 
     #[test]

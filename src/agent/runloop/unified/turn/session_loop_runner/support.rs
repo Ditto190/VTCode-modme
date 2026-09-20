@@ -189,7 +189,12 @@ const EXEC_SESSION_RESUME_COMMAND_MAX_BYTES: usize = 160;
 /// `next_wait_args` shape so the model can settle the session without
 /// reconstructing anything. Bounded to a few hundred bytes.
 pub(super) async fn build_exec_session_resume_note(tool_registry: &ToolRegistry) -> Option<String> {
-    let sessions = tool_registry.in_progress_exec_sessions(EXEC_SESSION_RESUME_HINT_CAP).await;
+    // Background sessions are intentionally retained across turns; surfacing
+    // them as mandatory resume work would make the next model turn wait on
+    // the very sessions the caller asked to keep running asynchronously.
+    let sessions = tool_registry
+        .in_progress_foreground_exec_sessions(EXEC_SESSION_RESUME_HINT_CAP)
+        .await;
     if sessions.is_empty() {
         return None;
     }
@@ -693,6 +698,28 @@ mod tests {
             !registry.in_progress_exec_sessions(4).await.is_empty(),
             "injection must not auto-wait the live session"
         );
+        registry.close_harness_exec_session(&session_id).await.expect("close session");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn append_transient_turn_notes_omits_retained_background_sessions() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+        let run = registry
+            .execute_public_tool_ref(
+                vtcode_core::config::constants::tools::EXEC_COMMAND,
+                &json!({"cmd": "sleep 5", "background": true, "yield_time_ms": 100}),
+            )
+            .await
+            .expect("background run should start");
+        let session_id = run["session_id"].as_str().expect("session id present").to_string();
+
+        let mut history: Vec<vtcode_core::llm::provider::Message> = Vec::new();
+        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None).await;
+
+        assert!(!transient.iter().any(|note| note.starts_with("Exec session resume:")));
+        assert!(history.is_empty(), "retained background work must not force a resume wait");
         registry.close_harness_exec_session(&session_id).await.expect("close session");
     }
 
