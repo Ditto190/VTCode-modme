@@ -2,6 +2,39 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.164.0 - 2026-09-20
+
+### Highlights
+#### Bug Fixes
+
+- Fail-closed trust and headless-safe auth hints (d366bfd3) 
+- Wire exec_sessions through inline loop initializers (65009bf6) 
+- Align cache hit-rate denominator and preserve envelope on no-op refresh (a7195ee4) 
+- Keep background sessions asynchronous (637dcf84) 
+#### Documentation
+
+- Document headless CI contract (630e4766) 
+- Promote exec-session resume hint to contract with golden test (66642580) 
+- Mark exec-session resume shipped on TODO board (f7e5ce95) 
+#### Features
+
+- Async progress UI synced with engine (cdb8b0b8) 
+- Add Step 5 Preview model with 1M context (0249081a) 
+- Promote cross-turn exec-session resume to runtime contract (d18482a4) 
+- Advertise cross-turn resume hint in write_stdin guidance (50f3a8f4) 
+- Support StepFun native Responses reasoning events (e9a7ec6b) 
+### Other Changes
+#### Other
+
+- Update TODO (79b26603) 
+- Update TODO (f8e87b7c) 
+- Update README (79be53e9) 
+#### Refactors
+
+- Unify prompt cache split in shared module (3aaa596e) 
+#### Tests
+
+- Cover Exec in TUI predicate test (3111d9f3) 
 ## 0.163.3 - 2026-09-20
 
 ### Highlights
