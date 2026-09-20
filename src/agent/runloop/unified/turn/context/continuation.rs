@@ -73,6 +73,7 @@ pub(super) fn evaluate_interim_text_continuation(
     let last_user_follow_up = last_user_message_is_follow_up(history);
     let recent_tool_activity = has_recent_tool_activity(history);
     let last_user_requested_progressive_work = last_user_requested_progressive_work(history);
+    let read_only_request = last_user_requested_read_only_answer(history);
 
     let d = |should_continue: bool, reason: &'static str| {
         InterimTextContinuationDecision::with(
@@ -118,6 +119,18 @@ pub(super) fn evaluate_interim_text_continuation(
         }
         if has_explicit_blocker(&lower) {
             return d(false, "full_auto_blocked_handoff");
+        }
+        // Full-auto is an execution policy, not a reason to keep generating
+        // after an informational request has been answered. The old fallback
+        // below treated every non-keyword response as unfinished work, so a
+        // read-only request such as "explore the codebase and summarize" could
+        // trigger a second provider call after the answer was already shown.
+        // If that follow-up was interrupted, the stream had visible content
+        // but no confirmed final response and the turn was reported as a
+        // recovery fallback. Decide this from the user's request, not the
+        // answer's formatting or vocabulary.
+        if read_only_request {
+            return d(false, "full_auto_read_only_answer");
         }
         if full_auto_response_is_conclusive(&lower) {
             return d(false, "full_auto_final_completion");
@@ -551,6 +564,75 @@ fn last_user_requested_progressive_work(history: &[uni::Message]) -> bool {
     ]
     .iter()
     .any(|needle| text.contains(needle))
+}
+
+/// Returns true when the latest user request asks for information or a
+/// summary, without also asking the agent to change or verify the workspace.
+/// Such requests are terminal once the model has supplied the answer, even in
+/// full-auto mode. Action-oriented requests deliberately remain on the
+/// autonomous continuation path.
+fn last_user_requested_read_only_answer(history: &[uni::Message]) -> bool {
+    let Some(text) = last_user_message_text(history) else {
+        return false;
+    };
+
+    let asks_for_information = [
+        "summarize",
+        "summary",
+        "overview",
+        "explain",
+        "describe",
+        "what is",
+        "what's",
+        "what are",
+        "why ",
+        "how does",
+        "how do",
+        "show me",
+        "tell me",
+        "compare",
+        "explore",
+        "walk me through",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+    if !asks_for_information {
+        return false;
+    }
+
+    // Match imperative/action clauses rather than any occurrence of a verb.
+    // For example, "How do I fix the parser?" is still an informational
+    // question, while "Explore the parser and fix the regression" is an
+    // execution request.
+    let action_verbs = [
+        "fix ",
+        "edit ",
+        "update ",
+        "change ",
+        "modify ",
+        "create ",
+        "implement ",
+        "refactor ",
+        "write ",
+        "delete ",
+        "remove ",
+        "apply ",
+        "run ",
+        "execute ",
+        "format ",
+        "test ",
+        "build ",
+    ];
+    let action_clause = action_verbs
+        .iter()
+        .any(|verb| text.starts_with(verb) || text.match_indices(verb).any(|(index, _)| is_clause_start(&text, index)));
+    let chained_action = action_verbs.iter().any(|verb| {
+        [" and ", " then ", "; ", ", "]
+            .iter()
+            .any(|connector| text.contains(&format!("{connector}{verb}")))
+    });
+
+    !(action_clause || chained_action)
 }
 
 fn has_interim_intent_clause(lower: &str) -> bool {
@@ -994,6 +1076,82 @@ mod tests {
             let decision = evaluate_interim_text_continuation(true, false, &history, text, 0);
             assert!(decision.should_continue, "expected continuation for {text:?}");
         }
+    }
+
+    #[test]
+    fn full_auto_stops_after_a_read_only_summary_request_without_keyword_markers() {
+        let history = vec![uni::Message::user(
+            "Explore the codebase and summarize what makes this project special.".to_string(),
+        )];
+        let answer = "Here's a consolidated table of the project's differentiators:\n\n| Area | Meaning |\n|---|---|\n| Runtime | The harness coordinates tools and context. |\n| Safety | Commands are checked before execution. |";
+
+        let decision = evaluate_interim_text_continuation(true, false, &history, answer, 0);
+
+        assert!(!decision.should_continue);
+        assert_eq!(decision.reason, "full_auto_read_only_answer");
+    }
+
+    #[test]
+    fn full_auto_keeps_action_requests_on_the_autonomous_path() {
+        let history = vec![uni::Message::user(
+            "Explore the parser, summarize the issue, and fix the regression.".to_string(),
+        )];
+
+        let decision = evaluate_interim_text_continuation(true, false, &history, "I reviewed the request.", 0);
+
+        assert!(decision.should_continue);
+        assert_eq!(decision.reason, "full_auto_continuation");
+    }
+
+    #[test]
+    fn full_auto_stops_for_an_informational_how_to_fix_question() {
+        let history = vec![uni::Message::user("How do I fix the parser regression?".to_string())];
+        let decision = evaluate_interim_text_continuation(
+            true,
+            false,
+            &history,
+            "The parser loses the trailing token when the input ends with a delimiter.",
+            0,
+        );
+
+        assert!(!decision.should_continue);
+        assert_eq!(decision.reason, "full_auto_read_only_answer");
+    }
+
+    #[tokio::test]
+    async fn read_only_summary_is_published_as_final_without_a_follow_up_directive() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.full_auto = true;
+        ctx.working_history.push(uni::Message::user(
+            "Explore the codebase and summarize what makes this project special.".to_string(),
+        ));
+
+        let outcome = ctx
+            .handle_text_response(
+                "Here's a consolidated table of the project's differentiators:\n\n| Area | Meaning |\n|---|---|\n| Runtime | The harness coordinates tools and context. |\n| Safety | Commands are checked before execution. |"
+                    .to_string(),
+                Vec::new(),
+                None,
+                None,
+                true,
+            )
+            .await
+            .expect("read-only summary should complete");
+
+        assert!(matches!(outcome, TurnHandlerOutcome::Break(TurnLoopResult::Completed { .. })));
+        assert!(!ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::System
+                && message.content.as_text().contains(AUTONOMOUS_CONTINUE_DIRECTIVE)
+        }));
+        assert_eq!(
+            ctx.working_history
+                .iter()
+                .rev()
+                .find(|message| message.role == uni::MessageRole::Assistant)
+                .and_then(|message| message.phase),
+            Some(uni::AssistantPhase::FinalAnswer)
+        );
     }
 
     #[test]
