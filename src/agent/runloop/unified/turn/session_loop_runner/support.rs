@@ -611,6 +611,43 @@ mod tests {
         registry.close_harness_exec_session(&session_id).await.expect("close session");
     }
 
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn exec_session_resume_note_shape_is_stable_contract() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+
+        let run = registry
+            .execute_public_tool_ref(
+                vtcode_core::config::constants::tools::EXEC_COMMAND,
+                &json!({"cmd": "sleep 5", "yield_time_ms": 100}),
+            )
+            .await
+            .expect("run should start");
+        let session_id = run["session_id"].as_str().expect("session id present").to_string();
+
+        let note = super::build_exec_session_resume_note(&registry).await.expect("hint present");
+        assert!(note.starts_with("Exec session resume:"), "stable prefix: {note}");
+        assert!(note.contains("are still running:"), "stable running header: {note}");
+        assert!(
+            note.contains(&format!("- {session_id} (`")),
+            "stable session line without guessing shell prefix or elapsed secs: {note}"
+        );
+        assert!(note.contains("sleep 5"), "stable command body: {note}");
+        assert!(note.contains("Settle them before starting new work"), "stable settle directive: {note}");
+        assert!(
+            note.contains(&format!(
+                "{{\"session_id\": \"{session_id}\", \"action\": \"wait\", \"wait_timeout_seconds\": 600}}"
+            )),
+            "stable pre-filled wait shape: {note}"
+        );
+        assert!(note.contains("exempt from the per-turn"), "stable budget exemption: {note}");
+        assert!(note.contains("deadline-expired wait"), "stable deadline language: {note}");
+        assert!(note.len() < 1_024, "contract stays bounded: {} bytes", note.len());
+
+        registry.close_harness_exec_session(&session_id).await.expect("close session");
+    }
+
     #[test]
     fn pending_approved_plan_checklist_cannot_be_completed() {
         let checklist = json!({

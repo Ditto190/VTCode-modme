@@ -311,6 +311,26 @@ Every `tokio::spawn`/`spawn_blocking` call site must have an owner: the `JoinHan
 
 ---
 
+## 22. Cross-Turn Exec-Session Resume Hint
+
+When a turn ends while a `run-*` exec session is still running, the next turn start must surface a bounded resume hint from the live registry so a resumed or compacted session needs zero identity reconstruction.
+
+Key guarantees:
+
+- **Source**: live registry via `in_progress_exec_sessions` with backend-checked completion; exited sessions are filtered, newest first, capped at 4.
+- **Injection site**: `append_transient_turn_notes` at every turn start — this single site covers both the normal next-turn case and session restore/resume (both flow through the turn loop).
+- **Bounded**: per-session command display truncated to 160 bytes, at most 4 sessions; a single-session hint stays under 1 KiB.
+- **Shape**: session id, command display, elapsed time, plus a pre-filled `write_stdin` wait (`{"session_id": "<first-id>", "action": "wait", "wait_timeout_seconds": 600}`).
+- **Never auto-execute**: the hint only suggests the wait call; the runtime never waits on its own.
+- **Budget**: `wait`/`inspect` calls stay exempt from the per-turn tool-call budget, so settling never starves new work. A deadline-expired wait returns an in-progress session that can be waited on again.
+- **Diagnostics**: turn-end `SnapshotTurnDiagnostics.in_progress_exec_sessions` (bounded to 4) records the ids for ATIF correlation.
+
+**Violation**: a turn starts with a live exec session but no resume hint; a single-session hint exceeding 1 KiB; more than 4 sessions in one hint; a hint that auto-executes a wait; a resumed session that must guess the `session_id`.
+
+**Remediation**: route the hint through `append_transient_turn_notes` from `in_progress_exec_sessions`, keep the 4-session / 160-byte / single-session 1 KiB bounds, and settle via `write_stdin` wait before starting new work. See `docs/harness/AGENT_LEGIBILITY_GUIDE.md` for the agent-facing settle shape.
+
+---
+
 ## Enforcement
 
 These invariants should be enforced by:

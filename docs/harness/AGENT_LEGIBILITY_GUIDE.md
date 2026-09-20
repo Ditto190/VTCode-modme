@@ -80,3 +80,16 @@ Use `task_boundary` and `task.md` religiously. High success is correlated with s
 Avoid repeatedly reading files without taking action. If you have read 5 files without a command or write call, pause and re-evaluate your strategy.
 
 - **Rule**: Prefer "Edit-Test" loops over "Read-Read" loops.
+
+## Cross-Turn Exec-Session Resume
+
+When a turn starts with a still-running command, you receive a bounded resume hint. Settle before starting new work.
+
+| Field | Meaning |
+|-------|---------|
+| Session line | `- <session_id> (`<command>`, running <secs>s)` — at most 4, newest first |
+| Wait shape | `write_stdin {"session_id": "<first-id>", "action": "wait", "wait_timeout_seconds": 600}` |
+| Budget | `wait`/`inspect` are exempt from the per-turn tool-call budget |
+| Deadline | A deadline-expired wait returns in-progress; wait again |
+
+**Remediation**: call the pre-filled `write_stdin` wait for the listed `session_id` before launching new commands. Never guess the id — it is in the hint. See invariant #22 in `docs/harness/ARCHITECTURAL_INVARIANTS.md`.
