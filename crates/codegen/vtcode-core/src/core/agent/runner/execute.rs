@@ -53,6 +53,24 @@ pub(super) struct RuntimePromptBundle {
     pub(super) system_prompt_report: crate::prompts::system::SystemPromptReport,
 }
 
+impl RuntimePromptBundle {
+    /// Provider-visible prefix unchanged across a catalog version bump.
+    ///
+    /// Compares only wire-visible identity (stable prompt digest, tool bytes,
+    /// active set, planning flags). Version/epoch and token estimates are
+    /// bookkeeping and intentionally excluded so no-op MCP refreshes preserve
+    /// the frozen envelope and keep the provider prefix cache hot.
+    fn has_same_provider_visible_prefix(&self, other: &Self) -> bool {
+        self.prompt_policy_hash == other.prompt_policy_hash
+            && self.tool_snapshot.tool_catalog_hash == other.tool_snapshot.tool_catalog_hash
+            && self.tool_snapshot.planning_active == other.tool_snapshot.planning_active
+            && self.tool_snapshot.request_user_input_enabled == other.tool_snapshot.request_user_input_enabled
+            && self.tool_snapshot.active_tool_names == other.tool_snapshot.active_tool_names
+            && self.request_envelope.instruction_digest() == other.request_envelope.instruction_digest()
+            && self.request_envelope.catalog_hash() == other.request_envelope.catalog_hash()
+    }
+}
+
 /// Outcome of [`AgentRunner::resolve_completion_assessment`].
 ///
 /// Collapses the duplicated `CompletionAssessment` handling (pre- and
@@ -251,9 +269,8 @@ impl AgentRunner {
         is_simple_task: bool,
     ) -> Result<bool> {
         let current_version = self.tool_registry.tool_catalog_state().current_version();
-        if current_version == bundle.tool_snapshot.version
-            && self.runtime_prompt_policy_hash() == bundle.prompt_policy_hash
-        {
+        let current_policy = self.runtime_prompt_policy_hash();
+        if current_version == bundle.tool_snapshot.version && current_policy == bundle.prompt_policy_hash {
             return Ok(false);
         }
 
@@ -262,7 +279,22 @@ impl AgentRunner {
             new_version = current_version,
             "Tool catalog changed mid-task; refreshing runtime prompt bundle"
         );
-        *bundle = self.build_validated_runtime_prompt_bundle(is_simple_task).await?;
+        let new_bundle = self.build_validated_runtime_prompt_bundle(is_simple_task).await?;
+        // No-op refresh: version/epoch bumped without provider-visible change
+        // (e.g. MCP refresh returning identical tools). Preserve the frozen
+        // envelope, token estimates, and reports so the provider prefix cache
+        // stays hot; only advance snapshot bookkeeping so the next version
+        // check passes.
+        if new_bundle.has_same_provider_visible_prefix(bundle) {
+            debug!(
+                old_version = bundle.tool_snapshot.version,
+                new_version = new_bundle.tool_snapshot.version,
+                "Tool catalog version bumped without provider-visible change; preserving request envelope"
+            );
+            bundle.tool_snapshot = new_bundle.tool_snapshot;
+            return Ok(false);
+        }
+        *bundle = new_bundle;
         Ok(true)
     }
 

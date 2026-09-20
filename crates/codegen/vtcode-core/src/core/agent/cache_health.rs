@@ -40,7 +40,11 @@ pub const DEGRADED_TURN_HIT_RATE_PERCENT: f64 = 50.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum CacheHealthAlert {
     /// Several consecutive measured turns re-paid (nearly) full input cost.
-    SustainedMisses { consecutive: u32 },
+    SustainedMisses {
+        consecutive: u32,
+        hit_rate: f64,
+        measured_turns: u32,
+    },
     /// The hit rate over recent measured turns fell below the floor.
     LowHitRate { hit_rate: f64, measured_turns: u32 },
 }
@@ -52,9 +56,9 @@ impl CacheHealthAlert {
     #[must_use]
     pub fn message(&self) -> String {
         match self {
-            Self::SustainedMisses { consecutive } => format!(
-                "Prompt cache suffered {consecutive} consecutive near-full misses; recent requests re-paid full input cost. \
-                 Check for prompt/tool-catalog churn (model switches, MCP refreshes, planning toggles) or long idle gaps expiring the provider cache."
+            Self::SustainedMisses { consecutive, hit_rate, measured_turns } => format!(
+                "Prompt cache suffered {consecutive} consecutive near-full misses (hit rate {hit_rate:.0}% over {measured_turns} measured turns); recent requests re-paid full input cost. \
+                 Check earlier warnings for model/reasoning switches, MCP refreshes, planning toggles, or idle-gap expiry, or inspect the trajectory log for prefix/catalog hash changes."
             ),
             Self::LowHitRate { hit_rate, measured_turns } => format!(
                 "Prompt cache hit rate is {hit_rate:.0}% over {measured_turns} measured turns (floor {HIT_RATE_FLOOR_PERCENT:.0}%). \
@@ -74,8 +78,8 @@ impl CacheHealthAlert {
 #[derive(Debug, Clone, Default)]
 pub struct PromptCacheHealthMonitor {
     measured_turns: u32,
+    window_input_tokens: u64,
     window_read_tokens: u64,
-    window_creation_tokens: u64,
     consecutive_degraded: u32,
     sustained_miss_fired: bool,
     low_rate_fired: bool,
@@ -94,8 +98,8 @@ impl PromptCacheHealthMonitor {
             return None;
         }
         self.measured_turns = self.measured_turns.saturating_add(1);
+        self.window_input_tokens = self.window_input_tokens.saturating_add(usage.input_tokens);
         self.window_read_tokens = self.window_read_tokens.saturating_add(usage.cached_input_tokens);
-        self.window_creation_tokens = self.window_creation_tokens.saturating_add(usage.cache_creation_tokens);
 
         if Self::turn_hit_rate(usage) < DEGRADED_TURN_HIT_RATE_PERCENT {
             self.consecutive_degraded = self.consecutive_degraded.saturating_add(1);
@@ -105,7 +109,11 @@ impl PromptCacheHealthMonitor {
 
         if !self.sustained_miss_fired && self.consecutive_degraded >= SUSTAINED_MISS_TURNS {
             self.sustained_miss_fired = true;
-            return Some(CacheHealthAlert::SustainedMisses { consecutive: self.consecutive_degraded });
+            return Some(CacheHealthAlert::SustainedMisses {
+                consecutive: self.consecutive_degraded,
+                hit_rate: self.rolling_hit_rate(),
+                measured_turns: self.measured_turns,
+            });
         }
 
         if !self.low_rate_fired
@@ -122,14 +130,15 @@ impl PromptCacheHealthMonitor {
         None
     }
 
-    /// Hit rate over all measured turns this session.
+    /// Hit rate over all measured turns this session: cached input over total
+    /// input. Uses the same `cached/input` definition as the per-turn check so
+    /// turns with large uncached tails cannot inflate the rolling figure.
     #[must_use]
     pub fn rolling_hit_rate(&self) -> f64 {
-        let total = self.window_read_tokens.saturating_add(self.window_creation_tokens);
-        if total == 0 {
+        if self.window_input_tokens == 0 {
             return 100.0;
         }
-        (self.window_read_tokens as f64 / total as f64) * 100.0
+        (self.window_read_tokens as f64 / self.window_input_tokens as f64) * 100.0
     }
 
     fn is_measured(usage: &Usage) -> bool {
@@ -179,7 +188,7 @@ mod tests {
         assert_eq!(monitor.record_turn(&usage(50_000, 0, 5_000)), None);
         assert_eq!(monitor.record_turn(&usage(50_000, 0, 5_000)), None);
         let alert = monitor.record_turn(&usage(50_000, 0, 5_000));
-        assert_eq!(alert, Some(CacheHealthAlert::SustainedMisses { consecutive: 3 }));
+        assert!(matches!(alert, Some(CacheHealthAlert::SustainedMisses { consecutive: 3, .. })));
     }
 
     #[test]
@@ -190,10 +199,10 @@ mod tests {
         assert_eq!(monitor.record_turn(&usage(50_000, 45_000, 5_000)), None);
         assert_eq!(monitor.record_turn(&usage(50_000, 0, 5_000)), None);
         assert_eq!(monitor.record_turn(&usage(50_000, 0, 5_000)), None);
-        assert_eq!(
+        assert!(matches!(
             monitor.record_turn(&usage(50_000, 0, 5_000)),
-            Some(CacheHealthAlert::SustainedMisses { consecutive: 3 })
-        );
+            Some(CacheHealthAlert::SustainedMisses { consecutive: 3, .. })
+        ));
     }
 
     #[test]
@@ -246,10 +255,37 @@ mod tests {
     }
 
     #[test]
+    fn rolling_rate_uses_total_input_not_cache_traffic() {
+        // Asymmetric uncached tail: cached/(cached+creation) looks healthy
+        // while cached/input is degraded. Rolling must follow cached/input.
+        let mut monitor = PromptCacheHealthMonitor::new();
+        // D,D,H x2 + D,D → max streak 2 (no sustained miss), rolling
+        // (6*5000 + 2*26000) / (8*50000) = 20.5%, below the 25% floor.
+        // Old read/(read+creation) math gave 68% and missed this.
+        let mut alert = None;
+        for index in 0..8 {
+            let turn = if index % 3 == 2 {
+                usage(50_000, 26_000, 4_000)
+            } else {
+                usage(50_000, 5_000, 5_000)
+            };
+            alert = monitor.record_turn(&turn).or(alert);
+        }
+        assert!(matches!(alert, Some(CacheHealthAlert::LowHitRate { .. })));
+        assert!(
+            monitor.rolling_hit_rate() < HIT_RATE_FLOOR_PERCENT,
+            "rolling {} should be below floor",
+            monitor.rolling_hit_rate()
+        );
+    }
+
+    #[test]
     fn alert_messages_mention_likely_causes() {
-        let sustained = CacheHealthAlert::SustainedMisses { consecutive: 3 }.message();
+        let sustained =
+            CacheHealthAlert::SustainedMisses { consecutive: 3, hit_rate: 5.0, measured_turns: 3 }.message();
         assert!(sustained.contains("consecutive"));
-        assert!(sustained.contains("planning toggles"));
+        assert!(sustained.contains("5%"));
+        assert!(sustained.contains("trajectory log"));
         let low = CacheHealthAlert::LowHitRate { hit_rate: 10.0, measured_turns: 9 }.message();
         assert!(low.contains("10%"));
         assert!(low.contains("idle gaps"));

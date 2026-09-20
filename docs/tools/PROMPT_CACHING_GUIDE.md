@@ -94,10 +94,12 @@ All local summarization paths fork this way: flat single-pass summaries, hierarc
 
 Beyond per-event advisories (reasoning-effort changes, idle-gap expiry, planning transitions), both runloops feed every turn's normalized usage into a shared session health monitor (`core::agent::cache_health::PromptCacheHealthMonitor`). Turns without provider cache metrics or below 1,024 input tokens are ignored as noise. Two session-scoped alerts fire at most once each, via `tracing::warn` plus the runloop's user-warning channel:
 
--   **Sustained misses** — 3 consecutive measured turns each reusing under 50% of cache. Indicates the session is re-paying full input cost turn after turn.
--   **Low hit rate** — after 8 measured turns, the cumulative hit rate is under 25%.
+-   **Sustained misses** — 3 consecutive measured turns each reusing under 50% of cache. Indicates the session is re-paying full input cost turn after turn. The warning includes the cumulative hit rate (`cached/total input`) over measured turns.
+-   **Low hit rate** — after 8 measured turns, the cumulative hit rate (`cached/total input`) is under 25%.
 
-Either alert names the likely causes to check: prompt/tool-catalog churn (model switches, MCP refreshes, planning toggles) or idle gaps expiring the provider cache.
+No-op catalog refreshes (version/epoch bump with identical tool bytes and stable prompt) preserve the frozen request envelope so the provider prefix stays hot; only provider-visible changes rebuild it.
+
+Either alert names the likely causes to check: prompt/tool-catalog churn (model/reasoning switches, MCP refreshes, planning toggles) or idle gaps expiring the provider cache. The sustained-miss warning also points to earlier single-event warnings and the trajectory log for prefix/catalog hash changes.
 
 ### Mid-session model switches
 
