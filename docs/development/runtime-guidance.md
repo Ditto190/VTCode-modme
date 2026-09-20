@@ -103,7 +103,7 @@ while runtime shutdown closes all process groups and descendants. The runtime
 continues to emit the existing `ThreadEvent` item lifecycle events rather than
 introducing a parallel background-process event contract.
 
-Cross-turn resume is transient, not compiled guidance: when a turn ends with a
+Cross-turn resume hint body is transient, not universal guidance: when a turn ends with a
 live foreground session, the next turn start injects a bounded `Exec session resume:` hint
 via `append_transient_turn_notes` (same path for normal next-turn and session
 restore/resume). The hint carries at most 4 session lines (160 bytes per
@@ -111,8 +111,10 @@ command, <1 KiB single-session) plus a pre-filled `write_stdin` wait, and the
 runtime never auto-executes the wait. Turn-end `turn.completed` (schema 0.15.0)
 and `SnapshotTurnDiagnostics` both record `in_progress_exec_sessions` (bounded
 to 4) for ATIF correlation, including retained background sessions that remain
-live for asynchronous work. This note stays out of `runtime_guidance.rs` so the
-320-token universal section is not taxed on turns with no live session.
+live for asynchronous work. This hint body stays out of `runtime_guidance.rs` so the
+320-token universal section is not taxed on turns with no live session; per-tool
+`guidelines.rs` `write_stdin` guidance carries only a one-line pointer that the
+hint may appear.
 
 The provider-facing history also has an aggregate tool-preview budget per
 turn (32 KiB execution, 96 KiB planning). After exhaustion, new payload bodies are replaced by bounded metadata,

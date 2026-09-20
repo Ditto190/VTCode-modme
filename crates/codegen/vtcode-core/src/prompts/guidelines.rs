@@ -18,6 +18,13 @@ const TOOL_REQUEST_USER_INPUT: &str = tools::REQUEST_USER_INPUT;
 const TOOL_TASK_TRACKER: &str = tools::TASK_TRACKER;
 const TOOL_START_PLANNING: &str = tools::START_PLANNING;
 
+/// Shared cross-turn resume pointer (invariant #22). The hint body itself stays
+/// transient via `append_transient_turn_notes`; tool guidance only advertises
+/// that a turn-start `Exec session resume:` note carries the live ids so a
+/// resumed or compacted session needs zero identity reconstruction.
+const CROSS_TURN_RESUME_HINT_CLAUSE: &str =
+    "; a turn-start `Exec session resume:` hint carries the live ids when a prior turn ended mid-run.";
+
 /// Documentation density is independent of the tools a session may execute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolGuidanceProfile {
@@ -89,7 +96,9 @@ pub fn generate_tool_guidelines_with_capabilities(
                 lines.push(background_exec_guidance().to_owned());
             }
             if has(TOOL_WRITE_STDIN) {
-                lines.push("- `write_stdin` needs an active `session_id`; prefer returned `next_wait_args` and repeat wait after an in-progress deadline.".to_owned());
+                lines.push(format!(
+                    "- `write_stdin` needs an active `session_id`; prefer returned `next_wait_args` and repeat wait after an in-progress deadline{CROSS_TURN_RESUME_HINT_CLAUSE}"
+                ));
             }
             lines.push("- Never bypass safeguards. Resolve verification before completion; do not repeat calls to recover suppressed previews.".to_owned());
             if has(TOOL_START_PLANNING) {
@@ -174,7 +183,9 @@ pub fn generate_tool_guidelines_for_profile(
     // Runtime Guidance / operating-profile sections; repeating them here
     // wastes prompt budget.
     if has_stdin {
-        lines.push("- `write_stdin`: reuse the existing `session_id` of an active exec session; prefer the pre-filled `next_wait_args` over `next_continue_args` polling; `spool_complete: false` marks readable partial output; an exited pending spool arrives on a later wait.".to_string());
+        lines.push(format!(
+            "- `write_stdin`: reuse the existing `session_id` of an active exec session; prefer the pre-filled `next_wait_args` over `next_continue_args` polling; `spool_complete: false` marks readable partial output; an exited pending spool arrives on a later wait{CROSS_TURN_RESUME_HINT_CLAUSE}"
+        ));
     }
     if has_search {
         lines.push("- `code_search`: omit unused filters; no empty values (`path: \"\"`).".to_string());
@@ -747,9 +758,31 @@ mod tests {
         assert!(guidelines.contains("background: true"));
         assert!(guidelines.contains("Bash `histverify`"));
         assert!(guidelines.contains("zsh `HIST_VERIFY`"));
+        // Cross-turn resume (invariant #22): the live id arrives via a
+        // turn-start `Exec session resume:` hint when a prior turn ended mid-run.
+        assert!(guidelines.contains("`Exec session resume:`"));
+        assert!(guidelines.contains("prior turn ended mid-run"));
         // No `code_search` in this profile: the search-preference clause
         // must not spend budget naming an unavailable tool.
         assert!(!guidelines.contains("Prefer `code_search` over `rg`"));
+    }
+
+    #[test]
+    fn write_stdin_guidance_advertises_cross_turn_resume_hint() {
+        let tools = vec![TOOL_WRITE_STDIN.to_string()];
+        let default_guidance = generate_tool_guidelines_for_profile(&tools, None, ResolvedShellPromptProfile::UnixLike);
+        assert!(default_guidance.contains("`Exec session resume:`"));
+        assert!(default_guidance.contains("prior turn ended mid-run"));
+
+        let minimal = generate_tool_guidelines_with_capabilities(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+            ToolGuidanceProfile::Minimal,
+            false,
+        );
+        assert!(minimal.contains("`Exec session resume:`"));
+        assert!(minimal.contains("prior turn ended mid-run"));
     }
 
     #[test]
