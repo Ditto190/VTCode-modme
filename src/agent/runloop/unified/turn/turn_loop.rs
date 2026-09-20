@@ -902,7 +902,13 @@ pub(crate) async fn run_turn_loop(
         let recovery_compaction_requested = ctx.harness_state.take_post_tool_compaction_pending();
         if recovery_compaction_requested {
             let context_capacity_failure = ctx.harness_state.post_tool_context_capacity_failure();
-            match compact_before_tool_enabled_retry(RecoveryCompactionRequest {
+            // Async UI stays in sync: spinner ticks while the engine compacts the
+            // older prefix; the final line is rendered from the engine outcome.
+            let progress = crate::agent::runloop::unified::turn::compaction::CompactionProgressGuard::start(
+                ctx.handle,
+                ctx.input_status_state,
+            );
+            let recovery_result = compact_before_tool_enabled_retry(RecoveryCompactionRequest {
                 history: working_history,
                 turn_history_start_len: &mut turn_history_start_len,
                 compaction_context: crate::agent::runloop::unified::turn::compaction::CompactionContext::new(
@@ -919,10 +925,19 @@ pub(crate) async fn run_turn_loop(
                 context_manager: ctx.context_manager,
                 steering_update,
             })
-            .await
-            {
-                Ok(true) => {}
-                Ok(false) if context_capacity_failure => {
+            .await;
+            let recovery_elapsed = progress.finish();
+            match recovery_result {
+                Ok(Some(outcome)) => {
+                    let label = crate::agent::runloop::unified::turn::compaction::format_compacted_summary(
+                        outcome.original_len,
+                        outcome.compacted_len,
+                        outcome.mode.as_str(),
+                        recovery_elapsed,
+                    );
+                    let _ = ctx.renderer.line(MessageStyle::Info, &label);
+                }
+                Ok(None) if context_capacity_failure => {
                     ctx.harness_state.mark_post_tool_context_compaction_failed();
                     ensure_post_tool_resume_directive(working_history);
                     result = TurnLoopResult::Blocked {
@@ -930,7 +945,7 @@ pub(crate) async fn run_turn_loop(
                     };
                     break;
                 }
-                Ok(false) => {}
+                Ok(None) => {}
                 Err(err) => {
                     if context_capacity_failure {
                         ctx.harness_state.mark_post_tool_context_compaction_failed();
@@ -944,6 +959,12 @@ pub(crate) async fn run_turn_loop(
                         error = %err,
                         "Post-tool recovery compaction failed; preserving the existing history for the bounded retry"
                     );
+                    let prefix =
+                        crate::agent::runloop::unified::turn::compaction::format_compaction_failed(recovery_elapsed);
+                    let _ = ctx.renderer.line(
+                        MessageStyle::Warning,
+                        &format!("{prefix} Recovery compaction failed; continuing with full history."),
+                    );
                 }
             }
         } else {
@@ -955,7 +976,28 @@ pub(crate) async fn run_turn_loop(
                 prompt_tokens = ctx.context_manager.current_token_usage(),
                 "Resolved per-turn context budget denominator"
             );
-            match crate::agent::runloop::unified::turn::compaction::maybe_auto_compact_history(
+            // Async UI: only show the spinner when compaction will actually run.
+            // `maybe_auto_compact_history` returns `None` fast below threshold,
+            // when disabled, or when suppressed; starting a spinner
+            // unconditionally would flicker every turn.
+            let auto_start = Instant::now();
+            let auto_compaction_allowed = ctx.vt_cfg.is_some_and(|cfg| cfg.agent.harness.auto_compaction_enabled)
+                && ctx.session_stats.auto_compact_suppressed == vtcode_core::compaction::SUPPRESS_NONE;
+            let auto_threshold = crate::agent::runloop::unified::turn::compaction::effective_compaction_threshold(
+                ctx.vt_cfg,
+                ctx.provider_client.as_ref(),
+                &active_model,
+            );
+            let auto_likely = auto_compaction_allowed
+                && (ctx.context_manager.compaction_pending()
+                    || auto_threshold.is_some_and(|threshold| ctx.context_manager.current_token_usage() >= threshold));
+            let auto_progress = auto_likely.then(|| {
+                crate::agent::runloop::unified::turn::compaction::CompactionProgressGuard::start(
+                    ctx.handle,
+                    ctx.input_status_state,
+                )
+            });
+            let auto_result = crate::agent::runloop::unified::turn::compaction::maybe_auto_compact_history(
                 crate::agent::runloop::unified::turn::compaction::CompactionContext::new(
                     ctx.provider_client.as_ref(),
                     &active_model,
@@ -973,8 +1015,11 @@ pub(crate) async fn run_turn_loop(
                 )
                 .with_steering_update(steering_update),
             )
-            .await
-            {
+            .await;
+            let auto_elapsed = auto_progress
+                .map(|guard| guard.finish())
+                .unwrap_or_else(|| auto_start.elapsed());
+            match auto_result {
                 Ok(Some(outcome)) => {
                     turn_history_start_len = outcome.compacted_len;
                     tracing::info!(
@@ -983,6 +1028,16 @@ pub(crate) async fn run_turn_loop(
                         turn_history_start_len,
                         "Applied local fallback compaction before the next turn request"
                     );
+                    let label = crate::agent::runloop::unified::turn::compaction::format_compacted_summary(
+                        outcome.original_len,
+                        outcome.compacted_len,
+                        outcome.mode.as_str(),
+                        auto_elapsed,
+                    );
+                    let _ = ctx.renderer.line(MessageStyle::Info, &label);
+                    // Continuation: do not break. The loop falls through to the
+                    // next LLM request using the compacted handoff (summary +
+                    // envelope + continuity tail) so the task resumes.
                 }
                 Ok(None) => {}
                 Err(err) => {

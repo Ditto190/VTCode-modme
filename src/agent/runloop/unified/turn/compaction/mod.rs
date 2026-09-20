@@ -1,7 +1,11 @@
 mod memory_envelope;
+mod progress_ui;
 mod recovery_preview;
 
 pub(crate) use self::memory_envelope::{refresh_session_memory_envelope, refresh_session_memory_envelope_async};
+pub(crate) use self::progress_ui::{
+    CompactionProgressGuard, format_already_compact, format_compacted_summary, format_compaction_failed,
+};
 pub(crate) use self::recovery_preview::build_recovery_context_previews_with_workspace;
 
 pub(crate) use vtcode_core::compaction::memory_envelope::{

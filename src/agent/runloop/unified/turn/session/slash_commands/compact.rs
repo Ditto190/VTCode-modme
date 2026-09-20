@@ -119,6 +119,13 @@ async fn execute_manual_compaction(
 
     let resolved_options = resolve_manual_compaction_options(ctx, options);
     let harness_snapshot = ctx.tool_registry.harness_context_snapshot();
+    // Async UI: bracket the engine await so `Compacting context...` ticks with
+    // elapsed time while the summarizer runs. The guard restores input status
+    // on finish/drop; the final line below stays the single source of truth.
+    let progress = crate::agent::runloop::unified::turn::compaction::CompactionProgressGuard::start(
+        ctx.handle,
+        ctx.input_status_state,
+    );
     let outcome = crate::agent::runloop::unified::turn::compaction::manual_compact_history_in_place(
         crate::agent::runloop::unified::turn::compaction::CompactionContext::new(
             ctx.provider_client.as_ref(),
@@ -139,6 +146,7 @@ async fn execute_manual_compaction(
         native_only,
     )
     .await;
+    let elapsed = progress.finish();
 
     let outcome = match outcome {
         Ok(outcome) => outcome,
@@ -147,27 +155,28 @@ async fn execute_manual_compaction(
             // chain is surfaced. Plain `{err}` prints only the outermost
             // "Failed to generate compaction summary" context and hides the
             // underlying provider error, which is the actual cause.
-            ctx.renderer.line(MessageStyle::Error, &format!("Compaction failed: {err:#}"))?;
+            let prefix = crate::agent::runloop::unified::turn::compaction::format_compaction_failed(elapsed);
+            ctx.renderer
+                .line(MessageStyle::Error, &format!("{prefix} Compaction failed: {err:#}"))?;
             return Ok(SlashCommandControl::Continue);
         }
     };
 
     let Some(outcome) = outcome else {
-        ctx.renderer.line(MessageStyle::Info, "Conversation is already compact.")?;
+        let label = crate::agent::runloop::unified::turn::compaction::format_already_compact(elapsed);
+        ctx.renderer.line(MessageStyle::Info, &label)?;
         return Ok(SlashCommandControl::Continue);
     };
 
     ctx.session_stats.auto_compact_suppressed = vtcode_core::compaction::SUPPRESS_NONE;
 
-    ctx.renderer.line(
-        MessageStyle::Info,
-        &format!(
-            "Compacted conversation history ({} -> {} messages, {} compaction).",
-            outcome.original_len,
-            outcome.compacted_len,
-            outcome.mode.as_str()
-        ),
-    )?;
+    let label = crate::agent::runloop::unified::turn::compaction::format_compacted_summary(
+        outcome.original_len,
+        outcome.compacted_len,
+        outcome.mode.as_str(),
+        elapsed,
+    );
+    ctx.renderer.line(MessageStyle::Info, &label)?;
     Ok(SlashCommandControl::Continue)
 }
 

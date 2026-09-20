@@ -11,7 +11,8 @@ use vtcode_core::llm::provider as uni;
 use crate::agent::runloop::unified::context_manager::ContextManager;
 use crate::agent::runloop::unified::state::SessionStats;
 use crate::agent::runloop::unified::turn::compaction::{
-    CompactionContext, CompactionState, SessionMemoryEnvelopeUpdate, compact_history_for_recovery_in_place,
+    CompactionContext, CompactionOutcome, CompactionState, SessionMemoryEnvelopeUpdate,
+    compact_history_for_recovery_in_place,
 };
 
 pub(super) struct RecoveryCompactionRequest<'a> {
@@ -24,8 +25,11 @@ pub(super) struct RecoveryCompactionRequest<'a> {
 }
 
 /// Compact the older history prefix while preserving the current request and
-/// its tool results. Returns `true` only when the prefix was actually replaced.
-pub(super) async fn compact_before_tool_enabled_retry(request: RecoveryCompactionRequest<'_>) -> Result<bool> {
+/// its tool results. Returns the engine outcome when the prefix was replaced,
+/// so the caller can render the authoritative `Context compacted` line.
+pub(super) async fn compact_before_tool_enabled_retry(
+    request: RecoveryCompactionRequest<'_>,
+) -> Result<Option<CompactionOutcome>> {
     let RecoveryCompactionRequest {
         history,
         turn_history_start_len,
@@ -45,7 +49,7 @@ pub(super) async fn compact_before_tool_enabled_retry(request: RecoveryCompactio
 
     let Some(outcome) = outcome else {
         tracing::debug!(preserve_from_index, "Post-tool recovery compaction had no reducible prefix");
-        return Ok(false);
+        return Ok(None);
     };
 
     let preserved_suffix_len = original_history_len.saturating_sub(preserve_from_index);
@@ -57,7 +61,7 @@ pub(super) async fn compact_before_tool_enabled_retry(request: RecoveryCompactio
         turn_history_start_len = *turn_history_start_len,
         "Compacted the older prefix before the bounded tool-enabled recovery request"
     );
-    Ok(true)
+    Ok(Some(outcome))
 }
 
 /// Return the beginning of the current request segment for recovery

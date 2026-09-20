@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use std::path::Path;
+use std::time::Instant;
 use vtcode_config::resolve_openai_auth;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::models::Provider;
@@ -205,6 +206,7 @@ pub(crate) async fn finalize_model_selection(
         .map(|cfg| cfg.agent.harness.compact_on_model_switch)
         .unwrap_or(true);
 
+    let compact_start = Instant::now();
     let outcome = compact_on_model_switch(ModelSwitchCompactionRequest {
         prev_provider,
         prev_model,
@@ -218,6 +220,7 @@ pub(crate) async fn finalize_model_selection(
         targets: compaction,
     })
     .await?;
+    let compact_elapsed = compact_start.elapsed();
 
     match outcome {
         ModelSwitchCompactionOutcome::Unchanged => {
@@ -243,15 +246,15 @@ pub(crate) async fn finalize_model_selection(
             )?;
         }
         ModelSwitchCompactionOutcome::Compacted(outcome) => {
+            let label = crate::agent::runloop::unified::turn::compaction::format_compacted_summary(
+                outcome.original_len,
+                outcome.compacted_len,
+                outcome.mode.as_str(),
+                compact_elapsed,
+            );
             renderer.line(
                 MessageStyle::Info,
-                &format!(
-                    "Compacted conversation for model switch ({} -> {} messages, {} compaction). \
-                    Auto-resume injected; new model continues seamlessly with preserved context.",
-                    outcome.original_len,
-                    outcome.compacted_len,
-                    outcome.mode.as_str()
-                ),
+                &format!("{label} Auto-resume injected; new model continues seamlessly with preserved context."),
             )?;
         }
         ModelSwitchCompactionOutcome::AlreadyCompact => {

@@ -37,7 +37,7 @@ When VT Code is running in alternate-screen mode, the transcript and composer us
 | :-------------- | :------------------------------------------------------------ |
 | `PgUp` / `PgDn` | Scroll the live transcript by half a page.                    |
 | `Ctrl+Home`     | Jump to the oldest transcript content.                        |
-| `Ctrl+End`      | Jump to last change, pinned to the bottom with sticky highlight (pill + footer hint appear while scrolled up with ≥2 changes; click pill or rebind `jump_to_last_change`). |
+| `Ctrl+End`      | Jump to last change, pinned to the bottom with sticky highlight (pill + footer hint appear while scrolled up with ≥2 changes; click pill/footer or rebind `jump_to_last_change`). |
 | Mouse wheel     | Scroll the live transcript when mouse capture is enabled.     |
 
 ### Diff Preview Navigation
@@ -119,7 +119,7 @@ are enabled and compact display is the default.
 
 - `/continue` resumes the most recently archived session in a new conversation. Equivalent to `vtcode --continue` from the CLI.
 - When a turn is blocked (repeated tool denials hit the fuse), the TUI shows a `Blocked` header badge, `Blocked • continue to retry • /resume • details: .vtcode/tasks/current_blocked.md` footer hint, and a transcript banner. Type `continue` with new guidance, describe alternative instructions, or run `vtcode --resume <session>` from a terminal. One attempt before the fuse trips, the runtime warns with the remaining attempts and a per-tool remedy hint.
-- `/compact` compacts the current session history immediately when you want to shed context manually.
+- `/compact` compacts the current session history immediately when you want to shed context manually. The status line shows `Compacting context...` with live elapsed time while the engine summarizes, then the transcript records `Context compacted · {duration} ({orig} -> {compacted} messages, {mode} compaction)`. Automatic and recovery compaction use the same indicator; the turn then continues from the compacted handoff (summary + memory envelope + continuity tail) without stalling.
 - `/compact edit-prompt` and `/compact reset-prompt` manage the saved default prompt for manual compaction requests.
 - For providers with native Responses compaction, VT Code uses the provider-owned compacted state.
  - For local fallback compaction, VT Code rebuilds history around one structured summary plus retained recent user messages, then injects the session memory envelope.
@@ -179,7 +179,7 @@ When a task is already running, VT Code keeps the active turn alive and lets you
 - `/compact` still works only while the session is idle; it rewrites the stored conversation context for the next turn instead of interrupting the active run.
 - Follow-up steering is assigned an internal intent ID and is checkpointed with the session. Consumed instructions are marked applied only after their tagged user message is written, so a restart does not replay an already durable instruction; identical text with a different intent remains distinct.
 - `/fork` is available while idle and creates a new archived session, leaving the current session unchanged.
-- `Ctrl+B` starts or stops the configured default background subagent when background mode is enabled and `default_agent` is set. Otherwise it opens the Local Agents drawer and shows setup guidance.
+- `Ctrl+B` has foreground-command priority: while a foreground PTY or pipe command is running, it hands that session to the retained background-session manager without killing it. The command keeps its stable `session_id` and can later be waited, polled, written to, inspected, terminated, or closed. If no foreground command is active, `Ctrl+B` keeps its background-subagent behavior and opens the Local Agents setup when that feature is not configured.
 - `Alt+S` opens or focuses the Local Agents drawer.
 - When the composer is empty and local agents exist, `Down` opens the Local Agents drawer. `Up` and `Down` keep normal history navigation once history traversal is active.
 - In the active-agent and subprocess inspectors, `Esc` closes the overlay, `Ctrl+R` reloads it, `Ctrl+K` requests a graceful stop, and `Ctrl+X` force-cancels the selected subprocess.
@@ -226,10 +226,10 @@ The Bash integration can run long commands asynchronously while you continue wor
 
 ### Running in the Background
 
-- Ask VT Code to run a command in the background, or
-- Press `Ctrl+B` while a command runs to move it to the background (press twice if your terminal uses tmux with the same prefix).
+- Ask VT Code to run a command with `background: true`, or
+- Press `Ctrl+B` while a foreground command runs to move that process to the background (press twice if your terminal uses tmux with the same prefix).
 
-Background tasks return immediately with an ID. VT Code keeps streaming updates via the BashOutput tool, and tasks are automatically cleaned up when the session ends.
+Background launches return a stable `session_id`, lifecycle state, PID when available, bounded initial output, and reusable wait arguments. A runtime retains at most three live background processes; it never evicts an older session to make room for a fourth. Use the existing `write_stdin`/`unified_exec` session actions to wait, poll, write, inspect, terminate, or close a session. Sessions live until they exit, are explicitly closed, or the VT Code runtime shuts down.
 
 Common backgrounded commands include:
 
@@ -273,7 +273,7 @@ Prefix input with `!` to run commands directly without agent interpretation:
 ! ls -la
 ```
 
-Bash mode streams the command and its output into the chat, supports backgrounding via `Ctrl+B`, and is ideal for quick shell operations while keeping a shared context with the agent.
+Bash mode streams the command and its output into the chat. A foreground Bash command can be handed off with `Ctrl+B`, while `background: true` is the agent-facing form for starting a retained session directly.
 
 ## Additional Resources
 
