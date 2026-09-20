@@ -3042,6 +3042,43 @@
           "medium",
           "high"
         ]
+      },
+      "step-5-preview": {
+        "id": "step-5-preview",
+        "name": "Step 5 Preview",
+        "description": "StepFun's frontier model for production-scale Agent applications with 1M context, native image/video input, and tool calling.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
+        "capabilities": {
+          "caching": true,
+          "thinking": true,
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": true
+        },
+        "cost": {
+          "input": 0.000001,
+          "output": 0.0000027,
+          "cache_read": 5e-08
+        },
+        "is_pro": true,
+        "lightweight_model": "step-3.7-flash",
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high"
+        ]
       }
     }
   },

@@ -103,17 +103,27 @@ impl_openai_compat_provider!(StepFunProvider, StepFunSpec, {
             || models::stepfun::REASONING_MODELS.contains(&requested)
     }
 
-    fn effective_context_size(&self, _model: &str) -> usize {
-        262_144
+    fn effective_context_size(&self, model: &str) -> usize {
+        crate::provider::catalog_context_window("stepfun", model, 262_144)
     }
 });
 
 #[cfg(test)]
 mod tests {
     use super::StepFunProvider;
-    use crate::provider::{LLMRequest, Message};
+    use crate::provider::{LLMProvider, LLMRequest, Message};
     use vtcode_config::constants::models;
     use vtcode_config::types::ReasoningEffortLevel;
+
+    #[test]
+    fn step_5_preview_uses_1m_context_and_reasoning_effort() {
+        let provider = StepFunProvider::new("test-key".to_string());
+        assert_eq!(provider.effective_context_size(models::stepfun::STEP_5_PREVIEW), 1_048_576);
+        assert_eq!(provider.effective_context_size(models::stepfun::STEP_3_7_FLASH), 262_144);
+        assert!(provider.supports_reasoning(models::stepfun::STEP_5_PREVIEW));
+        assert!(provider.supports_reasoning_effort(models::stepfun::STEP_5_PREVIEW));
+        assert!(provider.supports_vision(models::stepfun::STEP_5_PREVIEW));
+    }
 
     #[test]
     fn payload_maps_reasoning_effort() {

@@ -142,6 +142,8 @@ pub enum ModelId {
     // StepFun models
     /// Step 3.7 Flash - StepFun's flagship multimodal reasoning model with tool calling
     StepFun37Flash,
+    /// Step 5 Preview - StepFun's frontier model for production-scale Agent applications with 1M context
+    StepFun5Preview,
 
     // Evolink gateway models (namespaced as `evolink/<model>`)
     /// GPT-5.2 served through the Evolink gateway

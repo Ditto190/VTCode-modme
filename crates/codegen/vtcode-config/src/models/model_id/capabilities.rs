@@ -327,6 +327,7 @@ impl ModelId {
                 | ModelId::HuggingFaceGlm53FlashTogether
                 | ModelId::HuggingFaceGlm53Together
                 | ModelId::HuggingFaceMinimaxM3Novita
+                | ModelId::StepFun5Preview
                 | ModelId::OpenRouterMoonshotaiKimiK3
                 | ModelId::MoonshotKimiK3
                 | ModelId::MergeGatewayMoonshotKimiK3
@@ -401,6 +402,9 @@ impl ModelId {
             ModelId::LlamaCppGptOss20b => "oss",
             // MiniMax models
             ModelId::MinimaxM3 => "M3",
+            // StepFun models
+            ModelId::StepFun37Flash => "3.7",
+            ModelId::StepFun5Preview => "5",
             // Moonshot models
             ModelId::MoonshotKimiK3 => "k3",
             ModelId::MergeGatewayMoonshotKimiK3 => "k3",

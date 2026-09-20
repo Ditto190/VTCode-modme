@@ -437,6 +437,13 @@ model_id_table! {
         display: "Step 3.7 Flash",
         description: "StepFun's flagship multimodal reasoning model with 256K context, native image/video input, and tool calling.",
     },
+    StepFun5Preview {
+        provider: StepFun,
+        id: models::stepfun::STEP_5_PREVIEW,
+        parse: [models::stepfun::STEP_5_PREVIEW],
+        display: "Step 5 Preview",
+        description: "StepFun's frontier model for production-scale Agent applications with 1M context, native image/video input, and tool calling.",
+    },
     // Evolink gateway models (namespaced; the provider strips the `evolink/` prefix)
     EvolinkGemini31Pro {
          provider: Evolink,

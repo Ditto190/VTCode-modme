@@ -104,6 +104,7 @@ impl ModelId {
             ModelId::HuggingFaceKimiK3Together,
             ModelId::HuggingFaceMinimaxM3Novita,
             ModelId::StepFun37Flash,
+            ModelId::StepFun5Preview,
             ModelId::EvolinkGemini31Pro,
             ModelId::EvolinkMinimaxM3,
             ModelId::EvolinkClaudeHaiku45,
