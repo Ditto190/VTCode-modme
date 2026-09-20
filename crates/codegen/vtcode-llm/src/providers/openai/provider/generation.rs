@@ -219,6 +219,8 @@ impl OpenAIProvider {
                 "reasoning",
                 "text",
                 "prompt_cache_key",
+                "prompt_cache_options",
+                "prompt_cache_retention",
             ] {
                 if let Some(value) = responses_request.get(key) {
                     map.insert(key.to_string(), value.clone());

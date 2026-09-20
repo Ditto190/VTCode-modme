@@ -1705,17 +1705,67 @@ mod caching_tests {
         let gemini_req = res.expect("request conversion");
 
         assert!(!gemini_req.contents.is_empty(), "Contents should not be empty");
-        // Verify system instruction is set with TTL
+        // Fail-safe: explicit mode emits the implicit text-only wire shape.
+        // An inline `ttlSeconds` part is not valid generateContent schema
+        // (`systemInstruction` accepts text only); true explicit caching needs
+        // the separate cachedContents lifecycle, which is unimplemented.
+        let system_str = serde_json::to_string(&gemini_req.system_instruction).unwrap_or_default();
+        assert!(!system_str.contains("ttlSeconds"), "no inline TTL part on the wire");
         assert!(gemini_req.system_instruction.is_some(), "System instruction should be set");
-        // Verify TTL is included in system instruction when explicitly configured
-        if let Some(ttl_seconds) = config.providers.gemini.explicit_ttl_seconds {
-            let system_str = serde_json::to_string(&gemini_req.system_instruction).unwrap_or_default();
-            assert!(
-                system_str.contains(&ttl_seconds.to_string()),
-                "Cache control or TTL should be configured when explicit_ttl_seconds is set"
-            );
-        }
     }
+}
+
+#[test]
+fn grown_history_keeps_contents_prefix_stable() {
+    // Implicit caching keys on the request prefix: a grown second turn must
+    // extend `contents` without rewriting earlier turns, and the system
+    // instruction must repeat verbatim.
+    let provider = GeminiProvider::new("test-key".to_string());
+    let first_turn = vec![
+        Message::user("list files".to_string()),
+        Message::assistant_with_tools(
+            String::new(),
+            vec![ToolCall::function(
+                "call_1".to_string(),
+                "list_files".to_string(),
+                json!({ "path": "." }).to_string(),
+            )],
+        ),
+        Message::tool_response("call_1".to_string(), "a.txt".to_string()),
+    ];
+    let mut second_turn = first_turn.clone();
+    second_turn.push(Message::user("read a.txt".to_string()));
+
+    let build = |messages: Vec<Message>| {
+        provider
+            .convert_to_gemini_request(&LLMRequest {
+                messages: messages.into(),
+                system_prompt: Some(Arc::from("stable instructions")),
+                model: "gemini-2.5-flash".to_string(),
+                ..Default::default()
+            })
+            .expect("conversion should succeed")
+    };
+
+    let first = build(first_turn);
+    let second = build(second_turn);
+
+    assert_eq!(
+        serde_json::to_value(&first.system_instruction).expect("serialize"),
+        serde_json::to_value(&second.system_instruction).expect("serialize"),
+        "system instruction must repeat verbatim"
+    );
+    let first_contents = serde_json::to_value(&first.contents).expect("serialize");
+    let second_contents = serde_json::to_value(&second.contents).expect("serialize");
+    let (Some(first_items), Some(second_items)) = (first_contents.as_array(), second_contents.as_array()) else {
+        panic!("contents should serialize as arrays");
+    };
+    assert!(second_items.len() > first_items.len(), "grown history must extend contents");
+    assert_eq!(
+        &second_items[..first_items.len()],
+        first_items,
+        "grown history must not rewrite the contents prefix"
+    );
 }
 
 #[test]

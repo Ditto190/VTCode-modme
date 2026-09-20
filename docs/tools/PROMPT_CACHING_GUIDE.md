@@ -41,6 +41,8 @@ surface_metrics = true
 -   `prompt_cache_retention` — optional OpenAI Responses API retention policy for cached prefixes. Supported values are `"in_memory"` and `"24h"`.
 -   Default: `None` (opt-in) - VT Code does not set prompt_cache_retention by default; so OpenAI keeps its default `in_memory` behavior unless you opt in explicitly.
 -   GPT-5.6-family Responses requests additionally send `prompt_cache_options: {"ttl": "30m"}` by default (currently the only TTL OpenAI accepts for these models), declaring cache intent explicitly instead of relying on the implicit default alone. An explicit catalog TTL or a configured `prompt_cache_retention` takes precedence where applicable.
+-   GPT-5.6+ Responses requests mark explicit `prompt_cache_breakpoint` boundaries on stable history (up to 4). Pre-5.6 exact matching only had the implicit latest-message breakpoint, so a growing conversation never partial-matched; explicit markers let later turns reuse the stable prefix while the suffix churns. The relocated `[System reminder]` tail never receives a marker (it varies per turn); a single-item request still marks its one stable item so the first request writes. Older models reject the field, so markers are 5.6-family-only.
+-   Responses `instructions` carry only the stable system prefix. Volatile sections (`[Harness Limits]`, `[Runtime Tool Catalog]`, `[Deferred Tools]`, planning notices, `## Environment`) and history `System` messages (compaction summaries, resume notes) move to a trailing `[System reminder]` input item, mirroring the Anthropic wire split. Chat Completions likewise sends stable instructions as the leading system message and volatile sections as a trailing system message. History order is otherwise untouched.
 -   Example CLI override to enable 24h retention for Responses model:
 
     ```bash
@@ -180,6 +182,7 @@ min_message_length_for_cache = 256
 -   `max_breakpoints` — maximum number of cache insertion points per request (tools, system prompt, user messages).
 -   `cache_system_messages` / `cache_user_messages` / `cache_tool_definitions` — toggle cache hints for each content type.
 -   `min_message_length_for_cache` — avoids setting cache hints on very short user messages.
+-   The tools-prefix breakpoint attaches to the last function tool: native server tools (web search, code execution, memory) carry no `cache_control` slot, so a trailing native tool no longer drops the whole tools-prefix breakpoint. Message breakpoints roll on the last two qualifying user messages; hardening passes (orphan-strip, adjacency, hoist-to-front, trailing-assistant guard) are deterministic repairs that keep grown histories byte-stable.
 
 ### Gemini
 
@@ -194,6 +197,7 @@ explicit_ttl_seconds = 900
 -   `mode` — `implicit` leverages built-in cache detection; `explicit` reserves cache slots for manual lifecycle management; `off` disables all Gemini caching.
 -   `min_prefix_tokens` — minimum prompt size before requesting cache evaluation.
 -   `explicit_ttl_seconds` — optional TTL when explicit mode is active.
+-   Explicit mode currently falls back to the implicit wire shape: `generateContent` `systemInstruction` accepts text only, so no inline TTL part is sent (true explicit caching needs the separate `cachedContents.create` + `cachedContent` lifecycle, which is unimplemented). Implicit caching needs 2,048+ tokens (2.5 family) or 4,096+ (3.x) of stable prefix — below that, expect no hits by design. Keep the system instruction and early history byte-stable; thought-signature round-tripping is deterministic.
 
 ### OpenRouter
 ```toml

@@ -180,9 +180,17 @@ impl GeminiProvider {
 
     pub(super) fn convert_to_gemini_request(&self, request: &LLMRequest) -> Result<GenerateContentRequest, LLMError> {
         if self.prompt_cache_enabled && matches!(self.prompt_cache_settings.mode, GeminiPromptCacheMode::Explicit) {
-            // Explicit cache handling requires separate cache lifecycle APIs which are
-            // coordinated outside of the request payload. Placeholder ensures we surface
-            // configuration usage even when implicit mode is active.
+            // True explicit caching needs the separate `cachedContents`
+            // lifecycle (`caches.create` + `cachedContent` per request), which
+            // is not implemented yet. Fall through to the implicit wire shape
+            // so explicit mode never emits the invalid inline `ttlSeconds`
+            // part (generateContent `systemInstruction` accepts text only).
+            static EXPLICIT_MODE_WARNED: std::sync::Once = std::sync::Once::new();
+            EXPLICIT_MODE_WARNED.call_once(|| {
+                tracing::warn!(
+                    "Gemini explicit prompt-cache mode is not implemented; falling back to the implicit wire shape. Explicit `ttl_seconds` has no wire effect until the cachedContents lifecycle ships."
+                );
+            });
         }
 
         let mut call_map: HashMap<String, String> = HashMap::with_capacity(request.messages.len());
@@ -337,11 +345,10 @@ impl GeminiProvider {
                 if self.prompt_cache_enabled
                     && matches!(self.prompt_cache_settings.mode, GeminiPromptCacheMode::Explicit)
                 {
-                    if let Some(ttl) = self.prompt_cache_settings.explicit_ttl_seconds {
-                        merged_system_prompt.map(|text| SystemInstruction::with_ttl(text, ttl))
-                    } else {
-                        merged_system_prompt.map(SystemInstruction::new)
-                    }
+                    // Fail-safe: the inline `ttlSeconds` part is not a valid
+                    // generateContent shape (see the warn-once above). Emit the
+                    // same text-only system instruction as implicit mode.
+                    merged_system_prompt.map(SystemInstruction::new)
                 } else if request.system_prompt.is_some()
                     || self.prompt_cache_enabled
                     || !history_system_directives.is_empty()

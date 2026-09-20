@@ -19,7 +19,8 @@ use vtcode_config::types::{ReasoningEffortLevel, VerbosityLevel};
 
 use super::responses_api::build_standard_responses_payload;
 use super::tool_serialization;
-use super::types::{MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload};
+use super::types::{InstructionSegmentKind, MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload};
+use crate::providers::shared::split_dynamic_prompt_suffix;
 
 const NONE_REASONING_EFFORT_MODELS: &[&str] = &[openai_models::GPT, openai_models::GPT_5_6, openai_models::GPT_5_6_SOL];
 /// Default `prompt_cache_options.ttl` for GPT-5.6-family Responses requests.
@@ -315,12 +316,29 @@ pub(crate) fn build_chat_request(
     let mut messages = Vec::with_capacity(request.messages.len() + 1);
     let mut active_tool_call_ids: HashSet<String> = HashSet::with_capacity(16);
 
+    // Stable/dynamic split mirrors the Responses path: volatile sections move
+    // to a trailing system message so per-turn runtime content stops rewriting
+    // the cached leading prefix. Without dynamics this is byte-identical to
+    // the legacy single system message.
+    let mut trailing_system: Option<String> = None;
     if let Some(system_prompt) = &request.system_prompt {
-        let system_prompt = augment_openai_instructions(&request.model, system_prompt.to_string());
-        messages.push(json!({
-            "role": vtcode_config::constants::message_roles::SYSTEM,
-            "content": system_prompt
-        }));
+        let (stable, dynamic) = split_dynamic_prompt_suffix(system_prompt.as_ref());
+        if let Some(dynamic) = dynamic.filter(|text| !text.trim().is_empty()) {
+            trailing_system = Some(dynamic);
+            if !stable.trim().is_empty() {
+                let stable = augment_openai_instructions(&request.model, stable);
+                messages.push(json!({
+                    "role": vtcode_config::constants::message_roles::SYSTEM,
+                    "content": stable
+                }));
+            }
+        } else {
+            let system_prompt = augment_openai_instructions(&request.model, system_prompt.to_string());
+            messages.push(json!({
+                "role": vtcode_config::constants::message_roles::SYSTEM,
+                "content": system_prompt
+            }));
+        }
     }
 
     for msg in request.messages.iter() {
@@ -370,6 +388,13 @@ pub(crate) fn build_chat_request(
         if !skip_message {
             messages.push(message);
         }
+    }
+
+    if let Some(dynamic) = trailing_system.filter(|text| !text.trim().is_empty()) {
+        messages.push(json!({
+            "role": vtcode_config::constants::message_roles::SYSTEM,
+            "content": dynamic
+        }));
     }
 
     if messages.is_empty() {
@@ -478,6 +503,90 @@ pub(crate) fn build_responses_request(
 /// `openai_request_builder_preserves_custom_include_strings_around_typed_include`,
 /// and the `responses_api` history tests. Remove this boundary once Rig exposes
 /// open custom include values and VTCode-compatible structured history hooks.
+fn is_explicit_cache_breakpoint_model(model: &str) -> bool {
+    // GPT-5.6+ (and GPT-6 Astra) support explicit `prompt_cache_breakpoint`
+    // markers. Older models (GPT-5.5 and earlier) reject `prompt_cache_options`
+    // and `prompt_cache_breakpoint` outright, so never emit markers for them.
+    is_gpt56_model(model) || model == openai_models::GPT_6_ASTRA
+}
+
+fn is_eligible_cache_breakpoint_block(block: &Value) -> bool {
+    matches!(block.get("type").and_then(Value::as_str), Some("input_text" | "input_image" | "input_file"))
+}
+
+/// Whether an input item is the relocated volatile-reminance reminder.
+///
+/// The reminder carries per-turn content, so it must never receive an explicit
+/// breakpoint (the marker would churn every turn).
+fn is_runtime_reminder_item(item: &Value) -> bool {
+    item.get("content").and_then(Value::as_array).is_some_and(|blocks| {
+        blocks.iter().any(|block| {
+            block
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.starts_with(DYNAMIC_RUNTIME_REMINDER_LABEL))
+        })
+    })
+}
+
+fn apply_explicit_cache_breakpoints(input: &mut [Value], model: &str) {
+    if !is_explicit_cache_breakpoint_model(model) || input.is_empty() {
+        return;
+    }
+
+    // Stable-prefix discipline: the newest trailing item is the varying suffix
+    // (covered by the implicit breakpoint). Explicit markers go on user-message
+    // boundaries inside the stable prefix so growing history keeps earlier
+    // markers byte-stable across turns. Cap at the 4 most recent boundaries to
+    // stay within the per-request write budget; older prefixes remain readable
+    // through the prior requests' writes.
+    let stable_end = input.len().saturating_sub(1);
+    let mut marked = 0u8;
+    for item in input[..stable_end].iter_mut().rev() {
+        if marked >= 4 {
+            break;
+        }
+        if is_runtime_reminder_item(item) {
+            continue;
+        }
+        let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let Some(block) = content.iter_mut().rev().find(|block| is_eligible_cache_breakpoint_block(block)) else {
+            continue;
+        };
+        if block.get("prompt_cache_breakpoint").is_none() {
+            block["prompt_cache_breakpoint"] = json!({ "mode": "explicit" });
+        }
+        marked += 1;
+    }
+
+    // Single-turn (or no eligible block in the stable prefix): mark the last
+    // eligible block so the first request still writes. The trailing item is
+    // the varying suffix (latest message or relocated runtime reminder), so
+    // skip it whenever an earlier item exists; otherwise the marker itself
+    // would churn every turn.
+    if marked == 0 {
+        let fallback_end = if input.len() > 1 { input.len() - 1 } else { input.len() };
+        for item in input[..fallback_end].iter_mut().rev() {
+            // A reminder-only input (history of only System messages) has no
+            // stable content to anchor; marking it would churn per turn.
+            if is_runtime_reminder_item(item) {
+                continue;
+            }
+            let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            if let Some(block) = content.iter_mut().rev().find(|block| is_eligible_cache_breakpoint_block(block))
+                && block.get("prompt_cache_breakpoint").is_none()
+            {
+                block["prompt_cache_breakpoint"] = json!({ "mode": "explicit" });
+                break;
+            }
+        }
+    }
+}
+
 fn build_responses_item_history(
     request: &provider::LLMRequest,
     ctx: &ResponsesRequestContext<'_>,
@@ -492,10 +601,7 @@ fn build_responses_item_history(
         responses_payload.instructions = Some(instructions);
     }
 
-    responses_payload.instructions = responses_payload
-        .instructions
-        .take()
-        .map(|instructions| augment_openai_instructions(&request.model, instructions));
+    separate_dynamic_instructions(request, &mut responses_payload);
 
     if !(ctx.include_assistant_phase
         || ctx.preserve_assistant_phase_on_replay && supports_assistant_phase_replay(&request.model))
@@ -503,7 +609,106 @@ fn build_responses_item_history(
         strip_non_native_assistant_phase(&mut responses_payload.input);
     }
 
+    // GPT-5.6+ exact-match caching needs explicit breakpoints on the stable
+    // prefix; the implicit breakpoint alone only covers the latest message.
+    // Gated on the Responses model family only (not the TTL flag) so the
+    // API-key and ChatGPT backends keep sharing one item/history builder.
+    // Older models reject the field outright, enforced inside the helper.
+    if ctx.is_responses_api_model {
+        apply_explicit_cache_breakpoints(&mut responses_payload.input, &request.model);
+    }
+
     Ok(responses_payload)
+}
+
+/// Trailing reminder label for relocated volatile prompt content.
+///
+/// Constant bytes keep the reminder tail cheap to reprocess; the label itself
+/// never varies across turns.
+const DYNAMIC_RUNTIME_REMINDER_LABEL: &str = "[System reminder — runtime context, not a user request]";
+
+/// Split volatile content out of Responses `instructions` into a trailing reminder.
+///
+/// The payload builder folds the whole system prompt (including per-turn
+/// sections like `[Runtime Tool Catalog]`, `[Deferred Tools]`, and planning
+/// notices) plus every history `System` message (compaction summaries, resume
+/// notes) into one `instructions` string. Any per-turn change there rewrites
+/// the cached prefix from byte zero, so sustained hit rates collapse.
+/// Mirror the Anthropic wire split: the stable system prefix stays in
+/// `instructions` (with the model contract addendum applied to the stable part
+/// only) while volatile segments — labeled by the builder via
+/// `InstructionSegmentKind`, so segment attribution never depends on guessing
+/// at a joined-string layout — move to a trailing user-role reminder item.
+/// History order is otherwise untouched, so grown histories keep the stable
+/// input prefix byte-stable across turns.
+///
+/// Fast path (no volatile segments): `instructions` keeps the exact legacy
+/// augmented value. When the builder supplied no provenance (e.g. a static
+/// replay fallback injected upstream), the whole string is treated as stable.
+fn separate_dynamic_instructions(request: &provider::LLMRequest, payload: &mut OpenAIResponsesPayload) {
+    let Some(built) = payload.instructions.take() else {
+        return;
+    };
+    let segments = match payload.instruction_segments.take() {
+        Some(segments) => segments,
+        None => {
+            // No provenance: static replay fallback or a caller-built string.
+            // Keep it whole — it is session-stable by construction.
+            payload.instructions = Some(augment_openai_instructions(&request.model, built));
+            return;
+        }
+    };
+
+    // Partition by provenance into a stable prefix and a volatile tail, then
+    // split the system-prompt segment on dynamic-section headers so its
+    // per-turn sections (`[Harness Limits]`, `[Runtime Tool Catalog]`, …) also
+    // leave the cached prefix. Volatile segments keep their wire order.
+    let mut stable_parts: Vec<String> = Vec::with_capacity(segments.len());
+    let mut volatile_parts: Vec<String> = Vec::new();
+    for (kind, text) in &segments {
+        match kind {
+            InstructionSegmentKind::SystemPrompt => {
+                let (stable, dynamic) = split_dynamic_prompt_suffix(text);
+                if !stable.is_empty() {
+                    stable_parts.push(stable);
+                }
+                if let Some(dynamic) = dynamic.filter(|text| !text.trim().is_empty()) {
+                    volatile_parts.push(dynamic);
+                }
+            }
+            InstructionSegmentKind::HistorySystem | InstructionSegmentKind::FoldedHistory => {
+                volatile_parts.push(text.clone());
+            }
+        }
+    }
+
+    if volatile_parts.is_empty() {
+        payload.instructions = Some(augment_openai_instructions(&request.model, built));
+        return;
+    }
+
+    let stable_joined = stable_parts.join("\n\n");
+    let stable_instructions = if stable_joined.trim().is_empty() {
+        // A system prompt that is entirely dynamic leaves no stable text, but
+        // the model contract addendum must still ride the cached prefix so it
+        // is not silently dropped (legacy always appended it).
+        let had_system_prompt = segments.iter().any(|(kind, _)| *kind == InstructionSegmentKind::SystemPrompt);
+        let addendum_only = augment_openai_instructions(&request.model, String::new());
+        (had_system_prompt && !addendum_only.trim().is_empty()).then_some(addendum_only)
+    } else {
+        Some(augment_openai_instructions(&request.model, stable_joined))
+    };
+    payload.instructions = stable_instructions;
+
+    let tail = volatile_parts.join("\n\n");
+    let mut reminder = String::with_capacity(DYNAMIC_RUNTIME_REMINDER_LABEL.len() + 1 + tail.len());
+    reminder.push_str(DYNAMIC_RUNTIME_REMINDER_LABEL);
+    reminder.push('\n');
+    reminder.push_str(&tail);
+    payload.input.push(json!({
+        "role": "user",
+        "content": [{ "type": "input_text", "text": reminder }]
+    }));
 }
 
 /// Shared normal HTTP/SSE Responses JSON boundary.
@@ -1033,5 +1238,355 @@ mod tests {
 
         assert!(instructions.contains("GPT-6 Astra"));
         assert!(!instructions.contains("GPT-5.6 model"));
+    }
+
+    fn cache_ctx() -> ResponsesRequestContext<'static> {
+        let mut ctx = base_context(None);
+        ctx.include_prompt_cache_retention = true;
+        ctx
+    }
+
+    fn gpt56_request(messages: Vec<provider::Message>) -> provider::LLMRequest {
+        provider::LLMRequest {
+            messages: messages.into(),
+            model: models::openai::GPT_5_6_LUNA.to_string(),
+            stream: true,
+            ..Default::default()
+        }
+    }
+
+    fn count_explicit_breakpoints(payload: &Value) -> usize {
+        payload
+            .get("input")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("content").and_then(Value::as_array))
+                    .flat_map(|blocks| blocks.iter())
+                    .filter(|block| block.get("prompt_cache_breakpoint").is_some())
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    fn breakpoint_modes(payload: &Value) -> Vec<String> {
+        payload
+            .get("input")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("content").and_then(Value::as_array))
+                    .flat_map(|blocks| blocks.iter())
+                    .filter_map(|block| {
+                        block
+                            .pointer("/prompt_cache_breakpoint/mode")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn gpt56_marks_stable_prefix_not_trailing_message() {
+        let request = gpt56_request(vec![
+            provider::Message::user("stable context".to_string()),
+            provider::Message::user("new question".to_string()),
+        ]);
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+        let input = payload.get("input").and_then(Value::as_array).expect("input");
+
+        assert_eq!(input.len(), 2);
+        let first_blocks = input[0].get("content").and_then(Value::as_array).expect("blocks");
+        assert_eq!(
+            first_blocks
+                .last()
+                .and_then(|b| b.pointer("/prompt_cache_breakpoint/mode"))
+                .and_then(Value::as_str),
+            Some("explicit"),
+            "stable prefix boundary must carry the explicit breakpoint"
+        );
+        let last_blocks = input[1].get("content").and_then(Value::as_array).expect("blocks");
+        assert!(
+            last_blocks.iter().all(|b| b.get("prompt_cache_breakpoint").is_none()),
+            "trailing varying message stays implicit-only so the stable prefix can partial-match"
+        );
+    }
+
+    #[test]
+    fn gpt56_grown_history_keeps_breakpoint_byte_stable() {
+        let first = gpt56_request(vec![provider::Message::user("stable context".to_string())]);
+        let second = gpt56_request(vec![
+            provider::Message::user("stable context".to_string()),
+            provider::Message::user("follow-up".to_string()),
+        ]);
+
+        let a = build_responses_request(&first, &cache_ctx()).expect("first should build");
+        let b = build_responses_request(&second, &cache_ctx()).expect("second should build");
+
+        let a_input = a.get("input").and_then(Value::as_array).expect("input");
+        let b_input = b.get("input").and_then(Value::as_array).expect("input");
+        assert_eq!(&b_input[..a_input.len()], &a_input[..], "breakpoint must not rewrite the stable prefix");
+        assert!(count_explicit_breakpoints(&b) >= 1);
+    }
+
+    #[test]
+    fn gpt55_and_older_get_no_explicit_breakpoint() {
+        let mut request = gpt56_request(vec![
+            provider::Message::user("stable context".to_string()),
+            provider::Message::user("new question".to_string()),
+        ]);
+        request.model = models::openai::GPT_5.to_string();
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+
+        assert_eq!(count_explicit_breakpoints(&payload), 0, "older models reject the breakpoint field");
+        assert!(payload.get("prompt_cache_options").is_none());
+    }
+
+    #[test]
+    fn gpt56_caps_explicit_breakpoints_at_four() {
+        let messages = (0..6).map(|i| provider::Message::user(format!("question {i}"))).collect();
+        let request = gpt56_request(messages);
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+
+        assert_eq!(count_explicit_breakpoints(&payload), 4, "writes are capped at four per request");
+        assert!(breakpoint_modes(&payload).iter().all(|mode| mode == "explicit"));
+    }
+
+    #[test]
+    fn gpt56_single_turn_still_writes_breakpoint() {
+        let request = gpt56_request(vec![provider::Message::user("only question".to_string())]);
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+
+        assert_eq!(count_explicit_breakpoints(&payload), 1, "first request must write the prefix");
+    }
+
+    fn system_with_dynamics() -> String {
+        "stable instructions\n\n[Harness Limits]\n- max_tool_calls_per_turn: 5\n\n[Runtime Tool Catalog]\n- epoch: 2"
+            .to_string()
+    }
+
+    #[test]
+    fn responses_splits_dynamic_suffix_into_trailing_reminder() {
+        use std::sync::Arc;
+
+        let mut request = gpt56_request(vec![
+            provider::Message::system("Previous conversation summary:\n- did stuff".to_string()),
+            provider::Message::user("continue".to_string()),
+        ]);
+        request.system_prompt = Some(Arc::from(system_with_dynamics()));
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+
+        let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+        assert!(instructions.contains("stable instructions"), "stable prefix stays cached");
+        assert!(!instructions.contains("[Harness Limits]"), "volatile sections leave instructions");
+        assert!(!instructions.contains("Previous conversation summary"), "history system leaves instructions");
+
+        let input = payload.get("input").and_then(Value::as_array).expect("input");
+        let reminder = input.last().expect("trailing reminder");
+        assert_eq!(reminder.get("role").and_then(Value::as_str), Some("user"));
+        let reminder_text = reminder
+            .pointer("/content/0/text")
+            .and_then(Value::as_str)
+            .expect("reminder text");
+        assert!(reminder_text.contains("[Harness Limits]"), "volatile sections ride the tail");
+        assert!(reminder_text.contains("Previous conversation summary"), "history system rides the tail");
+        assert!(reminder.pointer("/content/0/prompt_cache_breakpoint").is_none(), "varying tail stays implicit-only");
+    }
+
+    #[test]
+    fn responses_static_prompts_keep_legacy_shape() {
+        use std::sync::Arc;
+
+        let mut request = gpt56_request(vec![provider::Message::user("hello".to_string())]);
+        request.system_prompt = Some(Arc::from("stable instructions"));
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+
+        let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+        assert!(instructions.contains("stable instructions"));
+        let input = payload.get("input").and_then(Value::as_array).expect("input");
+        assert_eq!(input.len(), 1, "no reminder without volatile content");
+    }
+
+    #[test]
+    fn responses_grown_history_keeps_stable_instructions() {
+        use std::sync::Arc;
+
+        let first = {
+            let mut request = gpt56_request(vec![provider::Message::user("one".to_string())]);
+            request.system_prompt = Some(Arc::from(system_with_dynamics()));
+            request
+        };
+        let second = {
+            let mut request = gpt56_request(vec![
+                provider::Message::user("one".to_string()),
+                provider::Message::user("two".to_string()),
+            ]);
+            request.system_prompt = Some(Arc::from(system_with_dynamics()));
+            request
+        };
+
+        let a = build_responses_request(&first, &cache_ctx()).expect("first should build");
+        let b = build_responses_request(&second, &cache_ctx()).expect("second should build");
+
+        assert_eq!(a.get("instructions"), b.get("instructions"), "stable instructions repeat verbatim");
+        let a_input = a.get("input").and_then(Value::as_array).expect("input");
+        let b_input = b.get("input").and_then(Value::as_array).expect("input");
+        assert_eq!(a_input[0], b_input[0], "stable history item keeps its bytes");
+    }
+
+    #[test]
+    fn responses_nonstructured_folds_move_to_reminder() {
+        let mut ctx = cache_ctx();
+        ctx.include_structured_history_in_input = false;
+        let request = gpt56_request(vec![
+            provider::Message::user("run it".to_string()),
+            provider::Message::assistant("did it".to_string()),
+            provider::Message::user("again".to_string()),
+        ]);
+
+        let payload = build_responses_request(&request, &ctx).expect("request should build");
+
+        let instructions = payload.get("instructions").and_then(Value::as_str).unwrap_or("");
+        assert!(
+            !instructions.contains("Previous assistant response:"),
+            "folded per-turn history leaves instructions"
+        );
+        let input = payload.get("input").and_then(Value::as_array).expect("input");
+        let reminder = input.last().expect("trailing reminder");
+        assert!(
+            reminder
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("did it")),
+            "folded history rides the tail"
+        );
+    }
+
+    #[test]
+    fn chat_splits_dynamic_suffix_to_trailing_system_message() {
+        use std::sync::Arc;
+
+        let mut request = request();
+        request.model = "custom-chat-model".to_string();
+        request.system_prompt = Some(Arc::from(system_with_dynamics()));
+        request.messages = vec![provider::Message::user("hello".to_string())].into();
+
+        let payload = build_chat_request(&request, &chat_context()).expect("chat request should build");
+        let messages = payload.get("messages").and_then(Value::as_array).expect("messages");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].get("role").and_then(Value::as_str), Some("system"));
+        assert!(
+            messages[0]
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("stable instructions"))
+        );
+        assert!(
+            messages[0]
+                .get("content")
+                .and_then(Value::as_str)
+                .is_none_or(|text| !text.contains("[Harness Limits]"))
+        );
+        assert_eq!(messages[1].get("role").and_then(Value::as_str), Some("user"));
+        assert_eq!(messages[2].get("role").and_then(Value::as_str), Some("system"));
+        assert!(
+            messages[2]
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("[Harness Limits]"))
+        );
+    }
+
+    #[test]
+    fn chat_without_dynamics_keeps_single_system_message() {
+        use std::sync::Arc;
+
+        let mut request = request();
+        request.model = "custom-chat-model".to_string();
+        request.system_prompt = Some(Arc::from("stable instructions"));
+        request.messages = vec![provider::Message::user("hello".to_string())].into();
+
+        let payload = build_chat_request(&request, &chat_context()).expect("chat request should build");
+        let messages = payload.get("messages").and_then(Value::as_array).expect("messages");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].get("role").and_then(Value::as_str), Some("system"));
+        // Fast path must be byte-identical to the legacy single system message.
+        let legacy = augment_openai_instructions("custom-chat-model", "stable instructions".to_string());
+        assert_eq!(messages[0].get("content").and_then(Value::as_str), Some(legacy.as_str()));
+    }
+
+    #[test]
+    fn responses_splits_mid_history_system_and_dynamics_without_panicking() {
+        use std::sync::Arc;
+
+        // Regression guard (review H1/M3): a System message positioned after an
+        // assistant turn used to trip the prefix-strip heuristic / debug_assert.
+        // Provenance-based segmentation must split every case deterministically.
+        let mut request = gpt56_request(vec![
+            provider::Message::assistant("did it".to_string()),
+            provider::Message::system("resume note".to_string()),
+            provider::Message::user("continue".to_string()),
+        ]);
+        request.system_prompt = Some(Arc::from(system_with_dynamics()));
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+        let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+        assert!(instructions.contains("stable instructions"));
+        assert!(!instructions.contains("[Harness Limits]"), "dynamic sections leave instructions");
+        assert!(!instructions.contains("resume note"), "mid-history system leaves instructions");
+
+        let input = payload.get("input").and_then(Value::as_array).expect("input");
+        let reminder = input.last().expect("trailing reminder");
+        let reminder_text = reminder
+            .pointer("/content/0/text")
+            .and_then(Value::as_str)
+            .expect("reminder text");
+        assert!(reminder_text.contains("[Harness Limits]"));
+        assert!(reminder_text.contains("resume note"));
+        // History order before the tail is untouched: assistant then user.
+        assert_eq!(input[0].get("role").and_then(Value::as_str), Some("assistant"));
+        assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    }
+
+    #[test]
+    fn responses_all_dynamic_system_prompt_keeps_contract_addendum() {
+        use std::sync::Arc;
+
+        // Regression guard (review L1): when the system prompt is entirely
+        // dynamic, the GPT-5.6 contract addendum must still be emitted rather
+        // than silently dropped.
+        let mut request = gpt56_request(vec![provider::Message::user("hi".to_string())]);
+        request.system_prompt = Some(Arc::from("[Harness Limits]\n- max_tool_calls_per_turn: 5"));
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+        let instructions = payload.get("instructions").and_then(Value::as_str).expect("instructions");
+        assert!(
+            instructions.contains("GPT-5.6"),
+            "contract addendum must survive an all-dynamic prompt; got: {instructions:?}"
+        );
+        assert!(!instructions.contains("[Harness Limits]"), "got: {instructions:?}");
+    }
+
+    #[test]
+    fn reminder_only_input_receives_no_explicit_breakpoint() {
+        // Regression guard (review L2): a history of only System messages leaves
+        // the reminder as the sole input item; marking it would churn every turn.
+        let request = gpt56_request(vec![provider::Message::system("resume note".to_string())]);
+
+        let payload = build_responses_request(&request, &cache_ctx()).expect("request should build");
+
+        assert_eq!(count_explicit_breakpoints(&payload), 0, "varying reminder must stay unmarked");
     }
 }

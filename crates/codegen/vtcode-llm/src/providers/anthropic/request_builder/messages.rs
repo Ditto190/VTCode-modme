@@ -803,4 +803,67 @@ mod tests {
             .with_reasoning_details(Some(vec![json!(r#"{"type":"thinking","thinking":"trace"}"#)]));
         assert!(build_advisor_blocks(&message).is_empty());
     }
+
+    fn strip_message_anchors(messages: &mut [super::AnthropicMessage]) {
+        for message in messages.iter_mut() {
+            for block in message.content.iter_mut() {
+                if let AnthropicContentBlock::Text { cache_control, .. } = block {
+                    *cache_control = None;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn grown_history_keeps_wire_prefix_stable_across_turns() {
+        // Asymmetric guard for prefix caching: a grown second turn (new long
+        // user message plus a tool round) must serialize the shared prefix
+        // byte-identically once rolling anchors are factored out. Anchor
+        // movement is expected; content rewrites are not.
+        use crate::provider::ToolCall;
+
+        let first_turn = vec![
+            Message::user("a".repeat(300)),
+            Message::assistant_with_tools(
+                String::new(),
+                vec![ToolCall::function(
+                    "call_1".to_string(),
+                    "exec_command".to_string(),
+                    "{\"command\":\"ls\"}".to_string(),
+                )],
+            ),
+            Message::tool_response("call_1".to_string(), "a.txt".to_string()),
+        ];
+        let mut second_turn = first_turn.clone();
+        second_turn.push(Message::user("b".repeat(300)));
+
+        let settings = AnthropicPromptCacheSettings {
+            min_message_length_for_cache: 1,
+            ..AnthropicPromptCacheSettings::default()
+        };
+        let cache_control = Some(CacheControl {
+            control_type: "ephemeral".into(),
+            ttl: Some("5m".into()),
+        });
+        let build = |history: &[Message]| {
+            let request = LLMRequest::default();
+            let mut breakpoints_remaining = 4usize;
+            build_messages(&request, history, &cache_control, &settings, &mut breakpoints_remaining, "")
+                .expect("build_messages")
+        };
+
+        let mut first = build(&first_turn);
+        let mut second = build(&second_turn);
+        strip_message_anchors(&mut first);
+        strip_message_anchors(&mut second);
+
+        let first_json = serde_json::to_value(&first).expect("serialize first turn");
+        let second_json = serde_json::to_value(&second).expect("serialize second turn");
+        assert!(second_json.as_array().expect("array").len() > first_json.as_array().expect("array").len());
+        assert_eq!(
+            &second_json.as_array().expect("array")[..first_json.as_array().expect("array").len()],
+            first_json.as_array().expect("array"),
+            "grown history must extend the wire prefix without rewriting it"
+        );
+    }
 }

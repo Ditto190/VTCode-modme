@@ -68,15 +68,6 @@ impl SystemInstruction {
             parts: vec![Part::Text { text: text.into(), thought_signature: None }],
         }
     }
-
-    pub(crate) fn with_ttl(text: impl Into<String>, ttl_seconds: u64) -> Self {
-        SystemInstruction {
-            parts: vec![
-                Part::Text { text: text.into(), thought_signature: None },
-                Part::CacheControl { ttl_seconds: Some(ttl_seconds) },
-            ],
-        }
-    }
 }
 
 /// IMPORTANT: Variant ordering matters for `#[serde(untagged)]` deserialization.

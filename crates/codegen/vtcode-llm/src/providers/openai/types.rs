@@ -21,6 +21,24 @@ pub(crate) struct OpenAIResponsesPayload {
     pub(crate) input: Vec<Value>,
     /// Optional system instructions.
     pub(crate) instructions: Option<String>,
+    /// Per-segment provenance for `instructions`, in wire order.
+    ///
+    /// `None` when `instructions` is `None` or when the composition is
+    /// all-static (single stable segment). Consumers that need to relocate
+    /// volatile content use this instead of guessing at a joined-string
+    /// layout, which breaks the moment segment order varies.
+    pub(crate) instruction_segments: Option<Vec<(InstructionSegmentKind, String)>>,
+}
+
+/// Provenance kind for one segment of the composed `instructions` string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstructionSegmentKind {
+    /// The request-level system prompt (session-stable).
+    SystemPrompt,
+    /// A `System`-role message from conversation history (per-turn).
+    HistorySystem,
+    /// Assistant/tool history folded into instructions (non-structured path).
+    FoldedHistory,
 }
 
 /// Maximum completion tokens field name for Chat Completions API.

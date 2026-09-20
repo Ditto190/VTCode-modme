@@ -126,10 +126,18 @@ pub(crate) fn build_tools(
         push_anthropic_tool(&mut built_tools, tool)?;
     }
 
+    // Anchor the last function tool: native server tools (web search, code
+    // execution, memory, tool search) and the injected advisor tool carry no
+    // `cache_control` slot, so requiring the *last* tool to be a function
+    // silently drops the whole tools-prefix breakpoint whenever a native tool
+    // sorts last. Anchoring the last anchorable tool keeps the tools prefix
+    // cached; trailing non-function tools ride the uncached tail.
     if *breakpoints_remaining > 0
         && let Some(cc) = cache_control.as_ref()
-        && let Some(last_tool) = built_tools.last_mut()
-        && let AnthropicTool::Function(func_tool) = last_tool
+        && let Some(func_tool) = built_tools.iter_mut().rev().find_map(|tool| match tool {
+            AnthropicTool::Function(func_tool) => Some(func_tool),
+            _ => None,
+        })
     {
         func_tool.cache_control = Some(cc.clone());
         *breakpoints_remaining -= 1;
@@ -518,6 +526,127 @@ mod tests {
             "top-level allOf must be stripped so Anthropic doesn't reject the tool schema"
         );
         assert_eq!(function.input_schema["required"], json!(["action"]));
+    }
+
+    #[test]
+    fn build_tools_anchors_last_function_tool_when_native_tool_trails() {
+        let function = ToolDefinition::function(
+            "get_weather".to_string(),
+            "Get weather for a city".to_string(),
+            json!({"type": "object"}),
+        );
+        let native = ToolDefinition {
+            tool_type: "code_execution_20250825".to_string(),
+            function: None,
+            allowed_callers: None,
+            input_examples: None,
+            web_search: None,
+            hosted_tool_config: None,
+            shell: None,
+            grammar: None,
+            strict: None,
+            defer_loading: None,
+            namespace: None,
+            advisor: None,
+        };
+        let request = LLMRequest {
+            messages: vec![Message::user("run code".to_string())].into(),
+            tools: Some(Arc::new(vec![function, native])),
+            model: models::anthropic::DEFAULT_MODEL.to_string(),
+            ..Default::default()
+        };
+        let cache_control = Some(CacheControl {
+            control_type: "ephemeral".into(),
+            ttl: Some("1h".into()),
+        });
+        let mut breakpoints_remaining = 4usize;
+
+        let tools = build_tools(&request, &cache_control, &mut breakpoints_remaining)
+            .expect("tool build")
+            .expect("tools should exist");
+
+        assert_eq!(tools.len(), 2);
+        assert!(
+            matches!(
+                &tools[0],
+                AnthropicTool::Function(function)
+                    if function.name == "get_weather" && function.cache_control.is_some()
+            ),
+            "tools prefix breakpoint must survive a trailing native tool"
+        );
+        assert!(matches!(&tools[1], AnthropicTool::CodeExecution(_)));
+        assert_eq!(breakpoints_remaining, 3);
+    }
+
+    #[test]
+    fn build_tools_anchors_last_tool_when_all_are_functions() {
+        let names = ["alpha", "beta"];
+        let defs = names
+            .iter()
+            .map(|name| ToolDefinition::function(name.to_string(), name.to_string(), json!({"type": "object"})))
+            .collect();
+        let request = LLMRequest {
+            messages: vec![Message::user("hi".to_string())].into(),
+            tools: Some(Arc::new(defs)),
+            model: models::anthropic::DEFAULT_MODEL.to_string(),
+            ..Default::default()
+        };
+        let cache_control = Some(CacheControl {
+            control_type: "ephemeral".into(),
+            ttl: Some("1h".into()),
+        });
+        let mut breakpoints_remaining = 4usize;
+
+        let tools = build_tools(&request, &cache_control, &mut breakpoints_remaining)
+            .expect("tool build")
+            .expect("tools should exist");
+
+        assert!(matches!(
+            &tools[1],
+            AnthropicTool::Function(function)
+                if function.name == "beta" && function.cache_control.is_some()
+        ));
+        assert!(matches!(
+            &tools[0],
+            AnthropicTool::Function(function) if function.cache_control.is_none()
+        ));
+        assert_eq!(breakpoints_remaining, 3);
+    }
+
+    #[test]
+    fn build_tools_leaves_no_anchor_without_function_tools() {
+        let native = ToolDefinition {
+            tool_type: "code_execution_20250825".to_string(),
+            function: None,
+            allowed_callers: None,
+            input_examples: None,
+            web_search: None,
+            hosted_tool_config: None,
+            shell: None,
+            grammar: None,
+            strict: None,
+            defer_loading: None,
+            namespace: None,
+            advisor: None,
+        };
+        let request = LLMRequest {
+            messages: vec![Message::user("run code".to_string())].into(),
+            tools: Some(Arc::new(vec![native])),
+            model: models::anthropic::DEFAULT_MODEL.to_string(),
+            ..Default::default()
+        };
+        let cache_control = Some(CacheControl {
+            control_type: "ephemeral".into(),
+            ttl: Some("1h".into()),
+        });
+        let mut breakpoints_remaining = 4usize;
+
+        let tools = build_tools(&request, &cache_control, &mut breakpoints_remaining)
+            .expect("tool build")
+            .expect("tools should exist");
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(breakpoints_remaining, 4, "budget untouched when nothing is anchorable");
     }
 
     #[test]

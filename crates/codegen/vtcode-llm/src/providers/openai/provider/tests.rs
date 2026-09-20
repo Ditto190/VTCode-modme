@@ -3326,9 +3326,21 @@ async fn manual_compaction_payload_includes_selected_fields_and_appends_instruct
     assert!(p.get("previous_response_id").is_none() && p.get("output_types").is_none());
     let instr = p["instructions"].as_str().expect("instructions required");
     assert!(
-        instr.contains("Preserve decisions.")
-            && instr.contains("[Manual Compaction Instructions]")
-            && instr.contains("Terse.")
+        instr.contains("[Manual Compaction Instructions]") && instr.contains("Terse."),
+        "manual compaction instructions stay in the cached prefix"
+    );
+    assert!(
+        !instr.contains("Preserve decisions."),
+        "history system text must not rewrite the cached instructions prefix"
+    );
+    let input_items = p["input"].as_array().expect("input items required");
+    let reminder = input_items.last().expect("trailing runtime reminder");
+    assert!(
+        reminder
+            .pointer("/content/0/text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("Preserve decisions.")),
+        "history system text rides the trailing reminder so it stays visible to the compactor"
     );
 }
 

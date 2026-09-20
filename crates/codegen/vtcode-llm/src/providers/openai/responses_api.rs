@@ -4,7 +4,7 @@ use crate::provider::{
     ToolCall, Usage,
 };
 use crate::providers::common::append_normalized_reasoning_detail_items;
-use crate::providers::openai::types::OpenAIResponsesPayload;
+use crate::providers::openai::types::{InstructionSegmentKind, MAX_COMPLETION_TOKENS_FIELD, OpenAIResponsesPayload};
 use crate::providers::shared::{
     collect_tool_references_from_tool_search_output, function_output_value_from_message_content,
     parse_cache_write_tokens_from_usage, parse_cached_prompt_tokens_from_usage,
@@ -158,7 +158,10 @@ fn assistant_input_item(content_parts: Vec<Value>, phase: Option<AssistantPhase>
     item
 }
 
-fn append_assistant_text_to_instructions(instructions_segments: &mut Vec<String>, text: &str) {
+fn append_assistant_text_to_instructions(
+    instructions_segments: &mut Vec<(InstructionSegmentKind, String)>,
+    text: &str,
+) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return;
@@ -167,7 +170,7 @@ fn append_assistant_text_to_instructions(instructions_segments: &mut Vec<String>
     let mut s = String::with_capacity(30 + trimmed.len());
     s.push_str("Previous assistant response:\n");
     s.push_str(trimmed);
-    instructions_segments.push(s);
+    instructions_segments.push((InstructionSegmentKind::FoldedHistory, s));
 }
 
 fn append_output_item_text(value: &Value, text: &mut String) {
@@ -232,7 +235,7 @@ fn tool_result_history_text(message_content: &MessageContent) -> String {
 }
 
 fn append_tool_result_to_instructions(
-    instructions_segments: &mut Vec<String>,
+    instructions_segments: &mut Vec<(InstructionSegmentKind, String)>,
     tool_call_id: Option<&str>,
     message_content: &MessageContent,
 ) {
@@ -256,7 +259,7 @@ fn append_tool_result_to_instructions(
     }
     s.push('\n');
     s.push_str(&text);
-    instructions_segments.push(s);
+    instructions_segments.push((InstructionSegmentKind::FoldedHistory, s));
 }
 
 pub(crate) fn parse_responses_payload(
@@ -465,12 +468,12 @@ pub(crate) fn build_standard_responses_payload(
     let mut active_tool_calls: HashMap<String, ResponsesToolCallKind> = HashMap::new();
     let mut pending_tool_call_order: Vec<String> = Vec::new();
     let mut deferred_tool_outputs: HashMap<String, Value> = HashMap::new();
-    let mut instructions_segments = Vec::new();
+    let mut instructions_segments: Vec<(InstructionSegmentKind, String)> = Vec::new();
 
     if let Some(system_prompt) = &request.system_prompt {
         let trimmed = system_prompt.trim();
         if !trimmed.is_empty() {
-            instructions_segments.push(trimmed.to_string());
+            instructions_segments.push((InstructionSegmentKind::SystemPrompt, trimmed.to_string()));
         }
     }
 
@@ -480,7 +483,7 @@ pub(crate) fn build_standard_responses_payload(
                 let content_text = msg.content.as_text();
                 let trimmed = content_text.trim();
                 if !trimmed.is_empty() {
-                    instructions_segments.push(trimmed.to_string());
+                    instructions_segments.push((InstructionSegmentKind::HistorySystem, trimmed.to_string()));
                 }
             }
             MessageRole::User => {
@@ -605,13 +608,25 @@ pub(crate) fn build_standard_responses_payload(
         }
     }
 
-    let instructions = if instructions_segments.is_empty() {
-        None
-    } else {
-        Some(instructions_segments.join("\n\n"))
-    };
+    let (instructions, instruction_segments) = finalize_instruction_segments(instructions_segments);
 
-    Ok(OpenAIResponsesPayload { input, instructions })
+    Ok(OpenAIResponsesPayload { input, instructions, instruction_segments })
+}
+
+/// Join labeled instruction segments into the wire string plus provenance.
+///
+/// Returns `(None, None)` when there are no segments. Provenance is always
+/// emitted with the segments: dynamic sections can live inside the system
+/// prompt itself, so volatile-segment detection belongs to the consumer
+/// (`separate_dynamic_instructions`), not here.
+fn finalize_instruction_segments(
+    segments: Vec<(InstructionSegmentKind, String)>,
+) -> (Option<String>, Option<Vec<(InstructionSegmentKind, String)>>) {
+    if segments.is_empty() {
+        return (None, None);
+    }
+    let joined = segments.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>().join("\n\n");
+    (Some(joined), Some(segments))
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 use crate::provider::{LLMRequest, MessageRole};
 use crate::providers::anthropic_types::CacheControl;
+use crate::providers::shared::split_dynamic_prompt_suffix;
 use serde_json::{Value, json};
 
 pub(crate) struct SystemPromptBuildResult {
@@ -8,38 +9,14 @@ pub(crate) struct SystemPromptBuildResult {
     pub has_uncached_runtime_context: bool,
 }
 
-// Keep in sync with `stable_system_prefix_hash` in vtcode-core
-// (`core/agent/hash_utils.rs`): both must treat dynamic per-turn sections as
-// uncached suffix content or cache identity diverges from the wire split.
-//
-// Prompt-caching discipline: static content first, dynamic last. The wire
-// split must cut at the *earliest* dynamic header so planning toggles,
-// harness limits, tool-catalog metadata, and environment observations never
-// pollute the cached stable prefix.
+// Stable/dynamic cut shared with the OpenAI wire and the core stable hash;
+// the header list and match semantics live in `crate::providers::shared`.
 const RUNTIME_CONTEXT_SECTION_HEADER: &str = "[Runtime Context]";
 const HISTORY_DIRECTIVES_SECTION_HEADER: &str = "[History Directives]";
 const RUNTIME_CONTEXT_NEWLINE: &str = concat!("[Runtime Context]", "\n");
 const NEWLINE_RUNTIME_CONTEXT_NEWLINE: &str = concat!("\n", "[Runtime Context]", "\n");
 const NEWLINE_HISTORY_DIRECTIVES_NEWLINE: &str = concat!("\n", "[History Directives]", "\n");
 const HISTORY_DIRECTIVES_NEWLINE: &str = concat!("[History Directives]", "\n");
-
-/// Dynamic headers that start the uncached suffix, earliest match wins.
-/// Mirrors `DYNAMIC_HEADERS` in vtcode-core `hash_utils.rs`.
-const DYNAMIC_SPLIT_HEADERS: &[&str] = &[
-    "## Active Tools",
-    "## Environment",
-    "## Active Primary Agent Runtime State",
-    "# PLANNING WORKFLOW (READ-ONLY)",
-    "# FULL-AUTO: Complete task autonomously until done or blocked.",
-    "# FULL-AUTO (PLANNING WORKFLOW): Work autonomously within planning workflow constraints.",
-    "[Harness Limits]",
-    "[Runtime Tool Catalog]",
-    "[Deferred Tools]",
-    "[Runtime Context]",
-    "[History Directives]",
-    "[Context]",
-    "[Recovery Mode]",
-];
 
 fn has_runtime_context_section(prompt: &str) -> bool {
     prompt.starts_with(RUNTIME_CONTEXT_NEWLINE)
@@ -89,35 +66,12 @@ fn split_runtime_context_section(prompt: &str) -> Option<(String, String)> {
     // Cut at the earliest dynamic header so earlier runtime sections
     // (planning, harness limits, tool catalog, environment) stay out of the
     // cached prefix.
-    if let Some(split_at) = earliest_dynamic_split(prompt) {
-        let (stable_prefix, runtime_section) = prompt.split_at(split_at);
-        let runtime_section = runtime_section.trim_start_matches('\n').trim().to_string();
-        if runtime_section.is_empty() {
-            return None;
-        }
-        let stable_prefix = stable_prefix.trim().to_string();
-        if stable_prefix.is_empty() && runtime_section.is_empty() {
-            return None;
-        }
-        return Some((stable_prefix, runtime_section));
+    let (stable_prefix, dynamic) = split_dynamic_prompt_suffix(prompt);
+    let runtime_section = dynamic.filter(|section| !section.is_empty())?;
+    if stable_prefix.is_empty() && runtime_section.is_empty() {
+        return None;
     }
-    None
-}
-
-/// Find the earliest offset where a dynamic (uncached) section starts.
-/// Matches whole-line headers either at the start of the prompt or after a
-/// newline. Single pass; breaks at the first (earliest) match.
-fn earliest_dynamic_split(prompt: &str) -> Option<usize> {
-    let mut offset = 0usize;
-    for line in prompt.split_inclusive('\n') {
-        let line_end = offset + line.len();
-        let content_end = line_end.saturating_sub(usize::from(line.ends_with('\n')));
-        if DYNAMIC_SPLIT_HEADERS.contains(&prompt[offset..content_end].trim()) {
-            return Some(offset);
-        }
-        offset = line_end;
-    }
-    None
+    Some((stable_prefix, runtime_section))
 }
 
 pub(crate) fn build_system_prompt(
