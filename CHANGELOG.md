@@ -2,6 +2,43 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.165.0 - 2026-09-21
+
+### Highlights
+#### Bug Fixes
+
+- Use descriptive titles and single short row descriptions (cfdf84e3) 
+- Gate ProcessCommandExecutor behind std-process (7a13ac10) 
+- Cap empty-fallback auto-continues to break self-loop (06be0a64) 
+- Exclude rg/grep from coarse inspection grouping (f50cb7fd) 
+- Harden summary retry logic and error diagnostics (d7c6b1ae) 
+- Count live background exec sessions in status-line agent total (7b9380c4) 
+- Residual tracker end-turn UX and classifier parity (5cd2a05a) 
+#### Documentation
+
+- Attribute OpenAI Codex as source of ideas (7ccc436d) 
+#### Features
+
+- Show rebind-aware Ctrl+B background hint for active PTY/pipe tools (d9ce5bfd) 
+- Add Grok 4.7 as default xAI model (c6d78644) 
+- Add Grok 4.7 to Vercel AI Gateway and Merge Gateway (da141c5a) 
+### Other Changes
+#### Other
+
+-  TODO (e880ebb9) (@vinhnx)
+- Update TODO (4833671e) 
+- Update TODO (1572724d) 
+- Update TODO (195a5bcc) 
+- Update project (fcc81171) 
+- Update TODO (88f58202) 
+#### Performance
+
+- Enable auto-vectorization in constant-time token compare (da8d7dc7) 
+- Add runtime diagnostics, ArcSwap config cache, and lock-scope fixes (031552f6) 
+#### Tests
+
+- Update rg regression tests to use realistic pub pattern queries (d80303e3) 
+- Add generative oracle tests for diff algorithms and unified round-trip (af90af9a) 
 ## 0.164.2 - 2026-09-21
 
 ### Highlights
