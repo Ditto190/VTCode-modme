@@ -492,12 +492,19 @@ pub(crate) fn plan_progress_line(
     }
 }
 
+/// Stable opening marker for the harness-generated plan-mode auto-continue
+/// directive. The planning exit trigger treats any user message carrying this
+/// marker as machine-generated (not a genuine user turn), so the two sites
+/// must share one literal instead of drifting.
+pub(crate) const PLAN_MODE_AUTO_CONTINUE_MARKER: &str = "Plan-mode auto-continue:";
+
 /// Follow-up prompt for plan-mode auto-continue turns.
 pub(crate) fn plan_mode_continue_follow_up() -> String {
-    "Plan-mode auto-continue: planning is still active and no validated persisted plan is ready for approval. \
+    format!(
+        "{PLAN_MODE_AUTO_CONTINUE_MARKER} planning is still active and no validated persisted plan is ready for approval. \
 Continue read-only research/synthesis toward one compact `<proposed_plan>` now. \
 Do not ask the user to resume, do not implement, and do not auto-exit planning."
-        .to_string()
+    )
 }
 
 #[cfg(test)]

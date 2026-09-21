@@ -1754,10 +1754,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     );
                     if should_queue_plan {
                         let follow_up = tracker_continue::plan_mode_continue_follow_up();
-                        let directive = "Plan-mode auto-continue: planning remains active and no validated plan is ready for approval. \
+                        let directive = format!(
+                            "{} planning remains active and no validated plan is ready for approval. \
                              Continue read-only research/synthesis toward one compact `<proposed_plan>` now; \
-                             do not ask the user to resume and do not implement."
-                            .to_string();
+                             do not ask the user to resume and do not implement.",
+                            tracker_continue::PLAN_MODE_AUTO_CONTINUE_MARKER
+                        );
                         let budget_remaining = session_stats.plan_continuation_turns() < max_turns;
                         let queued = budget_remaining
                             && match runtime.try_queue_follow_up_input(follow_up) {

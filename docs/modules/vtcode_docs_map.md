@@ -945,7 +945,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/compose/spec/plan-mode-tracker-continuity.md`
   - **Content**: Planning Workflow + Tracker Continuity (Dedupe, Scope/Task, Continuation, Progress)
-  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **Topics**: Report, [S1] Problem, [S2] Design, Follow-up (2026-09-21) — auto-continue directive misread as a user stay signal, [S3] Out of Scope
   - **User Questions**: "What can you tell me about Planning Workflow + Tracker Continuity (Dedupe, Scope/Task, Continuation, Progress)?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/compose/spec/planning-verify-commands.md`
