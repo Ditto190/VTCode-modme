@@ -190,7 +190,7 @@ experimental_use_rmcp_client = true
 [[mcp.providers]]
 name = "memcode"
 enabled = true
-endpoint = "https://mcp.memcode.in/mcp"
+endpoint = "https://mcp.memcode.in/i/vtcode/mcp"
 protocol_version = "2025-11-25"
 
 [mcp.providers.oauth]
