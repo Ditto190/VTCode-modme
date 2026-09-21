@@ -94,6 +94,8 @@ pub enum ModelId {
     MergeGatewayDeepseekFlash,
     /// xAI Grok 4.6 through Merge Gateway
     MergeGatewayXaiGrok46,
+    /// xAI Grok 4.7 through Merge Gateway
+    MergeGatewayXaiGrok47,
     /// MiniMax H3 through Merge Gateway
     MergeGatewayMinimaxH3,
     /// Moonshot Kimi K3 through Merge Gateway
@@ -285,6 +287,8 @@ pub enum ModelId {
     VercelMoonshotaiKimiK3,
     /// MiniMax M3 served through the Vercel AI Gateway
     VercelMinimaxM3,
+    /// Grok 4.7 served through the Vercel AI Gateway
+    VercelSpacexaiGrok47,
     // xAI models
     /// Grok 4.6 - xAI's flagship reasoning model with reasoning_effort support (500k context)
     XaiGrok46,

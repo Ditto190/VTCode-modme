@@ -3385,6 +3385,35 @@
         },
         "is_pro": true
       },
+      "xai/grok-4.7": {
+        "id": "xai/grok-4.7",
+        "name": "Grok 4.7 (Merge Gateway)",
+        "description": "xAI Grok 4.7 served through Merge Gateway's native Responses API.",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 500000,
+        "output_tokens": 500000,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": false
+        },
+        "is_pro": true
+      },
       "minimax/minimax-h3": {
         "id": "minimax/minimax-h3",
         "name": "MiniMax H3 (Merge Gateway)",
@@ -4206,6 +4235,32 @@
         "cost": {
           "input": 3e-07,
           "output": 1.2e-06
+        }
+      },
+      "spacexai/grok-4.7": {
+        "id": "spacexai/grok-4.7",
+        "name": "Grok 4.7 (Vercel AI Gateway)",
+        "description": "xAI Grok 4.7 advanced reasoning model for complex coding and long-context professional work served through the Vercel AI Gateway",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 500000,
+        "capabilities": {
+          "thinking": true,
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": true
+        },
+        "cost": {
+          "input": 1.2e-06,
+          "output": 3.6e-06
         }
       },
       "deepseek/deepseek-flash": {
