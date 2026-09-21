@@ -135,7 +135,11 @@ Acceptance: Phase 1 done when guard skill + suite + docs ship, default-off, zero
 I'm thinking about using Jev:
 
 • classifying shell commands → allow/ask/deny
-• deciding when context needs compaction
+• deciding when context needs compaction // maybe no need
 • routing tasks to the right tools/subagents
 
 What coding-agent heuristics could semantic routing replace?
+
+===
+
+https://huggingface.co/blog/tokenizers-v1
