@@ -2,6 +2,45 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.164.1 - 2026-09-21
+
+### Highlights
+#### Bug Fixes
+
+- Classify write-free awk as read-only inspection (76c6d6b4) 
+- Block awk indirect calls and harden tests (3ccc638f) 
+- Drop unused OSC 0 helper (5d5da97a) 
+- Treat background exit 0 as stopped and coordinate exec termination (470f0d89) 
+- Wire orphaned icon helpers, share iterm2 gate (46dbba83) 
+- Respect --quiet for iterm2 icon notice (e2388f2c) 
+- Ignore auto-continue marker in stay-intent check (434e4a75) 
+- Unify background subprocess completion with the main run loop (a00bfdb9) 
+- Derive serde on CommandForm for --all-features (ae75856d) 
+- Dismiss text selection on click and Esc (842f296d) 
+- Disarm drag state when a selection is dismissed (505b038e) 
+#### Documentation
+
+- Add Memcode MCP OAuth setup (ff33aed4) (@vivekgupta-memcode)
+- Add Memcode OAuth setup (16db0c9e) (@vivekgupta-memcode)
+- Use attributed Memcode integration endpoint (fed8c054) (@vivekgupta-memcode)
+- Use attributed Memcode integration endpoint (00ed0506) (@vivekgupta-memcode)
+- Verify claims and tighten prose (b7c845f9) 
+#### Features
+
+- Sync tab icon with window title and bundle profile icons (e35278ac) 
+- Installable VT Code tab icon profile (2a4d46a2) 
+- Profile icons for Windows Terminal and VS Code (7bd8e392) 
+- Auto-install tab icon profile on first interactive run (6d151fed) 
+- Switch profile artwork to yellow V mark (04573846) 
+- Descriptive TODO title and one-line task rows (72fbf822) 
+### Other Changes
+#### Other
+
+- Update TODO (05e3fd56) 
+- Update TODO (8d52b73f) 
+- Update project (2bd27b16) 
+- Update TODO (96d4c090) 
+- Update TODO (4a08bd49) 
 ## 0.164.0 - 2026-09-20
 
 ### Highlights
