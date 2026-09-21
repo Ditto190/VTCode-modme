@@ -8,6 +8,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT_OR_Apache--2.0-30363D?style=flat-square)](#license)
 [![MSRV](https://img.shields.io/badge/MSRV-1.93.0-30363D?style=flat-square)](./docs/development/DEVELOPMENT_SETUP.md)
+[![Version](https://img.shields.io/badge/Version-0.164.0-30363D?style=flat-square)](https://github.com/vinhnx/VTCode/releases)
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-BFB38F?style=flat-square)](https://agentskills.io/)
 [![Agent Client Protocol](https://img.shields.io/badge/Agent_Client_Protocol-383B73?style=flat-square&logo=zedindustries&logoColor=white)](./docs/guides/zed-acp.md)
 [![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-A63333?style=flat-square&logo=modelcontextprotocol&logoColor=white)](./docs/guides/mcp-integration.md)
@@ -102,7 +103,7 @@ In practice, that means:
 | **Setup and teardown stay manual**       | Lifecycle hooks run shell commands on session and tool events; workspace hooks need explicit approval first. [Hooks guide](./docs/guides/hooks-guide.md)                                                                                                                                        |
 | **Edits drift from project conventions** | Project instructions (`AGENTS.md`) are loaded into every turn, so the agent codes to your rules instead of rediscovering them. [Getting started](./docs/user-guide/getting-started.md)                                                                                                          |
 | **Interactive only is not enough**       | Headless `vtcode exec` with JSON events, scheduled tasks via `vtcode schedule`, and isolated eval worktrees support CI, cron, and agent-to-agent flows. [Full automation](./docs/guides/full-automation.md)                                                                                     |
-| **One provider locks you in**            | Built-in adapters for Gemini, OpenAI, Anthropic, DeepSeek, xAI, Meta, NVIDIA NIM, and more — plus gateways such as OpenRouter and GitHub Copilot, OpenAI-compatible custom providers, local inference via Ollama, LM Studio, and llama.cpp, and a `providers_whitelist` for air-gapped setups. [Providers](./docs/providers/PROVIDER_GUIDES.md) |
+| **One provider locks you in**            | Built-in adapters for Gemini, OpenAI, Anthropic, DeepSeek, xAI, Meta, NVIDIA NIM, StepFun, and more — plus gateways such as OpenRouter and GitHub Copilot, OpenAI-compatible custom providers, local inference via Ollama, LM Studio, and llama.cpp, and a `providers_whitelist` for air-gapped setups. [Providers](./docs/providers/PROVIDER_GUIDES.md) |
 
 The result is a terminal-native workflow that is:
 
@@ -240,6 +241,7 @@ A second tier handles session lifecycle and day-to-day operations:
 | Command                              | Purpose                                                                               |
 | ------------------------------------ | ------------------------------------------------------------------------------------- |
 | `vtcode continue`                    | Resume the last session, or fork it into a new one with `--session-id`                |
+| `vtcode exec resume`                 | Continue a finished headless run with a follow-up prompt: `--last` or a session id    |
 | `vtcode schedule`                    | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts   |
 | `vtcode secret`                      | Store provider API keys in your OS keyring, never in shell history or workspace files |
 | `vtcode models`                      | Inspect, test, and compare providers and models                                       |
@@ -262,15 +264,19 @@ the operator surface, with editor/agent bridges (`vtcode acp`, `vtcode a2a`,
 vtcode review
 
 # Weekly dependency audit (Mondays 09:00) as a durable cron job
-vtcode schedule create --cron "0 9 * * 1" --prompt "check for outdated deps and open an issue if any have CVEs"
+vtcode schedule create --name "weekly-dep-audit" --cron "0 9 * * 1" --prompt "check for outdated deps and open an issue if any have CVEs"
 
 # Resume yesterday's session and fork it for a new experiment
 vtcode continue --session-id <id>
+
+# Continue the last headless run with a follow-up prompt
+vtcode exec resume --last "continue the refactor"
 
 # See exactly what the agent did in the last run
 vtcode trajectory
 ```
 
+To pick up a specific exec session by id, use `vtcode exec resume <session-id> "..."`.
 Headless `exec` usage: [exec mode guide](./docs/user-guide/exec-mode.md).
 Durable cron schedules: [scheduled tasks guide](./docs/user-guide/scheduled-tasks.md).
 
