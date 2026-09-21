@@ -474,6 +474,43 @@ fn header_suggestions_hide_subagent_shortcuts_with_background_only() {
 }
 
 #[test]
+fn header_suggestions_show_background_shortcut_when_foreground_pty_active() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.active_pty_sessions = Some(Arc::new(AtomicUsize::new(1)));
+
+    let line = session.header_suggestions_line().expect("header suggestions line");
+    let rendered = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert!(rendered.contains("Ctrl+B"), "foreground PTY must surface Ctrl+B, got: {rendered:?}");
+    assert!(rendered.contains("background"));
+    assert!(!rendered.contains("Alt+S"));
+}
+
+#[test]
+fn foreground_pty_hint_visible_with_non_empty_composer() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_input("cargo check".to_string());
+    session.active_pty_sessions = Some(Arc::new(AtomicUsize::new(1)));
+
+    let line = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let rendered = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert!(rendered.contains("Ctrl+B"), "PTY hint must survive non-empty input, got: {rendered:?}");
+}
+
+#[test]
+fn foreground_pty_hint_does_not_duplicate_local_agents_hint() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.local_agents = vec![sample_local_agent_entry(app_types::LocalAgentKind::Delegated)];
+    session.active_pty_sessions = Some(Arc::new(AtomicUsize::new(1)));
+
+    let line = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let rendered = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert_eq!(rendered.matches("Ctrl+B").count(), 1, "Ctrl+B must appear once, got: {rendered:?}");
+}
+
+#[test]
 fn empty_input_status_shows_subagent_shortcuts() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.local_agents = vec![sample_local_agent_entry(app_types::LocalAgentKind::Delegated)];
@@ -575,6 +612,77 @@ fn input_block_shows_active_subagent_title_with_badge_style() {
     assert!(span.style.add_modifier.contains(Modifier::BOLD));
 
     assert_eq!(session.input_block_extra_height(), 2);
+}
+
+#[test]
+fn background_activity_drives_global_shimmer_without_locking_guards() {
+    use crate::tui::core_tui::runner::TuiSessionDriver;
+
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![sample_local_agent_entry(app_types::LocalAgentKind::Background)],
+    });
+
+    // Drawer stays closed, yet the loading signal must still reach the core.
+    assert!(!session.local_agents_visible());
+    assert!(session.core.has_background_activity());
+    assert_eq!(session.core.background_activity_status_text().as_deref(), Some("Running 1 background task..."));
+
+    // Global loading reflects background work, but the turn-busy guard stays off.
+    assert!(TuiSessionDriver::has_status_spinner(&session));
+    assert!(!TuiSessionDriver::is_running_activity(&session));
+}
+
+#[test]
+fn background_activity_status_pluralizes_and_clears_with_entries() {
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![
+            sample_local_agent_entry_with_id("agent-1", "rust-engineer", app_types::LocalAgentKind::Background),
+            sample_local_agent_entry_with_id("exec-1", "cargo check", app_types::LocalAgentKind::ExecSession),
+        ],
+    });
+    assert_eq!(session.core.background_activity_status_text().as_deref(), Some("Running 2 background tasks..."));
+
+    session.handle_command(app_types::InlineCommand::SetLocalAgents { entries: vec![] });
+    assert!(!session.core.has_background_activity());
+    assert!(session.core.background_activity_status_text().is_none());
+}
+
+#[test]
+fn input_status_surfaces_background_activity_while_turn_is_idle() {
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents {
+        entries: vec![
+            sample_local_agent_entry_with_id("agent-1", "rust-engineer", app_types::LocalAgentKind::Background),
+            sample_local_agent_entry_with_id("exec-1", "cargo check", app_types::LocalAgentKind::ExecSession),
+        ],
+    });
+
+    let line = session.core.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let rendered = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert!(
+        rendered.contains("Running 2 background tasks"),
+        "input status must surface background activity with the drawer closed, got: {rendered:?}"
+    );
+}
+
+#[test]
+fn input_status_omits_background_activity_when_none_running() {
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents { entries: vec![] });
+
+    let rendered = session
+        .core
+        .render_input_status_line(VIEW_WIDTH)
+        .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect::<String>())
+        .unwrap_or_default();
+
+    assert!(
+        !rendered.contains("background task"),
+        "idle session must not claim background activity, got: {rendered:?}"
+    );
 }
 
 #[test]

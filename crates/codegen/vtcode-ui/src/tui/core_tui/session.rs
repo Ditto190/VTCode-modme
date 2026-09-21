@@ -330,6 +330,13 @@ pub struct Session {
     // --- PTY Session Management ---
     pub(crate) active_pty_sessions: Option<Arc<std::sync::atomic::AtomicUsize>>,
 
+    // --- Background Activity ---
+    /// Number of live background tasks (managed subagents and retained exec
+    /// sessions) surfaced by the most recent local-agents refresh. Drives the
+    /// global loading shimmer so background work is visible without opening
+    /// the drawer; it never feeds the turn-busy guards.
+    pub(crate) background_activity_count: usize,
+
     // --- Keybinding store ---
     bindings: BindingStore,
 

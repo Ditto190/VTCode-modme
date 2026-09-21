@@ -803,6 +803,19 @@ impl Session {
                 None => local_agents_hint,
             });
         }
+        // Background tasks are asynchronous, so they surface here (not in
+        // `status_left_text`) to keep turn-busy guards off while still driving
+        // the shared loading shimmer with a visible, shimmer-eligible status.
+        // While a turn or foreground command owns the status, skip it: that
+        // status already shimmers and adding a second "Running" is noise.
+        if !self.is_running_activity()
+            && let Some(background_status) = self.background_activity_status_text()
+        {
+            left = Some(match left {
+                Some(existing) => format!("{existing} · {background_status}"),
+                None => background_status,
+            });
+        }
 
         let right = match (right, self.vim_state.status_label()) {
             (Some(existing), Some(vim_label)) => Some(format!("{vim_label} · {existing}")),
@@ -945,11 +958,13 @@ impl Session {
 
     fn local_agents_input_status_hint(&self) -> Option<String> {
         if self.input_uses_shell_prefix() || !self.input_manager.content().trim().is_empty() {
-            return None;
+            // A foreground PTY keeps its background hint visible even with a
+            // non-empty composer so users can discover Ctrl+B mid-command.
+            return self.foreground_pty_background_hint().map(str::to_owned);
         }
 
         if !self.has_local_agents() {
-            return None;
+            return self.foreground_pty_background_hint().map(str::to_owned);
         }
 
         Some("↓ or Alt+S local agents · Ctrl+B background".to_string())

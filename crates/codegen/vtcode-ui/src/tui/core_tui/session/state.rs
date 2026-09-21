@@ -35,6 +35,7 @@ const ACTION_REQUIRED_STATUS_TEXT: &str = "Action required";
 const APPROVAL_REQUIRED_STATUS_TEXT: &str = "Approval required";
 const INPUT_REQUIRED_STATUS_TEXT: &str = "Input required";
 const ACTIVE_PTY_STATUS_TEXT: &str = "Running PTY command...";
+const FOREGROUND_PTY_BACKGROUND_HINT: &str = "Ctrl+B background";
 
 impl Session {
     /// Mark dirty after task-panel body content changed. Terminal-title progress
@@ -414,7 +415,7 @@ impl Session {
             self.mark_thinking_run_starts_dirty();
         }
         let shimmer_active = if self.appearance.should_animate_progress_status() {
-            self.is_shimmer_active()
+            self.is_shimmer_active() || self.background_status_shimmer_active()
         } else {
             false
         };
@@ -571,8 +572,44 @@ impl Session {
             .unwrap_or(0)
     }
 
+    pub(crate) fn has_active_foreground_pty(&self) -> bool {
+        self.active_pty_session_count() > 0
+    }
+
+    /// Record the number of live background tasks from the latest local-agents
+    /// refresh. Background work is asynchronous: it drives the global loading
+    /// shimmer but must never look like an in-flight turn, so this is kept out
+    /// of [`Self::is_running_activity`].
+    pub(crate) fn set_background_activity_count(&mut self, count: usize) {
+        if self.background_activity_count != count {
+            self.background_activity_count = count;
+            self.mark_dirty();
+        }
+    }
+
+    pub(crate) fn has_background_activity(&self) -> bool {
+        self.background_activity_count > 0
+    }
+
+    /// Input-status indicator while background tasks run. The wording contains
+    /// a shimmer needle (`running `) so [`status_requires_shimmer`] animates it
+    /// through the shared loading path.
+    pub(crate) fn background_activity_status_text(&self) -> Option<String> {
+        self.has_background_activity().then(|| {
+            format!(
+                "Running {} background task{}...",
+                self.background_activity_count,
+                if self.background_activity_count == 1 { "" } else { "s" }
+            )
+        })
+    }
+
+    pub(crate) fn foreground_pty_background_hint(&self) -> Option<&'static str> {
+        self.has_active_foreground_pty().then_some(FOREGROUND_PTY_BACKGROUND_HINT)
+    }
+
     fn active_pty_status_text(&self) -> Option<&'static str> {
-        (self.active_pty_session_count() > 0).then_some(ACTIVE_PTY_STATUS_TEXT)
+        self.has_active_foreground_pty().then_some(ACTIVE_PTY_STATUS_TEXT)
     }
 
     pub(crate) fn has_status_spinner(&self) -> bool {
@@ -592,6 +629,16 @@ impl Session {
 
     pub(crate) fn is_shimmer_active(&self) -> bool {
         self.has_status_spinner() || self.thinking_spinner.is_active
+    }
+
+    /// Whether live background tasks must keep the loading shimmer animating.
+    ///
+    /// Kept out of [`Self::is_shimmer_active`] so a long-lived background task
+    /// does not pin the cursor to steady mode; the tick handler ORs this with
+    /// the turn shimmer instead, and short-circuiting avoids updating the
+    /// shared shimmer phase twice in one tick.
+    pub(crate) fn background_status_shimmer_active(&self) -> bool {
+        self.has_background_activity()
     }
 
     pub(crate) fn use_steady_cursor(&self) -> bool {

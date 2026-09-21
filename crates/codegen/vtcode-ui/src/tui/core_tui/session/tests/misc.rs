@@ -308,6 +308,22 @@ fn active_pty_observer_drives_compact_loading_status() {
 }
 
 #[test]
+fn background_activity_animates_loading_shimmer_without_looking_busy() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    assert!(!session.background_status_shimmer_active());
+
+    session.set_background_activity_count(2);
+    assert!(session.has_background_activity());
+    assert!(session.background_status_shimmer_active(), "live background work must animate the loading shimmer");
+    assert!(!session.is_running_activity(), "background work must never register as an in-flight turn");
+    assert_eq!(session.background_activity_status_text().as_deref(), Some("Running 2 background tasks..."));
+
+    session.set_background_activity_count(0);
+    assert!(!session.background_status_shimmer_active());
+    assert!(session.background_activity_status_text().is_none());
+}
+
+#[test]
 fn active_pty_observer_overrides_idle_stage_status() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     let active_pty_sessions = Arc::new(AtomicUsize::new(1));

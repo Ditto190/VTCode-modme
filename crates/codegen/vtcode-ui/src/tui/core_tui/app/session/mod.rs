@@ -320,12 +320,15 @@ impl AppSession {
     }
 
     fn local_agents_loading_active(&self) -> bool {
-        self.local_agents_visible()
-            && self
-                .local_agents_state
-                .entries()
-                .iter()
-                .any(crate::tui::core_tui::types::LocalAgentEntry::is_loading)
+        self.local_agents_visible() && self.background_activity_active()
+    }
+
+    /// Whether any background task (managed subagent, background subprocess,
+    /// or retained exec session) is still running, independent of drawer
+    /// visibility. Background work is asynchronous, so it feeds the loading
+    /// shimmer and animation tick rate but never the turn-busy guards.
+    fn background_activity_active(&self) -> bool {
+        self.local_agents_state.loading_count() > 0
     }
 
     pub(crate) fn file_palette_visible(&self) -> bool {
@@ -1000,7 +1003,9 @@ impl AppSession {
                     .iter()
                     .any(|entry| entry.kind == crate::tui::core_tui::types::LocalAgentKind::Delegated);
                 let update = self.local_agents_state.set_entries(entries.clone());
+                let background_count = self.local_agents_state.loading_count();
                 self.core.set_local_agents(entries);
+                self.core.set_background_activity_count(background_count);
                 if update.has_new_delegated_entries && self.should_auto_open_local_agents() {
                     self.ensure_inline_lists_visible_for_trigger();
                     self.open_local_agents_drawer(true);
@@ -1335,11 +1340,16 @@ impl TuiSessionDriver for AppSession {
     }
 
     fn is_running_activity(&self) -> bool {
-        self.core.is_running_activity() || self.local_agents_loading_active()
+        // Turn-scoped only. Background tasks and drawer previews are
+        // asynchronous, so they must not lock mode switches, block slash
+        // commands, or convert plain submissions into queued/steered input.
+        self.core.is_running_activity()
     }
 
     fn has_status_spinner(&self) -> bool {
-        self.core.has_status_spinner() || self.local_agents_loading_active()
+        // Drives the animation tick rate and the drawer row shimmer, so it
+        // includes background activity even when the drawer is closed.
+        self.core.has_status_spinner() || self.background_activity_active()
     }
 
     fn thinking_spinner_active(&self) -> bool {

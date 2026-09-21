@@ -37,6 +37,11 @@ use vtcode_config::subagents::SUBAGENT_HARD_CONCURRENCY_LIMIT;
 )]
 use super::*;
 
+/// Poll cadence for [`SubagentController::wait_for_background`]. Background
+/// records have no completion `Notify` (unlike delegated child records), so
+/// the wait refreshes on a bounded interval instead of an event.
+const BACKGROUND_WAIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
 impl SubagentController {
     /// Returns status entries for all tracked background subprocesses.
     pub async fn background_status_entries(&self) -> Vec<BackgroundSubprocessEntry> {
@@ -351,6 +356,61 @@ impl SubagentController {
         } else {
             record.status = BackgroundSubprocessStatus::Stopped;
             record.error = None;
+        }
+    }
+
+    /// Blocks until one of the target background subprocesses reaches a
+    /// terminal state (`Stopped`/`Error`) or the timeout expires.
+    ///
+    /// This is the background counterpart to the delegated
+    /// [`SubagentController::wait`]: managed subprocesses previously had no
+    /// model-visible wait path, so the main orchestrator could only observe
+    /// completion via manual `/subprocesses` polling or the Local Agents
+    /// drawer. Unknown ids resolve to `Ok(None)` (fail-closed) rather than
+    /// an error so the unified `agent action=wait` dispatcher can race this
+    /// alongside the delegated wait without hallucinating completion.
+    pub async fn wait_for_background(
+        &self,
+        targets: &[String],
+        timeout_ms: Option<u64>,
+    ) -> Result<Option<BackgroundSubprocessEntry>> {
+        if targets.is_empty() {
+            return Ok(None);
+        }
+        let _ = self.refresh_background_processes().await?;
+        for target in targets {
+            if let Ok(entry) = self.background_status_for(target).await
+                && matches!(entry.status, BackgroundSubprocessStatus::Stopped | BackgroundSubprocessStatus::Error)
+            {
+                return Ok(Some(entry));
+            }
+        }
+        let known = {
+            let state = self.state.read().await;
+            targets.iter().any(|target| state.background_children.contains_key(target))
+        };
+        if !known {
+            return Ok(None);
+        }
+
+        let timeout = std::time::Duration::from_millis(
+            timeout_ms.unwrap_or_else(|| self.config.vt_cfg.subagents.default_timeout_seconds.saturating_mul(1000)),
+        );
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            tokio::time::sleep(remaining.min(BACKGROUND_WAIT_POLL_INTERVAL)).await;
+            let _ = self.refresh_background_processes().await?;
+            for target in targets {
+                if let Ok(entry) = self.background_status_for(target).await
+                    && matches!(entry.status, BackgroundSubprocessStatus::Stopped | BackgroundSubprocessStatus::Error)
+                {
+                    return Ok(Some(entry));
+                }
+            }
         }
     }
 

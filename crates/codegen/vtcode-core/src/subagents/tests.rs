@@ -86,6 +86,42 @@ fn test_child_record(
     }
 }
 
+fn test_background_record(
+    spec: &SubagentSpec,
+    id: &str,
+    status: BackgroundSubprocessStatus,
+    desired_enabled: bool,
+    exec_session_id: &str,
+) -> BackgroundRecord {
+    let now = Utc::now();
+    BackgroundRecord {
+        id: id.to_string(),
+        agent_name: spec.name.clone(),
+        display_label: subagent_display_label(spec),
+        description: spec.description.clone(),
+        source: spec.source.label(),
+        color: spec.color.clone(),
+        session_id: "session-background-demo".to_string(),
+        exec_session_id: exec_session_id.to_string(),
+        desired_enabled,
+        status,
+        created_at: now,
+        updated_at: now,
+        started_at: Some(now),
+        ended_at: None,
+        pid: Some(42),
+        prompt: "Report readiness once.".to_string(),
+        summary: None,
+        error: None,
+        archive_path: None,
+        transcript_path: None,
+        max_turns: Some(4),
+        model_override: None,
+        reasoning_override: None,
+        restart_attempts: 0,
+    }
+}
+
 fn write_test_background_subagent(workspace_root: &std::path::Path) {
     let agent_dir = workspace_root.join(".vtcode/agents");
     std::fs::create_dir_all(&agent_dir).expect("agent dir");
@@ -1487,6 +1523,152 @@ async fn spawn_background_subprocess_rejects_conflicting_active_record_settings(
 
     assert!(err.to_string().contains("different prompt"));
     assert!(err.to_string().contains("Stop or restart"));
+}
+
+#[tokio::test]
+async fn wait_for_background_returns_stopped_record_immediately() {
+    let temp = TempDir::new().expect("tempdir");
+    write_test_background_subagent(temp.path());
+    let mut cfg = VTCodeConfig::default();
+    cfg.subagents.background.enabled = true;
+    let controller = SubagentController::new(test_controller_config(temp.path().to_path_buf(), cfg))
+        .await
+        .expect("controller");
+
+    let spec = controller.resolve_requested_spec(Some("background-demo")).await.expect("spec");
+    let record_id = background_record_id(spec.name.as_str());
+    {
+        let mut state = controller.state.write().await;
+        state.background_children.insert(
+            record_id.clone(),
+            test_background_record(&spec, &record_id, BackgroundSubprocessStatus::Stopped, false, ""),
+        );
+    }
+
+    let entry = controller
+        .wait_for_background(std::slice::from_ref(&record_id), Some(50))
+        .await
+        .expect("wait")
+        .expect("stopped record should complete immediately");
+    assert_eq!(entry.id, record_id);
+    assert_eq!(entry.status, BackgroundSubprocessStatus::Stopped);
+}
+
+#[tokio::test]
+async fn wait_for_background_times_out_on_running_record() {
+    let temp = TempDir::new().expect("tempdir");
+    write_test_background_subagent(temp.path());
+    let mut cfg = VTCodeConfig::default();
+    cfg.subagents.background.enabled = true;
+    let controller = SubagentController::new(test_controller_config(temp.path().to_path_buf(), cfg))
+        .await
+        .expect("controller");
+
+    let spec = controller.resolve_requested_spec(Some("background-demo")).await.expect("spec");
+    let record_id = background_record_id(spec.name.as_str());
+    {
+        let mut state = controller.state.write().await;
+        state.background_children.insert(
+            record_id.clone(),
+            test_background_record(
+                &spec,
+                &record_id,
+                BackgroundSubprocessStatus::Running,
+                true,
+                "exec-session-missing",
+            ),
+        );
+    }
+
+    let entry = controller
+        .wait_for_background(std::slice::from_ref(&record_id), Some(50))
+        .await
+        .expect("wait");
+    assert!(entry.is_none(), "running record should time out, not hallucinate completion");
+}
+
+#[tokio::test]
+async fn wait_for_background_is_fail_closed_for_unknown_and_empty_targets() {
+    let temp = TempDir::new().expect("tempdir");
+    let controller =
+        SubagentController::new(test_controller_config(temp.path().to_path_buf(), VTCodeConfig::default()))
+            .await
+            .expect("controller");
+
+    assert!(
+        controller
+            .wait_for_background(&["background-missing".to_string()], Some(10))
+            .await
+            .expect("wait")
+            .is_none()
+    );
+    assert!(controller.wait_for_background(&[], Some(10)).await.expect("wait").is_none());
+}
+
+/// The unified `agent wait` surface must return a settled target in either
+/// scope promptly, instead of blocking out a still-running target in the
+/// other. A running delegated child plus an already-stopped background
+/// subprocess must resolve on the background entry well before the child's
+/// (5s) timeout would expire.
+#[tokio::test]
+async fn agent_wait_returns_settled_background_entry_without_waiting_out_delegated_child() {
+    let temp = TempDir::new().expect("tempdir");
+    write_test_background_subagent(temp.path());
+    let mut cfg = VTCodeConfig::default();
+    cfg.subagents.background.enabled = true;
+    let controller = Arc::new(
+        SubagentController::new(test_controller_config(temp.path().to_path_buf(), cfg))
+            .await
+            .expect("controller"),
+    );
+
+    let spec = controller.resolve_requested_spec(Some("background-demo")).await.expect("spec");
+    let background_id = background_record_id(spec.name.as_str());
+    let delegated_spec = vtcode_config::builtin_subagents()
+        .into_iter()
+        .find(|spec| spec.name == "default")
+        .expect("default");
+    {
+        let mut state = controller.state.write().await;
+        state.children.insert(
+            "delegated-running".to_string(),
+            test_child_record(
+                "delegated-running",
+                "session-delegated",
+                "parent-session",
+                &delegated_spec,
+                SubagentStatus::Running,
+                1,
+                None,
+            ),
+        );
+        state.background_children.insert(
+            background_id.clone(),
+            test_background_record(&spec, &background_id, BackgroundSubprocessStatus::Stopped, false, ""),
+        );
+    }
+
+    let registry = crate::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
+    registry.set_subagent_controller(Arc::clone(&controller));
+
+    let started = std::time::Instant::now();
+    let response = registry
+        .agent_executor(serde_json::json!({
+            "action": "wait",
+            "ids": ["delegated-running", background_id],
+            "timeout_ms": 5_000
+        }))
+        .await
+        .expect("agent wait");
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "settled background target must not wait out the delegated child: {elapsed:?}"
+    );
+    assert_eq!(response["completed"], serde_json::json!(true));
+    assert_eq!(response["entry"]["id"], serde_json::json!(background_id));
+    assert_eq!(response["entry"]["status"], serde_json::json!("stopped"));
 }
 
 #[tokio::test]
