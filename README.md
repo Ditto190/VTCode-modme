@@ -60,9 +60,9 @@
 VT Code is an open-source terminal coding agent written in Rust: one static
 binary for quick interactive sessions and long-running autonomous work alike,
 no IDE required, no context left behind. It is a **harness, not just an LLM
-wrapper**: the model reasons; the runtime supplies everything else: tools,
-context, sandboxing, state, and **verification**: turning raw model output
-into safe, reviewable progress, entirely in your terminal.
+wrapper**: the model reasons, and the runtime supplies tools, context,
+sandboxing, state, and **verification** — turning raw model output into safe,
+reviewable progress.
 
 The full documentation catalog lives in the
 [docs overview](./docs/README.md).
@@ -86,10 +86,8 @@ The full documentation catalog lives in the
 
 ## Why VT Code
 
-VT Code is built for work that takes more than one prompt. The model reasons;
-the **harness** supplies everything else — context, tools, safeguards, state,
-and verification — so long tasks stay dependable and reviewable from the first
-prompt to the final diff.
+VT Code is built for work that takes more than one prompt: long tasks stay
+dependable and reviewable from the first prompt to the final diff.
 
 In practice, that means:
 
@@ -155,19 +153,12 @@ graph LR
     LOOP <--> MODELS
 ```
 
-- **Entry points:** the TUI, headless `exec`/`ask`, cron schedules, and
-  editors over ACP all drive the same loop.
-- **Harness:** context assembly, policy checks, and sandboxing wrap every
-  model turn; the `ThreadEvent` log records everything for replay and
-  rollback.
-- **Extensions and models:** attach without patching the core; swap providers
-  without touching your workflow.
-
-For contributors, the layers map to workspace crates: entry points live in
-`vtcode` (`src/`) and `vtcode-acp`; the harness is `vtcode-core` with
-`vtcode-safety` for policy and sandboxing; the `ThreadEvent` contract is
-`vtcode-exec-events`; extensions are `vtcode-mcp`, `vtcode-skills`, and
-`vtcode-agent-plugins`; provider clients live in `vtcode-llm`.
+The TUI, headless `exec`/`ask`, cron schedules, and editors over ACP all drive
+the same loop. For contributors, the layers map to workspace crates: entry
+points in `vtcode` (`src/`) and `vtcode-acp`; the harness in `vtcode-core`
+with `vtcode-safety` for policy and sandboxing; the `ThreadEvent` contract in
+`vtcode-exec-events`; extensions in `vtcode-mcp`, `vtcode-skills`, and
+`vtcode-agent-plugins`; provider clients in `vtcode-llm`.
 
 For layer-by-layer details, extension seams, and internal composition rules,
 see the [Architecture guide](./docs/ARCHITECTURE.md).
@@ -178,7 +169,7 @@ see the [Architecture guide](./docs/ARCHITECTURE.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
-# or: brew trust vinhnx/tap && brew install vinhnx/tap/vtcode
+# or: brew install vinhnx/tap/vtcode
 # or: cargo install vtcode
 ```
 
@@ -255,7 +246,8 @@ A second tier handles session lifecycle and day-to-day operations:
 | `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots                                             |
 | `vtcode tool-policy`                 | Allow or deny specific tools per workspace                                            |
 | `vtcode trajectory`                  | Pretty-print run logs for debugging and audits                                        |
-| `vtcode skills` / `vtcode plugins` / `vtcode mcp` | Manage skills, agent plugins, and MCP servers                            |
+| `vtcode skills` / `vtcode plugins`   | Manage skills and agent plugins                                                       |
+| `vtcode mcp`                         | Connect and manage MCP servers                                                        |
 
 `vtcode analyze`, `vtcode check`, `vtcode schema tools`, `vtcode dependencies`
 (alias `deps`), `vtcode config`, `vtcode man`, and `vtcode update` round out
@@ -279,9 +271,8 @@ vtcode continue --session-id <id>
 vtcode trajectory
 ```
 
-Headless `exec` usage is covered in the
-[exec mode guide](./docs/user-guide/exec-mode.md); durable cron schedules in
-the [scheduled tasks guide](./docs/user-guide/scheduled-tasks.md).
+Headless `exec` usage: [exec mode guide](./docs/user-guide/exec-mode.md).
+Durable cron schedules: [scheduled tasks guide](./docs/user-guide/scheduled-tasks.md).
 
 ## Documentation
 
