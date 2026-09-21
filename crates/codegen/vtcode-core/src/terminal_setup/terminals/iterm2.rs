@@ -12,10 +12,8 @@ use crate::terminal_setup::detector::TerminalType;
 use crate::terminal_setup::features::multiline;
 use anyhow::{Context, Result};
 use vtcode_commons::VtCodePaths;
-use vtcode_commons::ansi_codes::set_iterm2_profile;
 use vtcode_commons::terminal_detection::{
-    ITERM2_DYNAMIC_PROFILE_FILENAME, ITERM2_ICON_MODE_CUSTOM, ITERM2_PROFILE_NAME, installed_iterm2_profile_path,
-    iterm2_dynamic_profiles_dir, should_apply_iterm2_profile,
+    ITERM2_DYNAMIC_PROFILE_FILENAME, ITERM2_ICON_MODE_CUSTOM, ITERM2_PROFILE_NAME, iterm2_dynamic_profiles_dir,
 };
 
 /// Generate iTerm2 setup instructions (manual configuration required)
@@ -136,11 +134,6 @@ pub fn installed_icon_path(data_dir: &Path) -> PathBuf {
     data_dir.join("icons").join(PROFILE_ICON_FILENAME)
 }
 
-/// Whether the shipped profile is installed for `home`.
-pub fn profile_icon_installed(home: &Path) -> bool {
-    installed_iterm2_profile_path(home).exists()
-}
-
 /// Install the VT Code iTerm2 profile icon (macOS only, idempotent).
 ///
 /// Writes only VT Code-owned files: the artwork under the data root and
@@ -170,21 +163,6 @@ pub fn default_install_paths() -> Result<(PathBuf, PathBuf)> {
     let home = dirs::home_dir().context("failed to determine home directory")?;
     let data_dir = VtCodePaths::resolve()?.data_dir().to_path_buf();
     Ok((home, data_dir))
-}
-
-/// One-shot profile-switch sequence for an installed profile.
-pub fn apply_profile_icon_sequence() -> String {
-    set_iterm2_profile(ITERM2_PROFILE_NAME)
-}
-
-/// Environment plus install gate evaluated against the live process.
-pub fn should_apply_profile_icon() -> bool {
-    let iterm_session = std::env::var("ITERM_SESSION_ID").is_ok();
-    let tmux_session = std::env::var("TMUX").is_ok();
-    let installed = default_install_paths()
-        .map(|(home, _)| profile_icon_installed(&home))
-        .unwrap_or(false);
-    should_apply_iterm2_profile(iterm_session, tmux_session, installed)
 }
 
 /// Guidance lines pointing at the automatic installer and the manual fallback.
@@ -282,10 +260,5 @@ mod tests {
     fn profile_icon_instructions_point_at_installer() {
         let lines = profile_icon_instructions();
         assert!(lines.iter().any(|line| line.contains("install-iterm2-icon")));
-    }
-
-    #[test]
-    fn apply_sequence_targets_shipped_profile() {
-        assert_eq!(apply_profile_icon_sequence(), "\u{1b}]1337;SetProfile=VT Code\u{7}");
     }
 }

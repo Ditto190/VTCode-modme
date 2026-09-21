@@ -6,9 +6,7 @@ use crate::tui::config::constants::ui;
 use super::Session;
 
 use vtcode_commons::ansi_codes::{set_iterm2_profile, set_terminal_title_and_icon};
-use vtcode_commons::terminal_detection::{
-    ITERM2_PROFILE_NAME, installed_iterm2_profile_path, should_apply_iterm2_profile,
-};
+use vtcode_commons::terminal_detection::{ITERM2_PROFILE_NAME, should_apply_iterm2_profile_now};
 
 const MAX_TITLE_LENGTH: usize = 128;
 
@@ -270,14 +268,7 @@ pub(crate) fn apply_iterm2_profile_once() {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let iterm_session = std::env::var("ITERM_SESSION_ID").is_ok();
-    let tmux_session = std::env::var("TMUX").is_ok();
-    let installed = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .map(|home| installed_iterm2_profile_path(&home))
-        .map(|path| path.exists())
-        .unwrap_or(false);
-    if !should_apply_iterm2_profile(iterm_session, tmux_session, installed) {
+    if !should_apply_iterm2_profile_now() {
         return;
     }
     if let Err(error) = write_iterm2_profile_switch() {

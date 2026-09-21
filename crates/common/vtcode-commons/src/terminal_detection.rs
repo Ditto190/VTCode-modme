@@ -45,6 +45,21 @@ pub fn should_apply_iterm2_profile(iterm_session: bool, tmux_session: bool, prof
     iterm_session && !tmux_session && profile_installed
 }
 
+/// Environment plus install gate evaluated against the live process.
+///
+/// Combines [`should_apply_iterm2_profile`] with `ITERM_SESSION_ID` /
+/// `TMUX` detection and the installed-profile check, so all callers share
+/// one gating decision.
+pub fn should_apply_iterm2_profile_now() -> bool {
+    let iterm_session = env::var("ITERM_SESSION_ID").is_ok();
+    let tmux_session = env::var("TMUX").is_ok();
+    let installed = dirs::home_dir()
+        .map(|home| installed_iterm2_profile_path(&home))
+        .map(|path| path.exists())
+        .unwrap_or(false);
+    should_apply_iterm2_profile(iterm_session, tmux_session, installed)
+}
+
 /// Supported terminal emulators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalType {

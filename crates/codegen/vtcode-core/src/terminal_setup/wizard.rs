@@ -234,13 +234,17 @@ fn guidance_only_messages(terminal_type: TerminalType) -> Vec<String> {
             "Configure Shift+Enter or newline shortcuts through X resources or your window manager.".to_string(),
             "Use your terminal bell settings if you want completion alerts.".to_string(),
         ],
-        TerminalType::WindowsTerminal => vec![
-            "VT Code does not currently advertise guided setup for Windows Terminal.".to_string(),
-            "Configure Shift+Enter or multiline bindings in Windows Terminal settings if you need them.".to_string(),
-            "Use the terminal bell or profile alert settings for notifications.".to_string(),
-            "For a VT Code tab icon, add an \"icon\" entry to a settings.json profile (see resources/icons/README.md)."
-                .to_string(),
-        ],
+        TerminalType::WindowsTerminal => {
+            let mut lines = vec![
+                "VT Code does not currently advertise guided setup for Windows Terminal.".to_string(),
+                "Configure Shift+Enter or multiline bindings in Windows Terminal settings if you need them."
+                    .to_string(),
+                "Use the terminal bell or profile alert settings for notifications.".to_string(),
+                String::new(),
+            ];
+            lines.extend(crate::terminal_setup::terminals::windows_terminal::profile_icon_instructions());
+            lines
+        }
         TerminalType::Hyper => vec![
             "VT Code does not currently advertise guided setup for Hyper.".to_string(),
             "Configure multiline bindings or plugins directly in `.hyper.js`.".to_string(),
@@ -300,6 +304,8 @@ mod tests {
     #[test]
     fn windows_terminal_guidance_mentions_profile_icon() {
         let lines = guidance_only_messages(TerminalType::WindowsTerminal);
-        assert!(lines.iter().any(|line| line.contains("icon")));
+        let joined = lines.join("\n");
+        assert!(joined.contains("icon"));
+        assert!(joined.contains(".ico"));
     }
 }
