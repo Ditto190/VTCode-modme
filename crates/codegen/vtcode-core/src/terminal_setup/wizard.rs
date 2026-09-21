@@ -306,6 +306,6 @@ mod tests {
         let lines = guidance_only_messages(TerminalType::WindowsTerminal);
         let joined = lines.join("\n");
         assert!(joined.contains("icon"));
-        assert!(joined.contains(".ico"));
+        assert!(joined.contains(".png"));
     }
 }

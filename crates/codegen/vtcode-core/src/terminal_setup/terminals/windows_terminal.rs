@@ -80,12 +80,12 @@ pub fn profile_icon_instructions() -> Vec<String> {
     vec![
         "TAB ICON (profile image):".to_string(),
         "1. Open Settings (Ctrl+,) → Open JSON file.".to_string(),
-        "2. Add a profile entry (replace the icon path with your copy of resources/icons/vtcode-profile-180.ico):"
+        "2. Add a profile entry (replace the icon path with your copy of resources/icons/vtcode-profile-180.png):"
             .to_string(),
         "{".to_string(),
         "  \"name\": \"VT Code\",".to_string(),
         "  \"commandline\": \"vtcode\",".to_string(),
-        "  \"icon\": \"C:\\\\Tools\\\\vtcode-profile-180.ico\"".to_string(),
+        "  \"icon\": \"C:\\\\Tools\\\\vtcode-profile-180.png\"".to_string(),
         "}".to_string(),
     ]
 }
@@ -114,7 +114,7 @@ mod tests {
         let lines = profile_icon_instructions();
         let joined = lines.join("\n");
         assert!(joined.contains("\"icon\""));
-        assert!(joined.contains(".ico"));
+        assert!(joined.contains(".png"));
         assert!(joined.contains("VT Code"));
     }
 }
