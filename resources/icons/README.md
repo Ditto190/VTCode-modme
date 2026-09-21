@@ -24,7 +24,14 @@ distinguish icon from title, instead of relying on `OSC 0` aliasing.
 Text `OSC 1`/`OSC 2` works everywhere. For a graphical icon, configure
 once per terminal:
 
-- iTerm2: Preferences > Profiles > General > Icon, choose
+- iTerm2 (automatic): run `/terminal-setup install-iterm2-icon` inside
+  VT Code. It installs a `VT Code` dynamic profile (custom icon +
+  auto-switch while `vtcode` runs) under
+  `~/Library/Application Support/iTerm2/DynamicProfiles/vtcode.json`
+  with artwork in the VT Code data dir. New tabs pick it up immediately;
+  deleting `vtcode.json` uninstalls. VT Code switches to the profile
+  once at TUI startup, only when the file exists.
+- iTerm2 (manual): Settings > Profiles > General > Icon, choose
   `vtcode-profile-120.png` (Retina) or `vtcode-profile-32.png`.
 - Windows Terminal: set the profile `"icon"` to
   `resources/icons/vtcode-profile-180.ico` (or the `-180.png`).

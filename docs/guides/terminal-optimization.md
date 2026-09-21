@@ -45,6 +45,9 @@ For a graphical profile icon, configure it once in the terminal app using
 the bundled assets in `resources/icons/` (see its `README.md`):
 `vtcode-profile-32.png` for tabs, `vtcode-profile-120.png` for HiDPI
 profiles, and `vtcode-profile-180.ico`/`.png` for Windows Terminal.
+On iTerm2, `/terminal-setup install-iterm2-icon` installs a `VT Code`
+dynamic profile automatically; VT Code switches to it once at startup
+whenever the profile file exists.
 
 ## Line Break Options
 

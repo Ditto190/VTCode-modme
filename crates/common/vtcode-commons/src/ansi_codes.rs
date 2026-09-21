@@ -728,6 +728,18 @@ pub fn set_terminal_title_and_icon(title: &str) -> String {
     format!("{}{}", set_icon_name(title), set_window_title(title))
 }
 
+/// Build an iTerm2 proprietary sequence that switches the current session
+/// to a named profile (`OSC 1337 ; SetProfile=`).
+///
+/// This is iTerm2-only: other terminals ignore the proprietary `1337`
+/// sequence. It is the only programmatic way to change the graphical tab
+/// icon, which iTerm2 takes from the session profile (no escape sequence
+/// can set profile artwork directly).
+#[inline]
+pub fn set_iterm2_profile(profile_name: &str) -> String {
+    format!("{OSC}1337;SetProfile={profile_name}{BEL}")
+}
+
 /// Build an OSC 8 hyperlink open sequence
 #[inline]
 pub fn hyperlink_open(url: &str) -> String {
@@ -767,5 +779,11 @@ mod tests {
 
         let cleared = set_terminal_title_and_icon("");
         assert_eq!(cleared, "\x1b]1;\x07\x1b]2;\x07");
+    }
+
+    #[test]
+    fn iterm2_profile_switch_uses_proprietary_sequence() {
+        assert_eq!(set_iterm2_profile("VT Code"), "\x1b]1337;SetProfile=VT Code\x07");
+        assert_eq!(set_iterm2_profile("Default"), "\x1b]1337;SetProfile=Default\x07");
     }
 }

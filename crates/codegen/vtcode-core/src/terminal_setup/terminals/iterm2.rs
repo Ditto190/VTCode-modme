@@ -1,11 +1,22 @@
 //! iTerm2 configuration instruction generator.
 //!
-//! iTerm2 uses plist files which are complex to modify programmatically.
-//! This module generates manual setup instructions instead.
+//! Most iTerm2 settings live in plist files, which are complex to modify
+//! programmatically, so this module generates manual setup instructions for
+//! them. The tab icon is the exception: iTerm2 loads Dynamic Profiles from
+//! plain JSON files with no restart, so the icon profile below is fully
+//! installable from code.
+
+use std::path::{Path, PathBuf};
 
 use crate::terminal_setup::detector::TerminalType;
 use crate::terminal_setup::features::multiline;
-use anyhow::Result;
+use anyhow::{Context, Result};
+use vtcode_commons::VtCodePaths;
+use vtcode_commons::ansi_codes::set_iterm2_profile;
+use vtcode_commons::terminal_detection::{
+    ITERM2_DYNAMIC_PROFILE_FILENAME, ITERM2_ICON_MODE_CUSTOM, ITERM2_PROFILE_NAME, installed_iterm2_profile_path,
+    iterm2_dynamic_profiles_dir, should_apply_iterm2_profile,
+};
 
 /// Generate iTerm2 setup instructions (manual configuration required)
 pub fn generate_config(features: &[crate::terminal_setup::detector::TerminalFeature]) -> Result<String> {
@@ -81,6 +92,135 @@ pub fn generate_config(features: &[crate::terminal_setup::detector::TerminalFeat
     Ok(instructions.join("\n"))
 }
 
+/// Stable identity of the shipped iTerm2 profile so reinstalls overwrite
+/// instead of duplicating it.
+pub const PROFILE_GUID: &str = "1FC21C70-F2B1-4F0F-BB03-D1AE12EF900E";
+
+/// Filename of the installed profile artwork under the data root.
+pub const PROFILE_ICON_FILENAME: &str = "vtcode-profile-120.png";
+
+/// Embedded 120px profile artwork so installed binaries work without a
+/// repo checkout.
+const PROFILE_ICON_BYTES: &[u8] = include_bytes!("../../../../../../resources/icons/vtcode-profile-120.png");
+
+/// Outcome of [`install_profile_icon`].
+pub struct ProfileIconInstallReport {
+    /// Dynamic-profile JSON that iTerm2 loads live.
+    pub profile_path: PathBuf,
+    /// Installed artwork referenced by the profile.
+    pub icon_path: PathBuf,
+}
+
+/// Render the dynamic-profile JSON pointing at an absolute icon path.
+///
+/// Unspecified attributes inherit live from the default profile, so
+/// switching to this profile changes only the tab icon. The
+/// `Automatic Profile Switching` rule is best-effort (unknown keys are
+/// ignored): where honored, the session reverts automatically when the
+/// foreground job stops matching.
+pub fn dynamic_profile_json(icon_path: &Path) -> Result<String> {
+    let document = serde_json::json!({
+        "Profiles": [{
+            "Name": ITERM2_PROFILE_NAME,
+            "Guid": PROFILE_GUID,
+            "Icon": ITERM2_ICON_MODE_CUSTOM,
+            "Custom Icon Path": icon_path.to_string_lossy(),
+            "Automatic Profile Switching": ["&vtcode"],
+        }],
+    });
+    serde_json::to_string_pretty(&document).context("failed to serialize iTerm2 dynamic profile")
+}
+
+/// Absolute destination of the installed icon under a data root.
+pub fn installed_icon_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("icons").join(PROFILE_ICON_FILENAME)
+}
+
+/// Whether the shipped profile is installed for `home`.
+pub fn profile_icon_installed(home: &Path) -> bool {
+    installed_iterm2_profile_path(home).exists()
+}
+
+/// Install the VT Code iTerm2 profile icon (macOS only, idempotent).
+///
+/// Writes only VT Code-owned files: the artwork under the data root and
+/// `vtcode.json` under iTerm2's DynamicProfiles directory. Existing
+/// profiles are never modified; deleting `vtcode.json` uninstalls.
+pub fn install_profile_icon(home: &Path, data_dir: &Path) -> Result<ProfileIconInstallReport> {
+    if !cfg!(target_os = "macos") {
+        anyhow::bail!("iTerm2 profile icons are only available on macOS");
+    }
+    let icon_path = installed_icon_path(data_dir);
+    if let Some(parent) = icon_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create icon directory {}", parent.display()))?;
+    }
+    std::fs::write(&icon_path, PROFILE_ICON_BYTES)
+        .with_context(|| format!("failed to write icon {}", icon_path.display()))?;
+    let profiles_dir = iterm2_dynamic_profiles_dir(home);
+    std::fs::create_dir_all(&profiles_dir).with_context(|| format!("failed to create {}", profiles_dir.display()))?;
+    let profile_path = profiles_dir.join(ITERM2_DYNAMIC_PROFILE_FILENAME);
+    let json = dynamic_profile_json(&icon_path)?;
+    std::fs::write(&profile_path, json).with_context(|| format!("failed to write {}", profile_path.display()))?;
+    Ok(ProfileIconInstallReport { profile_path, icon_path })
+}
+
+/// Resolve default install locations: home directory and canonical data root.
+pub fn default_install_paths() -> Result<(PathBuf, PathBuf)> {
+    let home = dirs::home_dir().context("failed to determine home directory")?;
+    let data_dir = VtCodePaths::resolve()?.data_dir().to_path_buf();
+    Ok((home, data_dir))
+}
+
+/// One-shot profile-switch sequence for an installed profile.
+pub fn apply_profile_icon_sequence() -> String {
+    set_iterm2_profile(ITERM2_PROFILE_NAME)
+}
+
+/// Environment plus install gate evaluated against the live process.
+pub fn should_apply_profile_icon() -> bool {
+    let iterm_session = std::env::var("ITERM_SESSION_ID").is_ok();
+    let tmux_session = std::env::var("TMUX").is_ok();
+    let installed = default_install_paths()
+        .map(|(home, _)| profile_icon_installed(&home))
+        .unwrap_or(false);
+    should_apply_iterm2_profile(iterm_session, tmux_session, installed)
+}
+
+/// Guidance lines pointing at the automatic installer and the manual fallback.
+pub fn profile_icon_instructions() -> Vec<String> {
+    vec![
+        "TAB ICON (profile image):".to_string(),
+        "1. Run `/terminal-setup install-iterm2-icon` to install the VT Code tab icon automatically.".to_string(),
+        "2. Or set it manually: Settings → Profiles → General → Icon → Custom, then pick a PNG from resources/icons/."
+            .to_string(),
+    ]
+}
+
+/// Run the non-interactive profile-icon install with progress output.
+///
+/// Fails closed outside iTerm2 or off macOS; never touches existing profiles.
+pub fn run_profile_icon_install(renderer: &mut crate::utils::ansi::AnsiRenderer) -> Result<()> {
+    use crate::terminal_setup::detector::TerminalType;
+    use crate::utils::ansi::MessageStyle;
+
+    let terminal = TerminalType::detect()?;
+    if !matches!(terminal, TerminalType::ITerm2) {
+        renderer.line(MessageStyle::Error, &format!("This installer needs iTerm2 (detected {}).", terminal.name()))?;
+        return Ok(());
+    }
+    let (home, data_dir) = default_install_paths()?;
+    renderer.line(MessageStyle::Info, "Installing VT Code iTerm2 tab icon...")?;
+    let report = install_profile_icon(&home, &data_dir)?;
+    renderer.line(MessageStyle::Status, &format!("✓ Profile written: {}", report.profile_path.display()))?;
+    renderer.line(MessageStyle::Status, &format!("✓ Icon installed: {}", report.icon_path.display()))?;
+    renderer.line(
+        MessageStyle::Info,
+        "Open a new iTerm2 tab so it picks up the profile; the logo replaces the generic tab glyph while VT Code runs.",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +234,58 @@ mod tests {
         assert!(instructions.contains("Preferences"));
         assert!(instructions.contains("MULTILINE"));
         assert!(instructions.contains("COPY/PASTE"));
+    }
+
+    #[test]
+    fn dynamic_profile_json_points_at_given_icon() {
+        let first = dynamic_profile_json(Path::new("/data/vtcode/icons/vtcode-profile-120.png")).unwrap();
+        let second = dynamic_profile_json(Path::new("/other/icons/vtcode-profile-120.png")).unwrap();
+        assert_ne!(first, second);
+
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+        let profile = &value["Profiles"][0];
+        assert_eq!(profile["Name"], ITERM2_PROFILE_NAME);
+        assert_eq!(profile["Guid"], PROFILE_GUID);
+        assert_eq!(profile["Icon"], ITERM2_ICON_MODE_CUSTOM);
+        assert_eq!(profile["Custom Icon Path"], "/data/vtcode/icons/vtcode-profile-120.png");
+        assert!(
+            profile["Automatic Profile Switching"]
+                .as_array()
+                .is_some_and(|rules| rules.iter().any(|rule| rule == "&vtcode"))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_profile_icon_writes_artwork_and_profile() {
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+
+        let first = install_profile_icon(home.path(), data.path()).unwrap();
+        assert!(first.profile_path.exists());
+        assert!(first.icon_path.exists());
+        assert_eq!(std::fs::read(&first.icon_path).unwrap(), PROFILE_ICON_BYTES);
+
+        let stored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&first.profile_path).unwrap()).unwrap();
+        assert_eq!(
+            stored["Profiles"][0]["Custom Icon Path"].as_str().unwrap().to_string(),
+            first.icon_path.to_string_lossy().into_owned()
+        );
+
+        let second = install_profile_icon(home.path(), data.path()).unwrap();
+        assert_eq!(second.profile_path, first.profile_path);
+        assert_eq!(second.icon_path, first.icon_path);
+    }
+
+    #[test]
+    fn profile_icon_instructions_point_at_installer() {
+        let lines = profile_icon_instructions();
+        assert!(lines.iter().any(|line| line.contains("install-iterm2-icon")));
+    }
+
+    #[test]
+    fn apply_sequence_targets_shipped_profile() {
+        assert_eq!(apply_profile_icon_sequence(), "\u{1b}]1337;SetProfile=VT Code\u{7}");
     }
 }

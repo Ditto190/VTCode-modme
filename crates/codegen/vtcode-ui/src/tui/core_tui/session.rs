@@ -75,7 +75,7 @@ pub(crate) mod reverse_search;
 mod spinner;
 mod state;
 pub mod terminal_capabilities;
-mod terminal_title;
+pub(crate) mod terminal_title;
 #[cfg(test)]
 mod tests;
 mod tool_renderer;

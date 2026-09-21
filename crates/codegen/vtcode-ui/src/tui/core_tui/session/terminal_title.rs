@@ -5,7 +5,10 @@ use crate::tui::config::constants::ui;
 
 use super::Session;
 
-use vtcode_commons::ansi_codes::set_terminal_title_and_icon;
+use vtcode_commons::ansi_codes::{set_iterm2_profile, set_terminal_title_and_icon};
+use vtcode_commons::terminal_detection::{
+    ITERM2_PROFILE_NAME, installed_iterm2_profile_path, should_apply_iterm2_profile,
+};
 
 const MAX_TITLE_LENGTH: usize = 128;
 
@@ -254,6 +257,37 @@ fn terminal_title_sequence(title: &str) -> String {
 fn write_terminal_title(title: &str) -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     stdout.write_all(terminal_title_sequence(title).as_bytes())?;
+    stdout.flush()
+}
+
+/// One-shot switch to the installed VT Code iTerm2 profile, if applicable.
+///
+/// Called once at TUI startup (never on title updates): the profile carries
+/// the tab icon, and repeated switches would fight manual profile changes
+/// mid-session. Sessions without the installed profile file are untouched,
+/// so deleting it uninstalls the behavior.
+pub(crate) fn apply_iterm2_profile_once() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let iterm_session = std::env::var("ITERM_SESSION_ID").is_ok();
+    let tmux_session = std::env::var("TMUX").is_ok();
+    let installed = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .map(|home| installed_iterm2_profile_path(&home))
+        .map(|path| path.exists())
+        .unwrap_or(false);
+    if !should_apply_iterm2_profile(iterm_session, tmux_session, installed) {
+        return;
+    }
+    if let Err(error) = write_iterm2_profile_switch() {
+        tracing::debug!(%error, "failed to switch to iTerm2 profile");
+    }
+}
+
+fn write_iterm2_profile_switch() -> std::io::Result<()> {
+    let mut stdout = std::io::stdout();
+    stdout.write_all(set_iterm2_profile(ITERM2_PROFILE_NAME).as_bytes())?;
     stdout.flush()
 }
 
