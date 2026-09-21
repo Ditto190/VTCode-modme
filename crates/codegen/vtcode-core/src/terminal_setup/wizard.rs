@@ -238,6 +238,8 @@ fn guidance_only_messages(terminal_type: TerminalType) -> Vec<String> {
             "VT Code does not currently advertise guided setup for Windows Terminal.".to_string(),
             "Configure Shift+Enter or multiline bindings in Windows Terminal settings if you need them.".to_string(),
             "Use the terminal bell or profile alert settings for notifications.".to_string(),
+            "For a VT Code tab icon, add an \"icon\" entry to a settings.json profile (see resources/icons/README.md)."
+                .to_string(),
         ],
         TerminalType::Hyper => vec![
             "VT Code does not currently advertise guided setup for Hyper.".to_string(),
@@ -293,5 +295,11 @@ mod tests {
         let lines = guidance_only_messages(TerminalType::TerminalApp);
         assert!(lines.iter().any(|line| line.contains("does not auto-configure")));
         assert!(lines.iter().any(|line| line.contains("Use Option as Meta Key")));
+    }
+
+    #[test]
+    fn windows_terminal_guidance_mentions_profile_icon() {
+        let lines = guidance_only_messages(TerminalType::WindowsTerminal);
+        assert!(lines.iter().any(|line| line.contains("icon")));
     }
 }

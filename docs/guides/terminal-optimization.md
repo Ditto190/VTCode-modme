@@ -41,8 +41,17 @@ VT Code sets both the terminal icon label (`OSC 1`) and window title
 sync on emulators that distinguish icon from title (iTerm2, Windows
 Terminal, Kitty, Ghostty, WezTerm, and others).
 
-For a graphical profile icon, configure it once in the terminal app using
-the bundled assets in `resources/icons/` (see its `README.md`):
+Graphical tab icons depend on each terminal's own profile system — no
+escape sequence can set profile artwork. Coverage today:
+
+| Terminal | Graphical icon path | Status |
+| --- | --- | --- |
+| iTerm2 | `VT Code` dynamic profile (custom icon + auto-switch) | Automatic via `/terminal-setup install-iterm2-icon`; applied once at TUI startup while installed |
+| Windows Terminal | `settings.json` profile `"icon"` (`.ico`/`.png`) | Guided fragment in `/terminal-setup` output; assets in `resources/icons/` |
+| VS Code integrated terminal | Extension terminal `iconPath` | Automatic: bundled `media/vtcode-terminal.png` |
+| Kitty, Ghostty, WezTerm, Alacritty, Terminal.app, Warp, Zed, Hyper, Tabby | None per-session (app/window level only) | `OSC 1`/`OSC 2` text label |
+
+Bundled assets live in `resources/icons/` (see its `README.md`):
 `vtcode-profile-32.png` for tabs, `vtcode-profile-120.png` for HiDPI
 profiles, and `vtcode-profile-180.ico`/`.png` for Windows Terminal.
 On iTerm2, `/terminal-setup install-iterm2-icon` installs a `VT Code`
