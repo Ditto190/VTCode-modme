@@ -332,9 +332,10 @@ mod tests {
     fn xai_presets_exist_and_default_to_grok46() {
         let presets = presets::xai_presets();
         assert!(presets.iter().any(|preset| preset.model == "grok-4.6"));
+        assert!(presets.iter().any(|preset| preset.model == "grok-4.7"));
 
         let default = presets.iter().find(|preset| preset.is_default).expect("xAI default preset");
-        assert_eq!(default.model, "grok-4.6");
+        assert_eq!(default.model, "grok-4.7");
         assert_eq!(default.context_window, Some(500_000));
         assert!(
             default

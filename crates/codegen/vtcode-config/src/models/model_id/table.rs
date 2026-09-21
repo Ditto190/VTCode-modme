@@ -636,6 +636,13 @@ model_id_table! {
         display: "Grok 4.6",
         description: "xAI's flagship reasoning model with reasoning_effort support (500k context)",
     },
+    XaiGrok47 {
+        provider: XAI,
+        id: models::xai::GROK_4_7,
+        parse: [models::xai::GROK_4_7],
+        display: "Grok 4.7",
+        description: "xAI's flagship reasoning model with reasoning_effort support (500k context)",
+    },
     // Vercel AI Gateway models (ids use the gateway's native `vendor/model` format)
     VercelAnthropicClaudeSonnet5 {
         provider: Vercel,

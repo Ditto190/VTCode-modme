@@ -255,6 +255,8 @@ pub enum ModelId {
     OpenRouterMoonshotaiKimiK3,
     /// Grok 4.6 - xAI's flagship reasoning model with reasoning_effort support via OpenRouter
     OpenRouterXAiGrok46,
+    /// Grok 4.7 - xAI's flagship reasoning model with reasoning_effort support via OpenRouter
+    OpenRouterXAiGrok47,
     /// MiMo-V2.5 - Xiaomi's omnimodal agentic model for complex software engineering via OpenRouter
     OpenRouterXiaomiMimoV25,
     /// MiMo-V2.5-Pro - Xiaomi's flagship agentic model for complex software engineering via OpenRouter
@@ -286,6 +288,8 @@ pub enum ModelId {
     // xAI models
     /// Grok 4.6 - xAI's flagship reasoning model with reasoning_effort support (500k context)
     XaiGrok46,
+    /// Grok 4.7 - xAI's flagship reasoning model with reasoning_effort support (500k context)
+    XaiGrok47,
 
     /// User-defined model not in the hardcoded catalog.
     /// Carries the provider key string and model identifier string.

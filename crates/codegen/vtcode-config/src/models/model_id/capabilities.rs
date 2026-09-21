@@ -333,6 +333,7 @@ impl ModelId {
                 | ModelId::MergeGatewayMoonshotKimiK3
                 | ModelId::OllamaGlm53Cloud
                 | ModelId::XaiGrok46
+                | ModelId::XaiGrok47
                 | ModelId::MergeGatewayXaiGrok46
         )
     }
@@ -416,6 +417,7 @@ impl ModelId {
             ModelId::HuggingFaceGlm53Together => "5.3",
             // xAI models
             ModelId::XaiGrok46 => "4.6",
+            ModelId::XaiGrok47 => "4.7",
             ModelId::MergeGatewayXaiGrok46 => "4.6",
             // Qwen models
             ModelId::MergeGatewayDefaultRouting => "routing",

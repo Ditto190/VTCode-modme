@@ -112,6 +112,7 @@ impl ModelId {
             ModelId::OpenRouterZaiGlm53Flash,
             // xAI models
             ModelId::XaiGrok46,
+            ModelId::XaiGrok47,
             // Vercel AI Gateway models
             ModelId::VercelAnthropicClaudeSonnet5,
             ModelId::VercelAnthropicClaudeOpus5,
