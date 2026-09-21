@@ -172,6 +172,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Table of Contents, Core Insight: Rust Is Not Faster Than C/C++ — It Is *Safer While Being Equally Fast*, Destructive Move Semantics, Aliasing Guarantees (`noalias`), Immutable by Default & `const` Semantics
   - **User Questions**: "What can you tell me about Rust-Specific Performance Principles for VT Code?", "How does Table of Contents work?", "How does Core Insight: Rust Is Not Faster Than C/C++ — It Is *Safer While Being Equally Fast* work?"
 
+- **File**: `docs/development/sandboxing-basics-reference.md`
+  - **Content**: Sandboxing Basics — Reference Notes
+  - **Topics**: Source (not vendored), Why this matters to VT Code, Distilled principles (in our own words), Short attributed quotations, How VT Code applies it
+  - **User Questions**: "What can you tell me about Sandboxing Basics — Reference Notes?", "How does Source (not vendored) work?", "How does Why this matters to VT Code work?"
+
 - **File**: `docs/development/session-persistence.md`
   - **Content**: Session Event Persistence
   - **Topics**: Audit packs

@@ -23,15 +23,6 @@ use what is suitable for the terminal emulator in /Users/vinhnguyenxuan/Document
 
 ===
 
-for TODO/task list header section, don't use plan file name, use a descriptive title that clearly indicates the purpose or context of the tasks.
-
-bug:
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-21 at 11.36.44.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-21 at 11.36.40.png'
-
-also for each task list item, show only 1 short description instead of the full details.
-
-===
-
 show keyboard shortcut (control+b) when a PTY tool is active in the TUI to allow users to send the tool to the background if needed.
 
 ===
@@ -90,10 +81,6 @@ Status: exited (0) · cwd . · pid 67321
 ===
 
 check and improve copy selection highlight, make it easier to output and unhighlight text when click in the TUI.
-
-===
-
-https://github.com/rui314/mold
 
 ===
 
