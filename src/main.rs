@@ -395,7 +395,9 @@ async fn run(prepared: PreparedRun) -> Result<()> {
     if startup_policy.run_interactive_maintenance() {
         match vtcode_core::terminal_setup::terminals::iterm2::ensure_profile_icon() {
             Ok(Some(report)) => {
-                println!("Installed VT Code iTerm2 tab icon profile ({}).", report.profile_path.display());
+                if !args.quiet {
+                    println!("Installed VT Code iTerm2 tab icon profile ({}).", report.profile_path.display());
+                }
             }
             Ok(None) => {}
             Err(error) => tracing::debug!(error = %error, "iTerm2 tab icon install skipped"),
