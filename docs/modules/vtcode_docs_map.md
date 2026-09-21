@@ -838,6 +838,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Context Engineering vs Prompt Engineering, VT Code's Three Context Primitives, Accuracy Optimization Loop, Core Principles
   - **User Questions**: "What can you tell me about Context Engineering in VT Code?", "How does Overview work?", "How does Context Engineering vs Prompt Engineering work?"
 
+- **File**: `docs/compose/spec/continuation-end-turn-ux.md`
+  - **Content**: Continuation End-Turn UX + Classifiers
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Continuation End-Turn UX + Classifiers?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/harness/CORE_BELIEFS.md`
   - **Content**: Core Beliefs
   - **Topics**: 1. Humans Steer, Agents Execute, 2. Repository as System of Record, 3. Progressive Disclosure, 4. Agent Legibility Over Human Aesthetics, 5. Enforce Invariants, Not Implementations
