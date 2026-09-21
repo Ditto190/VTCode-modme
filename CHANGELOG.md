@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.164.2 - 2026-09-21
+
+### Highlights
+#### Bug Fixes
+
+- Embed iTerm2 icon via OUT_DIR to fix packaged builds (7ae99809) 
+### Other Changes
 ## 0.164.1 - 2026-09-21
 
 ### Highlights
