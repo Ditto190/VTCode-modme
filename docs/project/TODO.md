@@ -190,3 +190,13 @@ Step 7 — Docs + hygiene:
 - User-facing guide under docs/ + quick-reference row; keep per-module AGENTS.md untouched unless conventions change. Conventional Commits; verify with ./scripts/check-dev.sh and cargo nextest run (never cargo test).
 
 Acceptance: Phase 1 done when guard skill + suite + docs ship, default-off, zero behavior change without key, fail-closed tests pass. Removal must stay free (delete plugin dir).
+
+===
+
+I'm thinking about using Jev:
+
+• classifying shell commands → allow/ask/deny
+• deciding when context needs compaction
+• routing tasks to the right tools/subagents
+
+What coding-agent heuristics could semantic routing replace?
