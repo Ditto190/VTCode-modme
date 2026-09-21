@@ -1886,12 +1886,20 @@ fn is_low_signal_outcome(outcome: &ToolPipelineOutcome, canonical_tool_name: &st
 /// legitimate exploration and never group.
 fn coarse_inspection_family_key(canonical_tool_name: &str, args: &serde_json::Value) -> Option<String> {
     use vtcode_core::config::constants::tools;
-    // Only shell listing/scanning commands suffer from overlapping-but-distinct
+    // Only bare directory listings suffer from overlapping-but-distinct
     // invocations (e.g. three `find` calls over the same tree with different
     // flags) that the exact family key never groups. File reads (`cat`/`head`/
-    // `tail` via shell included) and semantic search already carry precise
-    // family keys; grouping them coarsely would mislabel diverse productive
-    // exploration (different files/queries) as looping.
+    // `tail` via shell included) and semantic search (`rg`/`grep`, `code_search`)
+    // already carry precise family keys; grouping them coarsely would mislabel
+    // diverse productive exploration (different files/queries) as looping.
+    // In particular `rg`/`grep` must stay out: their first positional is the
+    // search pattern, not the search root, so five distinct queries such as
+    // `grep -n "enum Commands" ...`, `grep -rn "enum ExecSubcommand" ...`
+    // (turn_1303/turn_1304: `exec::inspection::grep::enum ×5`) or five `rg`
+    // searches for `exit` (`exec::inspection::rg::exit ×5`) all collapse into
+    // one coarse family and get promoted to low-signal, tripping early
+    // recovery on legitimate research. Distinct patterns/paths keep distinct
+    // exact families and converge via the total low-signal guard instead.
     match canonical_tool_name {
         tools::UNIFIED_EXEC | tools::EXEC_COMMAND => {
             let command = vtcode_core::tools::command_args::command_text(args).ok()??;
@@ -1902,7 +1910,7 @@ fn coarse_inspection_family_key(canonical_tool_name: &str, args: &serde_json::Va
                 .unwrap_or(first)
                 .trim_matches(|ch| ch == '\'' || ch == '"')
                 .to_ascii_lowercase();
-            if matches!(base.as_str(), "find" | "ls" | "rg" | "grep" | "fd") {
+            if matches!(base.as_str(), "find" | "ls" | "fd") {
                 Some(format!("exec::inspection::{base}::{}", coarse_inspection_root(&command)))
             } else {
                 None
@@ -1912,12 +1920,14 @@ fn coarse_inspection_family_key(canonical_tool_name: &str, args: &serde_json::Va
     }
 }
 
-/// Extract the search-root segment of a listing/scan command: the first
+/// Extract the search-root segment of a listing command: the first
 /// non-flag argument, with surrounding quotes and trailing slashes stripped.
-/// Deliberately heuristic — an option value (`rg -A 2 pat src` → root "2")
+/// Deliberately heuristic — an option value (`ls --width 80 src` → root "80")
 /// can be picked up and fragment a family, which only makes detection more
 /// conservative. Commands with no positional argument (`ls -la`) scan the
-/// working directory and map to ".".
+/// working directory and map to ".". Only `ls`/`find`/`fd` reach this helper;
+/// `rg`/`grep` are excluded above because their first positional is the
+/// search pattern, not a path root.
 fn coarse_inspection_root(command: &str) -> String {
     let root = command
         .split_whitespace()
@@ -5095,6 +5105,58 @@ mod tests {
             );
         }
         assert_eq!(tracker.max_coarse_listing_count(), 0);
+        // `rg`/`grep` must not enter the coarse ledger at all, so they can
+        // never be promoted to low-signal or named as dominant churn.
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.dominant_churn(), None);
+        assert_eq!(tracker.low_signal_tool_calls, 0);
+    }
+
+    #[test]
+    fn same_pattern_grep_searches_do_not_promote_to_low_signal() {
+        // Regression for turn_1303/turn_1304 (`exec::inspection::grep::enum ×5`)
+        // and the reported `exec::inspection::rg::exit ×5`: five distinct
+        // successful searches sharing one pattern (`enum` / `exit`) across
+        // different files/flags are legitimate research, not churn. They must
+        // not be promoted into the low-signal ledger and must not trip early
+        // recovery on their own.
+        let mut tracker = LoopTracker::new();
+        for command in [
+            "grep -n \"enum Commands\" -A 80 src/cli/mod.rs",
+            "grep -n \"enum Command\\|pub enum\" src/cli/mod.rs",
+            "grep -rn \"enum Commands\" crates/codegen/vtcode-core/src",
+            "grep -rn \"enum ExecSubcommand\" -A 30 crates/codegen/vtcode-core/src/cli/args/",
+            "grep -rn \"enum ScheduleSubcommand\" crates/codegen/vtcode-core/src/cli/args/",
+        ] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 0);
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.dominant_churn(), None);
+
+        let mut tracker = LoopTracker::new();
+        for command in [
+            "rg -n exit src/cli/mod.rs",
+            "rg -n exit crates/codegen/vtcode-core/src/cli/args/mod.rs",
+            "rg -n --no-heading exit src/agent/runloop",
+            "rg -n -S exit docs/guides",
+            "rg --hidden -n exit src",
+        ] {
+            update_repetition_tracker(
+                &mut tracker,
+                &successful_exec_output(),
+                tools::EXEC_COMMAND,
+                &json!({"cmd":command}),
+            );
+        }
+        assert_eq!(tracker.max_coarse_listing_count(), 0);
+        assert_eq!(tracker.max_low_signal_count(), 0);
+        assert_eq!(tracker.dominant_churn(), None);
     }
 
     #[test]
@@ -5106,7 +5168,7 @@ mod tests {
         assert_eq!(coarse_inspection_root("ls"), ".");
         // Heuristic: an option value can be picked up as the root, which only
         // fragments families and keeps detection conservative.
-        assert_eq!(coarse_inspection_root("rg -A 2 pat src"), "2");
+        assert_eq!(coarse_inspection_root("ls --width 80 src"), "80");
     }
 
     #[test]
