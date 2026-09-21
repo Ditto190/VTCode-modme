@@ -3663,6 +3663,37 @@ mod tests {
         assert_eq!(tracker.consecutive_navigations, 3);
     }
 
+    #[test]
+    fn awk_range_inspections_do_not_trigger_anti_blind_pressure() {
+        // Regression for session-vtcode-20260921T023834Z: six consecutive
+        // read-only `awk` page reads tripped the blind-editing gate because
+        // `awk` was missing from the read-only allow-list.
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for _ in 0..BLIND_EDITING_THRESHOLD {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tools::EXEC_COMMAND,
+                &json!({"cmd": "awk 'NR>=297 && NR<=312' README.md"}),
+            );
+        }
+
+        assert_eq!(tracker.consecutive_mutations, 0);
+        assert!(!tracker.verification_is_pending());
+        assert!(!mutation_blocked_until_verification(
+            &tracker,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "awk 'NR>=297 && NR<=312' README.md"}),
+        ));
+    }
+
     #[cfg(unix)]
     #[test]
     fn logged_compound_inspection_with_unix_stderr_suppression_does_not_trigger_pressure() {

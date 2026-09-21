@@ -436,14 +436,13 @@ pub(crate) fn has_unsafe_readonly_options(words: &[String]) -> bool {
             .iter()
             .skip(1)
             .any(|word| word == "-o" || word.starts_with("-o") || word == "--output" || word.starts_with("--output=")),
-        // `awk -i inplace` and `awk` scripts containing `system()`/redirection
-        // are not safely distinguishable from ordinary inspection here. The
-        // executable is therefore removed from the read-only allow-list, but
-        // keep its obvious in-place option guarded for raw validation too.
-        "awk" => command_words
-            .iter()
-            .skip(1)
-            .any(|word| word == "-i" || word.starts_with("--include")),
+        // `awk` stays on the read-only allow-list, but its program text can
+        // write (`print > file`), pipe into commands (`print | "cmd"`), or
+        // execute them (`system()`), and its options can edit in place
+        // (`-i inplace`), load external code (`-l`), or write profiles
+        // (`-p`). `has_unsafe_awk_options` fails closed on all of those; only
+        // data-only options (`-v`, `-F`) and a write-free program pass.
+        "awk" => has_unsafe_awk_options(&command_words[1..]),
         _ => false,
     }
 }
@@ -618,6 +617,121 @@ fn sed_substitution_may_write(chars: &[char], start: usize) -> bool {
         && chars
             .get(index + 1)
             .is_none_or(|character| character.is_whitespace() || *character == ';')
+}
+
+/// Return whether an `awk` invocation uses an option or program shape that can
+/// write workspace state or execute commands.
+///
+/// Only data-only options pass: `-v`/`--assign` (variable binding) and
+/// `-F`/`--field-separator`, each either attached or consuming the next word.
+/// Every other option fails closed — `-i`/`--include` edits in place,
+/// `-f`/`--file`/`--source` load program text this scanner cannot see,
+/// `-l`/`--load` loads native extensions, `-p`/`--profile`,
+/// `-W`/`--dump-variables`, and `--pretty-print` write files, and the
+/// remaining option surface is too wide to allow-list safely. `--` ends option
+/// parsing. The first bare word is the program and must
+/// be write-free per [`awk_program_may_write`]; later words are filenames. A
+/// missing program is malformed, so it fails closed like the `sed` guard.
+fn has_unsafe_awk_options(arguments: &[String]) -> bool {
+    let mut program_seen = false;
+    let mut options_ended = false;
+    let mut index = 0;
+
+    while index < arguments.len() {
+        let word = arguments[index].as_str();
+        if !options_ended && word == "--" {
+            options_ended = true;
+            index += 1;
+            continue;
+        }
+        if !options_ended && word.starts_with('-') && word.len() > 1 {
+            if word == "-v" || word == "--assign" || word == "-F" || word == "--field-separator" {
+                // Value-taking option with a separate argument.
+                index += 2;
+                continue;
+            }
+            if word.starts_with("-v")
+                || word.starts_with("--assign=")
+                || word.starts_with("-F")
+                || word.starts_with("--field-separator=")
+            {
+                // Attached value (`-F:`, `-vlimit=10`).
+                index += 1;
+                continue;
+            }
+            return true;
+        }
+        if !program_seen {
+            program_seen = true;
+            if awk_program_may_write(word) {
+                return true;
+            }
+        }
+        index += 1;
+    }
+
+    !program_seen
+}
+
+/// Return whether an `awk` program can write files, pipe into commands, or
+/// execute them. `>` (unless the `>=` comparison) and bare `|` (unless the
+/// `||` operator) are output redirection and command pipes; `system()` runs
+/// shell commands. String and regex literals are not distinguished from code:
+/// a literal containing `>` or `|` fails closed as a possible write instead
+/// of risking a missed redirection.
+fn awk_program_may_write(program: &str) -> bool {
+    let chars = program.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        let character = chars[index];
+        if character == '>' {
+            if chars.get(index + 1) == Some(&'=') {
+                index += 2;
+                continue;
+            }
+            return true;
+        }
+        if character == '|' {
+            if chars.get(index + 1) == Some(&'|') {
+                index += 2;
+                continue;
+            }
+            return true;
+        }
+        if (character == 's' || character == 'S') && awk_calls_system(&chars, index) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+/// Return whether `chars[start..]` invokes awk's `system()` builtin: the
+/// identifier `system` (case-insensitive) on an identifier boundary followed
+/// by optional whitespace and `(`.
+fn awk_calls_system(chars: &[char], start: usize) -> bool {
+    const NAME: &[char] = &['s', 'y', 's', 't', 'e', 'm'];
+    if start > 0 && is_awk_ident_char(chars[start - 1]) {
+        return false;
+    }
+    let candidate = chars.get(start..start + NAME.len());
+    if candidate.is_none_or(|slice| {
+        slice
+            .iter()
+            .zip(NAME.iter())
+            .any(|(actual, expected)| !actual.eq_ignore_ascii_case(expected))
+    }) {
+        return false;
+    }
+    let mut index = start + NAME.len();
+    while chars.get(index).is_some_and(|character| character.is_whitespace()) {
+        index += 1;
+    }
+    chars.get(index) == Some(&'(')
+}
+
+fn is_awk_ident_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
 }
 
 fn has_unsafe_readonly_options_in_command(command: &str) -> bool {
