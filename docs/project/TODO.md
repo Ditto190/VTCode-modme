@@ -1,12 +1,5 @@
 open source vtcode-diff, IMPORTANT remember to attribute OpenAI Codex https://github.com/openai/codex as the source of the underlying code and ideas.
 
----
-
-check and fix " Blocked action
-exec_command is denied by workspace tool policy, so I could not run the
-final extraction:
-• Denial: "Tool 'exec_command' execution denied by policy";"
-
 ===
 
 show keyboard shortcut (control+b) when a PTY tool is active in the TUI to allow users to send the tool to the background if needed. a visual indicator should be provided to make users aware of this functionality.
@@ -63,10 +56,6 @@ Status: exited (0) · cwd . · pid 67321
 ```
 
 ==> debug and fix the system again. session session-vtcode-20260921T043353Z_547816-25453
-
-===
-
-check and improve copy selection highlight, make it easier to output and unhighlight text when click in the TUI.
 
 ===
 
@@ -130,7 +119,3 @@ I'm thinking about using Jev:
 • routing tasks to the right tools/subagents
 
 What coding-agent heuristics could semantic routing replace?
-
-===
-
-https://huggingface.co/blog/tokenizers-v1
