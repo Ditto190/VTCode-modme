@@ -718,12 +718,6 @@ pub fn set_icon_name(name: &str) -> String {
     format!("{OSC_SET_ICON_PREFIX}{name}{BEL}")
 }
 
-/// Build an OSC sequence to set both icon name and window title at once.
-#[inline]
-pub fn set_icon_and_title(title: &str) -> String {
-    format!("{OSC_SET_ICON_AND_TITLE_PREFIX}{title}{BEL}")
-}
-
 /// Build combined icon (`OSC 1`) plus title (`OSC 2`) sequences.
 ///
 /// Emitting both explicitly keeps the built-in profile/tab icon label in
@@ -764,7 +758,6 @@ mod tests {
     fn icon_and_title_payloads_use_distinct_osc_codes() {
         assert_eq!(set_icon_name("VT"), "\x1b]1;VT\x07");
         assert_eq!(set_window_title("Code"), "\x1b]2;Code\x07");
-        assert_eq!(set_icon_and_title("VT Code"), "\x1b]0;VT Code\x07");
     }
 
     #[test]
