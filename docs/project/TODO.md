@@ -1,11 +1,3 @@
-open source vtcode-diff, IMPORTANT remember to attribute OpenAI Codex https://github.com/openai/codex as the source of the underlying code and ideas.
-
-===
-
-show keyboard shortcut (control+b) when a PTY tool is active in the TUI to allow users to send the tool to the background if needed. a visual indicator should be provided to make users aware of this functionality.
-
-===
-
 check background process handling in the TUI to ensure that tools running in the background do not interfere with the main interface and that their output is correctly captured and displayed. Also verify that terminating background processes works as expected as coordinated with main agent run loop. While the subprocess is running in the background, the main agent run loop should accurately reflect its status and handle any output or errors appropriately. also the main agent could do seperated tasks independently of the background subprocess. But make sure to synchronize state and handle any potential conflicts or race conditions between the main agent and background subprocesses.
 
 currently the background process success and exit 0 but the main agent run loop may not correctly reflect this status, leading to potential inconsistencies in the interface and task tracking.
