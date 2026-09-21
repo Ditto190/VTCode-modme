@@ -1896,7 +1896,8 @@ fn coarse_inspection_family_key(canonical_tool_name: &str, args: &serde_json::Va
     // search pattern, not the search root, so five distinct queries such as
     // `grep -n "enum Commands" ...`, `grep -rn "enum ExecSubcommand" ...`
     // (turn_1303/turn_1304: `exec::inspection::grep::enum ×5`) or five `rg`
-    // searches for `exit` (`exec::inspection::rg::exit ×5`) all collapse into
+    // searches for `pub` (turn_1291: `exec::inspection::rg::pub ×5`, e.g.
+    // `rg -n 'pub enum Commands' ...`) all collapse into
     // one coarse family and get promoted to low-signal, tripping early
     // recovery on legitimate research. Distinct patterns/paths keep distinct
     // exact families and converge via the total low-signal guard instead.
@@ -5115,8 +5116,8 @@ mod tests {
     #[test]
     fn same_pattern_grep_searches_do_not_promote_to_low_signal() {
         // Regression for turn_1303/turn_1304 (`exec::inspection::grep::enum ×5`)
-        // and the reported `exec::inspection::rg::exit ×5`: five distinct
-        // successful searches sharing one pattern (`enum` / `exit`) across
+        // and turn_1291 (`exec::inspection::rg::pub ×5`): five distinct
+        // successful searches sharing one pattern (`enum` / `pub`) across
         // different files/flags are legitimate research, not churn. They must
         // not be promoted into the low-signal ledger and must not trip early
         // recovery on their own.
@@ -5141,11 +5142,11 @@ mod tests {
 
         let mut tracker = LoopTracker::new();
         for command in [
-            "rg -n exit src/cli/mod.rs",
-            "rg -n exit crates/codegen/vtcode-core/src/cli/args/mod.rs",
-            "rg -n --no-heading exit src/agent/runloop",
-            "rg -n -S exit docs/guides",
-            "rg --hidden -n exit src",
+            "rg -n 'pub enum Commands' src/ -A 40",
+            "rg -n 'pub enum Commands' crates/codegen/vtcode-core/src/cli/args/mod.rs -A 50",
+            "rg -n 'pub enum Commands' crates/codegen/vtcode-core/src/cli/args/mod.rs -A 600",
+            "rg -n 'pub enum Provider|Gemini|OpenAI' crates/codegen/vtcode-llm/src",
+            "rg -n 'pub enum SecretCommand|Add|List' crates/codegen/vtcode-core/src/cli/args/secret.rs",
         ] {
             update_repetition_tracker(
                 &mut tracker,

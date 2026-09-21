@@ -1144,7 +1144,7 @@ mod tests {
     #[tokio::test]
     async fn same_pattern_search_repeats_do_not_trip_early_recovery() {
         // Regression for turn_1303/turn_1304 (`exec::inspection::grep::enum ×5`)
-        // and the reported `exec::inspection::rg::exit ×5`: five distinct
+        // and turn_1291 (`exec::inspection::rg::pub ×5`): five distinct
         // successful searches sharing one pattern across different files/flags
         // are legitimate research. With `rg`/`grep` excluded from coarse
         // grouping they must not enter the low-signal ledger and must not
@@ -1159,11 +1159,11 @@ mod tests {
             command_success: true,
         });
         for query in [
-            "rg -n exit src/cli/mod.rs",
-            "rg -n exit crates/codegen/vtcode-core/src/cli/args/mod.rs",
-            "rg -n --no-heading exit src/agent/runloop",
-            "rg -n -S exit docs/guides",
-            "rg --hidden -n exit src",
+            "rg -n 'pub enum Commands' src/ -A 40",
+            "rg -n 'pub enum Commands' crates/codegen/vtcode-core/src/cli/args/mod.rs -A 50",
+            "rg -n 'pub enum Commands' crates/codegen/vtcode-core/src/cli/args/mod.rs -A 600",
+            "rg -n 'pub enum Provider|Gemini|OpenAI' crates/codegen/vtcode-llm/src",
+            "rg -n 'pub enum SecretCommand|Add|List' crates/codegen/vtcode-core/src/cli/args/secret.rs",
         ] {
             update_repetition_tracker(
                 &mut tracker,
