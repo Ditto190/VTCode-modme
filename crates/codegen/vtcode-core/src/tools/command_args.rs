@@ -437,8 +437,9 @@ pub(crate) fn has_unsafe_readonly_options(words: &[String]) -> bool {
             .skip(1)
             .any(|word| word == "-o" || word.starts_with("-o") || word == "--output" || word.starts_with("--output=")),
         // `awk` stays on the read-only allow-list, but its program text can
-        // write (`print > file`), pipe into commands (`print | "cmd"`), or
-        // execute them (`system()`), and its options can edit in place
+        // write (`print > file`), pipe into commands (`print | "cmd"`),
+        // execute them (`system()`), call them indirectly (`@func()`), or
+        // load code (`@include`, `@load`), and its options can edit in place
         // (`-i inplace`), load external code (`-l`), or write profiles
         // (`-p`). `has_unsafe_awk_options` fails closed on all of those; only
         // data-only options (`-v`, `-F`) and a write-free program pass.
@@ -673,17 +674,24 @@ fn has_unsafe_awk_options(arguments: &[String]) -> bool {
     !program_seen
 }
 
-/// Return whether an `awk` program can write files, pipe into commands, or
-/// execute them. `>` (unless the `>=` comparison) and bare `|` (unless the
-/// `||` operator) are output redirection and command pipes; `system()` runs
-/// shell commands. String and regex literals are not distinguished from code:
-/// a literal containing `>` or `|` fails closed as a possible write instead
-/// of risking a missed redirection.
+/// Return whether an `awk` program can write files, pipe into commands,
+/// execute them, or load external code. `>` (unless the `>=` comparison)
+/// and bare `|` (unless the `||` operator) are output redirection and
+/// command pipes; `system()` runs shell commands; `@` invokes gawk indirect
+/// calls (`@func()`) and directives (`@include`, `@load`), which can execute
+/// or load arbitrary code — including a `system` name smuggled via `-v`.
+/// String and regex literals are not distinguished from code: a literal
+/// containing `>`, `|`, or `@` fails closed as a possible write instead
+/// of risking a missed redirection. Bare `>` comparisons (`$3>100`) and `|`
+/// alternations (`/a|b/`) therefore stay mutating by design.
 fn awk_program_may_write(program: &str) -> bool {
     let chars = program.chars().collect::<Vec<_>>();
     let mut index = 0;
     while index < chars.len() {
         let character = chars[index];
+        if character == '@' {
+            return true;
+        }
         if character == '>' {
             if chars.get(index + 1) == Some(&'=') {
                 index += 2;
@@ -1336,6 +1344,8 @@ mod tests {
             "sort --compress-program=sh README.md",
             "date -s now",
             "awk -i inplace '{print}' README.md",
+            "awk -v f=system 'BEGIN{@f(\"id\")}' README.md",
+            "awk '@include \"x.awk\"' README.md",
             "sed -n 's/a/b/e' README.md",
             "fd --exec sh -c 'touch out'",
             "tree -o out.txt",

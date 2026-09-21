@@ -389,9 +389,15 @@ mod tests {
             "awk 'NR>=297 && NR<=312' README.md",
             "awk 'NR>=291 && NR<=296' README.md | cut -c1-150",
             "awk -F: '{print $1}' README.md",
+            "awk -F, '{print $2}' data.csv",
             "awk -v limit=10 'NR<=limit' README.md",
             "awk -- '{print $1}' README.md",
             "awk -- '{print $1}' -- -weird",
+            // `systime()` only reads the clock — must not be confused with
+            // `system()`. Absolute paths resolve via file_name().
+            "awk 'BEGIN{print systime()}' README.md",
+            "/usr/bin/awk 'NR>=1 && NR<=5' README.md",
+            "awk 'NR>=1 && NR<=5' README.md | sort",
         ] {
             assert!(is_readonly_command_session_command(&run_cmd(command)), "expected readonly command: {command}");
         }
@@ -406,6 +412,19 @@ mod tests {
             "awk '\"sort\" | getline line' README.md",
             "awk 'BEGIN{system(\"touch out\")}' README.md",
             "awk 'BEGIN{SYSTEM (\"id\")}' README.md",
+            "awk 'BEGIN{System(\"id\")}' README.md",
+            "awk 'BEGIN{system\t(\"id\")}' README.md",
+            // gawk indirect calls and directives can execute or load code,
+            // including a `system` name smuggled via `-v`. Fail closed.
+            "awk -v f=system 'BEGIN{@f(\"id\")}' README.md",
+            "awk 'BEGIN{@s(\"id\")}' README.md",
+            "awk '@include \"x.awk\"' README.md",
+            "awk '@load \"ext\"' README.md",
+            "awk '{print \"a@b\"}' README.md",
+            // Bare `>` comparisons and `|` alternations are indistinguishable
+            // from redirection/pipes without a full parser — fail closed.
+            "awk '$3>100' README.md",
+            "awk '/error|warning/' README.md",
             "awk -i inplace '{print}' README.md",
             "awk -f program.awk README.md",
             "awk --source '{print}' README.md",
@@ -414,6 +433,10 @@ mod tests {
             "awk -W dump-variables '{print}' README.md",
             "awk --posix '{print}' README.md",
             "awk -F:",
+            "awk",
+            "awk -v",
+            // Shell-level redirection stays mutating even with a safe program.
+            "awk 'NR>=1' README.md > out.txt",
         ] {
             assert!(!is_readonly_command_session_command(&run_cmd(command)), "expected mutating command: {command}");
         }

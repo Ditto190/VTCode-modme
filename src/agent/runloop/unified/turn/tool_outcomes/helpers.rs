@@ -3694,6 +3694,37 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn awk_write_primitives_still_trigger_anti_blind_pressure() {
+        // Asymmetric counterpart: real writes (including gawk `@` indirect
+        // calls) must still count as mutations so the fix cannot
+        // over-correct into a fail-open.
+        let mut tracker = LoopTracker::new();
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+
+        for _ in 0..BLIND_EDITING_THRESHOLD {
+            update_repetition_tracker(
+                &mut tracker,
+                &success,
+                tools::EXEC_COMMAND,
+                &json!({"cmd": "awk -v f=system 'BEGIN{@f(\"id\")}' README.md"}),
+            );
+        }
+
+        assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+        assert!(tracker.verification_is_pending());
+        assert!(mutation_blocked_until_verification(
+            &tracker,
+            tools::EXEC_COMMAND,
+            &json!({"cmd": "awk '{print > \"out.txt\"}' README.md"}),
+        ));
+    }
+
     #[cfg(unix)]
     #[test]
     fn logged_compound_inspection_with_unix_stderr_suppression_does_not_trigger_pressure() {
