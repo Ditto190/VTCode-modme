@@ -13,7 +13,8 @@ use crate::terminal_setup::features::multiline;
 use anyhow::{Context, Result};
 use vtcode_commons::VtCodePaths;
 use vtcode_commons::terminal_detection::{
-    ITERM2_DYNAMIC_PROFILE_FILENAME, ITERM2_ICON_MODE_CUSTOM, ITERM2_PROFILE_NAME, iterm2_dynamic_profiles_dir,
+    ITERM2_DYNAMIC_PROFILE_FILENAME, ITERM2_ICON_MODE_CUSTOM, ITERM2_PROFILE_NAME, installed_iterm2_profile_path,
+    iterm2_dynamic_profiles_dir,
 };
 
 /// Generate iTerm2 setup instructions (manual configuration required)
@@ -199,6 +200,44 @@ pub fn run_profile_icon_install(renderer: &mut crate::utils::ansi::AnsiRenderer)
     Ok(())
 }
 
+/// Ensure the iTerm2 profile icon is installed, returning the install
+/// report when this call wrote files.
+///
+/// Best-effort first-run path: skips silently off macOS, outside iTerm2,
+/// or under tmux, and rewrites the artwork when the installed copy drifts
+/// from the shipped bytes so icon updates propagate.
+pub fn ensure_profile_icon() -> Result<Option<ProfileIconInstallReport>> {
+    if !cfg!(target_os = "macos") {
+        return Ok(None);
+    }
+    let (home, data_dir) = default_install_paths()?;
+    let iterm_session = std::env::var("ITERM_SESSION_ID").is_ok();
+    let tmux_session = std::env::var("TMUX").is_ok();
+    ensure_profile_icon_at(&home, &data_dir, iterm_session, tmux_session)
+}
+
+/// Testable core of [`ensure_profile_icon`] with explicit paths and
+/// environment flags (no process-environment reads, no global roots).
+pub fn ensure_profile_icon_at(
+    home: &Path,
+    data_dir: &Path,
+    iterm_session: bool,
+    tmux_session: bool,
+) -> Result<Option<ProfileIconInstallReport>> {
+    if !cfg!(target_os = "macos") || !iterm_session || tmux_session {
+        return Ok(None);
+    }
+    let profile_path = installed_iterm2_profile_path(home);
+    let icon_path = installed_icon_path(data_dir);
+    let icon_fresh = std::fs::read(&icon_path)
+        .map(|bytes| bytes == PROFILE_ICON_BYTES)
+        .unwrap_or(false);
+    if profile_path.exists() && icon_fresh {
+        return Ok(None);
+    }
+    install_profile_icon(home, data_dir).map(Some)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +299,44 @@ mod tests {
     fn profile_icon_instructions_point_at_installer() {
         let lines = profile_icon_instructions();
         assert!(lines.iter().any(|line| line.contains("install-iterm2-icon")));
+    }
+
+    #[test]
+    fn ensure_skips_without_iterm_session_and_writes_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+
+        let report = ensure_profile_icon_at(home.path(), data.path(), false, false).unwrap();
+        assert!(report.is_none());
+        assert!(!iterm2_dynamic_profiles_dir(home.path()).exists());
+    }
+
+    #[test]
+    fn ensure_skips_under_tmux_and_writes_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+
+        let report = ensure_profile_icon_at(home.path(), data.path(), true, true).unwrap();
+        assert!(report.is_none());
+        assert!(!iterm2_dynamic_profiles_dir(home.path()).exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ensure_installs_once_then_refreshes_stale_artwork() {
+        let home = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+
+        let first = ensure_profile_icon_at(home.path(), data.path(), true, false).unwrap();
+        assert!(first.is_some());
+
+        let second = ensure_profile_icon_at(home.path(), data.path(), true, false).unwrap();
+        assert!(second.is_none());
+
+        let icon_path = installed_icon_path(data.path());
+        std::fs::write(&icon_path, b"stale-bytes").unwrap();
+        let third = ensure_profile_icon_at(home.path(), data.path(), true, false).unwrap();
+        let report = third.expect("stale artwork must trigger a refresh");
+        assert_eq!(std::fs::read(&report.icon_path).unwrap(), PROFILE_ICON_BYTES);
     }
 }

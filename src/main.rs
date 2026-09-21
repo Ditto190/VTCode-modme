@@ -387,6 +387,21 @@ async fn run(prepared: PreparedRun) -> Result<()> {
         });
     }
 
+    // First-run iTerm2 tab icon: install the VT Code dynamic profile so
+    // the tab shows the logo while sessions run. Best effort and
+    // idempotent; deleting DynamicProfiles/vtcode.json uninstalls.
+    // Inline (not spawned): two small reads when up to date, and the
+    // install notice must print before TUI alternate-screen entry.
+    if startup_policy.run_interactive_maintenance() {
+        match vtcode_core::terminal_setup::terminals::iterm2::ensure_profile_icon() {
+            Ok(Some(report)) => {
+                println!("Installed VT Code iTerm2 tab icon profile ({}).", report.profile_path.display());
+            }
+            Ok(None) => {}
+            Err(error) => tracing::debug!(error = %error, "iTerm2 tab icon install skipped"),
+        }
+    }
+
     let dispatch_result = cli::dispatch(&args, &startup, print_mode).await;
     perform_queued_runtime_relaunch();
     vtcode_core::utils::trace_writer::flush_trace_log();

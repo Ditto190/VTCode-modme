@@ -46,7 +46,7 @@ escape sequence can set profile artwork. Coverage today:
 
 | Terminal | Graphical icon path | Status |
 | --- | --- | --- |
-| iTerm2 | `VT Code` dynamic profile (custom icon + auto-switch) | Automatic via `/terminal-setup install-iterm2-icon`; applied once at TUI startup while installed |
+| iTerm2 | `VT Code` dynamic profile (custom icon + auto-switch) | Automatic: installed on first iTerm2 TUI run (repair via `/terminal-setup install-iterm2-icon`); applied once at TUI startup while installed |
 | Windows Terminal | `settings.json` profile `"icon"` (`.ico`/`.png`) | Guided fragment in `/terminal-setup` output; assets in `resources/icons/` |
 | VS Code integrated terminal | Extension terminal `iconPath` | Automatic: bundled `media/vtcode-terminal.png` |
 | Kitty, Ghostty, WezTerm, Alacritty, Terminal.app, Warp, Zed, Hyper, Tabby | None per-session (app/window level only) | `OSC 1`/`OSC 2` text label |
