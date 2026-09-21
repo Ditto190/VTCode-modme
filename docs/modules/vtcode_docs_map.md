@@ -411,6 +411,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Architecture, Configuration, Transport Types, Security
   - **User Questions**: "What can you tell me about MCP Integration Guide for VT Code?", "How does Overview work?", "How does Architecture work?"
 
+- **File**: `docs/guides/memcode-mcp.md`
+  - **Content**: Memcode MCP
+  - **Topics**: 1. Register VT Code as an OAuth client, 2. Configure the provider, 3. Sign in and verify, Recommended agent policy, Disconnect
+  - **User Questions**: "What can you tell me about Memcode MCP?", "How does 1. Register VT Code as an OAuth client work?", "How does 2. Configure the provider work?"
+
 - **File**: `docs/guides/minimax-integration.md`
   - **Content**: MiniMax Integration Guide
   - **Topics**: Overview, Configuration Options, Supported Features, Limitations, Example Usage
