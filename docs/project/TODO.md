@@ -18,16 +18,11 @@ final extraction:
 
 ===
 
-check and use built-in profile icon for VT Code, so that it will display correctly in the user interface (iterm2 etc) or other terminal emulators that support icons.
-use what is suitable for the terminal emulator in /Users/vinhnguyenxuan/Documents/vtchat_resources/v2_1 and then copy to VT Code's bundle resources
+show keyboard shortcut (control+b) when a PTY tool is active in the TUI to allow users to send the tool to the background if needed. a visual indicator should be provided to make users aware of this functionality.
 
 ===
 
-show keyboard shortcut (control+b) when a PTY tool is active in the TUI to allow users to send the tool to the background if needed.
-
-===
-
-check background process handling in the TUI to ensure that tools running in the background do not interfere with the main interface and that their output is correctly captured and displayed. Also verify that terminating background processes works as expected as coordinated with main agent run loop.
+check background process handling in the TUI to ensure that tools running in the background do not interfere with the main interface and that their output is correctly captured and displayed. Also verify that terminating background processes works as expected as coordinated with main agent run loop. While the subprocess is running in the background, the main agent run loop should accurately reflect its status and handle any output or errors appropriately. also the main agent could do seperated tasks independently of the background subprocess. But make sure to synchronize state and handle any potential conflicts or race conditions between the main agent and background subprocesses.
 
 currently the background process success and exit 0 but the main agent run loop may not correctly reflect this status, leading to potential inconsistencies in the interface and task tracking.
 
@@ -120,10 +115,6 @@ autonomous recovery and conclusion.
 
 == check session session-vtcode-20260921T045723Z_452479-85724
 and deep dive and fix
-
-===
-
-fix the `vtcode-bash-runner --all-features` serde failure from the hawk run
 
 ===
 
