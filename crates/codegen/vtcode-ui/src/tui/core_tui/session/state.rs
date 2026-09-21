@@ -22,7 +22,7 @@ use super::mouse_selection::MouseSelectionState;
 use super::reflow::is_info_box_line;
 use super::status_requires_shimmer;
 use super::{
-    ActiveOverlay, InlinePromptSuggestionState, Session, SuggestedPromptState,
+    ActiveOverlay, InlinePromptSuggestionState, MouseDragTarget, Session, SuggestedPromptState,
     modal::{ModalListState, ModalSearchState, ModalState, WizardModalState},
 };
 use crate::tui::config::constants::ui;
@@ -91,14 +91,23 @@ impl Session {
     /// Returns whether a visible selection was actually cleared. Clicking any
     /// UI target (file link, overlay control, bottom panel, jump affordance)
     /// and pressing Esc while idle both route through this so the highlight
-    /// never lingers on screen after the user has moved on. Clearing also drops
-    /// the click history, so a dismissal cannot arm a stale double-click.
+    /// never lingers on screen after the user has moved on.
+    ///
+    /// This is the single dismissal boundary for a mouse interaction: it also
+    /// clears the drag target and the edge auto-scroll the drag armed. Leaving
+    /// either set would keep scrolling the transcript (or keep routing drags to
+    /// the selection path) after the highlight is gone — reachable by pressing
+    /// Esc mid-drag with the button still held. `MouseSelectionState::clear`
+    /// drops the click history too, so a dismissal cannot arm a stale
+    /// double-click.
     pub(crate) fn clear_mouse_selection(&mut self) -> bool {
         let had_selection = self.mouse_selection.has_selection || self.mouse_selection.is_selecting;
         if !had_selection {
             return false;
         }
         self.mouse_selection.clear();
+        self.mouse_drag_target = MouseDragTarget::None;
+        self.cancel_drag_auto_scroll();
         self.mark_dirty();
         true
     }

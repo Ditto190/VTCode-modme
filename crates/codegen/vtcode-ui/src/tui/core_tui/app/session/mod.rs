@@ -319,10 +319,6 @@ impl AppSession {
         self.transient_host.is_visible(TransientSurface::LocalAgents)
     }
 
-    fn local_agents_loading_active(&self) -> bool {
-        self.local_agents_visible() && self.background_activity_active()
-    }
-
     /// Whether any background task (managed subagent, background subprocess,
     /// or retained exec session) is still running, independent of drawer
     /// visibility. Background work is asynchronous, so it feeds the loading
@@ -1289,14 +1285,11 @@ impl TuiSessionDriver for AppSession {
     }
 
     fn handle_tick(&mut self) {
+        // Background work (managed subagents, background subprocesses, retained
+        // exec sessions) animates the same shimmer phase: `core.handle_tick`
+        // already ORs `background_status_shimmer_active` into its single update
+        // per tick, so no separate drawer-visible pass is needed here.
         self.core.handle_tick();
-        if self.local_agents_loading_active()
-            && self.core.appearance.should_animate_progress_status()
-            && !self.core.is_shimmer_active()
-            && self.core.shimmer_state.update()
-        {
-            self.core.mark_dirty();
-        }
     }
 
     fn render(&mut self, frame: &mut Frame<'_>) {
