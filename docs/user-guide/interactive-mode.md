@@ -102,6 +102,7 @@ ANSI-free conversation text.
 
 - `ui.fullscreen.mouse_capture = false` keeps fullscreen rendering but returns click-and-drag selection to the terminal. This also disables in-app wheel scrolling, click-to-expand, click-to-position, and link activation.
 - `ui.fullscreen.copy_on_select = false` disables automatic clipboard copy after an in-app text selection. Manual copy shortcuts still work.
+- A selection is dismissed by clicking any UI target — a file link, an overlay control, the bottom panel, a jump affordance, or the transcript itself — and by pressing `Esc` while no turn is running. Dismissing through `Esc` does not arm the rewind double-press, and `Esc` still interrupts a running turn first, so a selection never shadows turn control.
 - Copying prefers native clipboard helpers (`pbcopy` on macOS, `xclip`/`xsel`/`wl-copy` on Linux, `clip.exe` on Windows) and falls back to the OSC 52 escape sequence. When no strategy succeeds, the input status row shows a `Copy failed` notice instead of a false success.
 - Dragging a selection to the top or bottom edge of the transcript auto-scrolls it, extending the selection onto newly revealed lines.
 - `ui.fullscreen.scroll_speed` multiplies mouse-wheel scrolling without affecting `PgUp`/`PgDn`.

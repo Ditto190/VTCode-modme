@@ -86,6 +86,23 @@ impl Session {
         }
     }
 
+    /// Dismiss any in-progress or completed mouse text selection.
+    ///
+    /// Returns whether a visible selection was actually cleared. Clicking any
+    /// UI target (file link, overlay control, bottom panel, jump affordance)
+    /// and pressing Esc while idle both route through this so the highlight
+    /// never lingers on screen after the user has moved on. Clearing also drops
+    /// the click history, so a dismissal cannot arm a stale double-click.
+    pub(crate) fn clear_mouse_selection(&mut self) -> bool {
+        let had_selection = self.mouse_selection.has_selection || self.mouse_selection.is_selecting;
+        if !had_selection {
+            return false;
+        }
+        self.mouse_selection.clear();
+        self.mark_dirty();
+        true
+    }
+
     pub(crate) fn clear_suggested_prompt_state(&mut self) {
         if !self.suggested_prompt_state.active {
             return;
