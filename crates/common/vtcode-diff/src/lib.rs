@@ -5,6 +5,11 @@
     reason = "validated diff indexes and UTF-8 token boundaries are structural invariants"
 )]
 //! Bounded structured text diffs and renderer-neutral preview rows.
+//!
+//! The presentation architecture and underlying ideas (unified and side-by-side
+//! terminal previews with intraline emphasis) were informed by
+//! [OpenAI Codex](https://github.com/openai/codex) (Apache-2.0). This crate is
+//! an independent implementation for VT Code; no Codex source code was copied.
 
 use similar::{ChangeTag, TextDiff};
 use std::collections::VecDeque;
