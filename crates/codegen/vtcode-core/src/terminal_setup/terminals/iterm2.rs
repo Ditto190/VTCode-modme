@@ -99,8 +99,10 @@ pub const PROFILE_GUID: &str = "1FC21C70-F2B1-4F0F-BB03-D1AE12EF900E";
 pub const PROFILE_ICON_FILENAME: &str = "vtcode-profile-120.png";
 
 /// Embedded 120px profile artwork so installed binaries work without a
-/// repo checkout.
-const PROFILE_ICON_BYTES: &[u8] = include_bytes!("../../../../../../resources/icons/vtcode-profile-120.png");
+/// repo checkout. Resolved through the `build.rs` embedded-assets pipeline so
+/// the published crate compiles without reaching outside its package root.
+const PROFILE_ICON_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/embedded_assets/resources/icons/vtcode-profile-120.png"));
 
 /// Outcome of [`install_profile_icon`].
 pub struct ProfileIconInstallReport {
