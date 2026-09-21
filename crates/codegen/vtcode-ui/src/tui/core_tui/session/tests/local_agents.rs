@@ -686,6 +686,42 @@ fn input_status_omits_background_activity_when_none_running() {
 }
 
 #[test]
+fn exited_exec_entries_do_not_drive_shimmer_while_running_ones_do() {
+    use crate::tui::core_tui::runner::TuiSessionDriver;
+
+    let mut exited =
+        sample_local_agent_entry_with_id("exec-exited", "cargo check", app_types::LocalAgentKind::ExecSession);
+    exited.status = "exited (0)".to_string();
+    let running =
+        sample_local_agent_entry_with_id("exec-running", "cargo test", app_types::LocalAgentKind::ExecSession);
+
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents { entries: vec![exited.clone(), running] });
+
+    // Only the live session counts: shimmer on, turn-busy guard off.
+    assert!(session.core.has_background_activity());
+    assert_eq!(session.core.background_activity_status_text().as_deref(), Some("Running 1 background task..."));
+    assert!(TuiSessionDriver::has_status_spinner(&session));
+    assert!(!TuiSessionDriver::is_running_activity(&session));
+
+    let rendered = session.core.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let text = rendered.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+    assert!(text.contains("Running 1 background task"), "live exec must shimmer, got: {text:?}");
+
+    // Once everything settles to `exited`, the retained entries keep the
+    // drawer hint but must stop the loading shimmer.
+    session.handle_command(app_types::InlineCommand::SetLocalAgents { entries: vec![exited] });
+    assert!(!session.core.has_background_activity());
+    assert!(session.core.background_activity_status_text().is_none());
+    assert!(!TuiSessionDriver::has_status_spinner(&session));
+
+    let rendered = session.core.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let text = rendered.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+    assert!(!text.contains("background task"), "exited exec must not shimmer, got: {text:?}");
+    assert!(text.contains("local agents"), "retained exec must keep the drawer hint, got: {text:?}");
+}
+
+#[test]
 fn header_suggestions_do_not_show_memory_shortcut_when_enabled() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.header_context.persistent_memory = Some(InlineHeaderStatusBadge {
