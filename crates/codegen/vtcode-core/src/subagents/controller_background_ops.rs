@@ -255,12 +255,29 @@ impl SubagentController {
 
         match snapshot.lifecycle_state {
             Some(crate::tools::types::VTCodeSessionLifecycleState::Running) => {
+                // A graceful stop sets `desired_enabled=false` optimistically
+                // while SIGTERM drains. Do not resurrect `Stopped` back to
+                // `Running` during that grace window; the `Exited` arm below
+                // finalizes once the backend confirms exit.
+                if !record.desired_enabled && matches!(record.status, BackgroundSubprocessStatus::Stopped) {
+                    return Ok(None);
+                }
                 record.status = BackgroundSubprocessStatus::Running;
                 record.ended_at = None;
                 record.error = None;
             }
             Some(crate::tools::types::VTCodeSessionLifecycleState::Exited) | None => {
                 record.ended_at.get_or_insert(Utc::now());
+                // A clean `exit 0` is successful completion, not a crash.
+                // It must not trigger auto-restore and must surface as
+                // `Stopped` so the runloop/drawer agree with the exec
+                // session's `exited (0)` status.
+                if matches!(snapshot.exit_code, Some(0)) {
+                    record.desired_enabled = false;
+                    record.status = BackgroundSubprocessStatus::Stopped;
+                    record.error = None;
+                    return Ok(None);
+                }
                 if record.desired_enabled
                     && self.config.vt_cfg.subagents.background.auto_restore
                     && record.restart_attempts < 1
@@ -315,6 +332,16 @@ impl SubagentController {
         snapshot: &crate::tools::types::VTCodeExecSession,
         _config: &SubagentControllerConfig,
     ) {
+        // Defensive: a retained `Some(0)` snapshot must never surface as
+        // `Error`. This covers paths that bypass the early clean-exit return
+        // above (e.g. restart budget already exhausted).
+        if matches!(snapshot.exit_code, Some(0)) {
+            record.desired_enabled = false;
+            record.status = BackgroundSubprocessStatus::Stopped;
+            record.error = None;
+            record.ended_at.get_or_insert(Utc::now());
+            return;
+        }
         if record.desired_enabled {
             record.status = BackgroundSubprocessStatus::Error;
             record.error = Some(match snapshot.exit_code {
@@ -323,6 +350,7 @@ impl SubagentController {
             });
         } else {
             record.status = BackgroundSubprocessStatus::Stopped;
+            record.error = None;
         }
     }
 
@@ -336,6 +364,7 @@ impl SubagentController {
                 .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?;
             record.desired_enabled = false;
             record.status = BackgroundSubprocessStatus::Stopped;
+            record.error = None;
             record.updated_at = Utc::now();
             record.ended_at = Some(Utc::now());
             (record.agent_name.clone(), record.exec_session_id.clone())
@@ -368,6 +397,7 @@ impl SubagentController {
                 .ok_or_else(|| anyhow!("Unknown background subprocess {target}"))?;
             record.desired_enabled = false;
             record.status = BackgroundSubprocessStatus::Stopped;
+            record.error = None;
             record.updated_at = Utc::now();
             record.ended_at = Some(Utc::now());
             (record.agent_name.clone(), record.exec_session_id.clone())
