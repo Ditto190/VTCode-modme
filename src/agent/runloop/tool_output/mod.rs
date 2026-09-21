@@ -362,6 +362,12 @@ pub(crate) fn tracker_progress_lines(val: &Value) -> Vec<String> {
 /// to a single `  … N more` row so large checklists stay bounded.
 pub(crate) const TRACKER_TRANSCRIPT_MAX_ROWS: usize = 30;
 
+/// Max bytes of one visible tracker row. A plan step can carry a long
+/// `Action -> files: [...] -> verify: [...]` body; the row keeps only its
+/// leading description so the TODO panel and the compact current row stay
+/// scannable. The full step text remains in the structured checklist payload.
+pub(crate) const TRACKER_ROW_DESCRIPTION_MAX_BYTES: usize = 96;
+
 /// One user-facing tracker row: glyphless display text plus its typed status.
 ///
 /// `status` is `None` for headers, diagnostics, and truncation rows, which
@@ -504,7 +510,7 @@ fn tracker_rich_tree_rows(val: &Value) -> Vec<TrackerRow> {
                     .filter_map(visible_tracker_view_row)
                     .map(|display| match tracker_tree_row_glyph(&display) {
                         Some((glyph, _)) => TrackerRow {
-                            text: strip_tracker_status_glyph(&display),
+                            text: tracker_row_text(strip_tracker_status_glyph(&display)),
                             status: task_status_from_glyph(glyph),
                             leaf: true,
                         },
@@ -512,7 +518,7 @@ fn tracker_rich_tree_rows(val: &Value) -> Vec<TrackerRow> {
                         // with the neutral pending style, matching the legacy
                         // plain rendering.
                         None => TrackerRow {
-                            text: display,
+                            text: tracker_row_text(display),
                             status: TaskItemStatus::Pending,
                             leaf: false,
                         },
@@ -533,7 +539,7 @@ fn tracker_rich_tree_rows(val: &Value) -> Vec<TrackerRow> {
             .unwrap_or(TaskItemStatus::Pending);
         let leaf = tracker_tree_row_glyph(&display).is_some();
         rows.push(TrackerRow {
-            text: strip_tracker_status_glyph(&display),
+            text: tracker_row_text(strip_tracker_status_glyph(&display)),
             status,
             leaf,
         });
@@ -602,6 +608,15 @@ fn tracker_tree_row_glyph(display: &str) -> Option<(&str, &str)> {
 ///
 /// `  ├ [-] Defer setup` → `  ├ Defer setup`. Parent rows and glyph-free
 /// rows pass through unchanged.
+/// Bound one visible tracker row to a single short description.
+///
+/// Applied after glyph stripping so the tree prefix and row structure survive;
+/// only the trailing description is trimmed. Never lets a row wrap into
+/// multiple lines in the panel or the compact current-task row.
+fn tracker_row_text(text: String) -> String {
+    vtcode_commons::formatting::truncate_byte_budget(&text, TRACKER_ROW_DESCRIPTION_MAX_BYTES, "…")
+}
+
 fn strip_tracker_status_glyph(display: &str) -> String {
     let Some((_, body)) = tracker_tree_row_glyph(display) else {
         return display.to_string();
@@ -958,12 +973,50 @@ mod tests {
     use vtcode_core::utils::ansi::AnsiRenderer;
 
     use super::{
-        TRACKER_TRANSCRIPT_MAX_ROWS, TrackerLine, collect_inline_output, humanize_tracker_title,
-        is_tracker_current_row, preferred_follow_up_rendered_body, render_tool_output,
+        TRACKER_ROW_DESCRIPTION_MAX_BYTES, TRACKER_TRANSCRIPT_MAX_ROWS, TrackerLine, collect_inline_output,
+        humanize_tracker_title, is_tracker_current_row, preferred_follow_up_rendered_body, render_tool_output,
         should_render_command_session_terminal_panel, spooled_output_hint, tracker_current_tree_row,
-        tracker_panel_metadata, tracker_panel_rows, tracker_progress_lines, tracker_summary_lines,
+        tracker_panel_metadata, tracker_panel_rows, tracker_progress_lines, tracker_row_text, tracker_summary_lines,
         tracker_transcript_lines, tracker_tree_body_lines,
     };
+
+    #[test]
+    fn tracker_row_text_bounds_long_descriptions_only() {
+        let long = "Add `vtcode exec resume` to the Commands section — document the cross-turn exec-session \
+                    resume contract in the second-tier command table row for `vtcode exec`";
+        let bounded = tracker_row_text(long.to_string());
+
+        assert!(bounded.ends_with('…'), "long row must be bounded: {bounded:?}");
+        assert!(
+            bounded.len() <= TRACKER_ROW_DESCRIPTION_MAX_BYTES + '…'.len_utf8(),
+            "row must stay within the budget: {} bytes",
+            bounded.len()
+        );
+
+        // Short descriptions stay verbatim so the panel does not add noise.
+        assert_eq!(tracker_row_text("Verify with cargo check".to_string()), "Verify with cargo check");
+    }
+
+    #[test]
+    fn tracker_rows_and_current_row_share_one_short_description() {
+        let long = "Update the Everyday recipes block — add a headless resume example next to the existing \
+                    `vtcode continue --session-id` recipe and align the schedule example with the canonical flag order";
+        let payload = json!({
+            "checklist": {
+                "title": "Refine README",
+                "completed": 0,
+                "total": 1,
+                "items": [{"index": 1, "description": long, "status": "pending"}]
+            }
+        });
+
+        let rows = tracker_tree_body_lines(&payload);
+        assert_eq!(rows.len(), 1, "single item yields a single row: {rows:?}");
+        assert!(rows[0].ends_with('…'), "panel row must be bounded: {rows:?}");
+
+        let current = tracker_current_tree_row(&payload).expect("pending row is the current task");
+        assert!(current.text.ends_with('…'), "compact current row must be bounded: {:?}", current.text);
+    }
 
     #[test]
     fn command_session_terminal_panel_detects_command_payload() {
