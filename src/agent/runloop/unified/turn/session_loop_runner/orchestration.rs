@@ -1738,11 +1738,23 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     // planning ends (budget/safety-cap/tool-free recovery) queue
                     // another turn. Completed planning turns may be interview or
                     // approval handoffs and must wait for the user. Never auto-approves.
+                    // Empty-fallback guard: deterministic `PLANNING_COMPLETED_FALLBACK_RESPONSE`
+                    // turns (no LLM synthesis, no tools) increment a consecutive
+                    // counter; after MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE the
+                    // gate closes so 32 empty turns cannot re-queue forever
+                    // (session-vtcode-20260921T045723Z).
                     let plan_auto_continue_enabled = planning_active && tracker_kill_switch;
                     let plan_state = tool_registry.planning_workflow_state();
                     let plan_ready_for_approval = planning_active
                         && crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state)
                             .await;
+                    let final_text_is_empty_fallback =
+                        final_text.as_deref().is_some_and(tracker_continue::is_plan_empty_fallback_text);
+                    if final_text_is_empty_fallback {
+                        session_stats.record_plan_empty_fallback();
+                    } else {
+                        session_stats.reset_plan_empty_fallbacks();
+                    }
                     let should_queue_plan = tracker_continue::should_queue_plan_mode_auto_continue(
                         plan_auto_continue_enabled,
                         planning_active,
@@ -1751,6 +1763,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         blocked_reason,
                         is_verification_block,
                         max_turns,
+                        session_stats.consecutive_plan_empty_fallbacks(),
                     );
                     if should_queue_plan {
                         let follow_up = tracker_continue::plan_mode_continue_follow_up();
@@ -1859,6 +1872,20 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", true, 0, 0));
                     } else if planning_active && !plan_ready_for_approval && !turn_completed && !should_queue_plan {
                         // Blocked planning without auto-queue: compact status only.
+                        // When the empty-fallback cap fired, name it explicitly so
+                        // the user knows why auto-continue stopped instead of
+                        // seeing 32 silent `research/synthesis` lines.
+                        if session_stats.consecutive_plan_empty_fallbacks()
+                            >= tracker_continue::MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE
+                        {
+                            let _ = renderer.line(
+                                MessageStyle::Info,
+                                &format!(
+                                    "[i] Plan-mode auto-continue stopped after {} empty turns with no synthesis; planning remains active. Type `continue` or re-state the request to resume.",
+                                    session_stats.consecutive_plan_empty_fallbacks()
+                                ),
+                            );
+                        }
                         let _ =
                             renderer.line(MessageStyle::Info, &tracker_continue::plan_progress_line("", false, 0, 0));
                     } else if !planning_active && incomplete.as_ref().is_none_or(|items| items.is_empty()) {

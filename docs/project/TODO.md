@@ -2,11 +2,6 @@ open source vtcode-diff, IMPORTANT remember to attribute OpenAI Codex https://gi
 
 ===
 
-debug session and fix: "[!] Turn balancer: repeated low-signal navigation detected (exec::inspection:
-:rg::exit ×5); scheduling an early recovery pass."
-
-===
-
 double check compaction /compact if it works properly. "Compaction failed: Failed to generate compaction summary", check last session and debug and fix.
 
 ---

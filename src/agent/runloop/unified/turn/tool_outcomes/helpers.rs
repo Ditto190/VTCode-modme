@@ -393,6 +393,22 @@ pub(crate) fn should_queue_tracker_resume_continuation(
 /// plan is not yet ready for approval. Ordinary completed planning turns are
 /// never auto-continued (they may be interview or approval handoffs). Never
 /// auto-approves.
+///
+/// `consecutive_empty_fallbacks` breaks the empty-turn self-loop: turns that
+/// end with the deterministic `PLANNING_COMPLETED_FALLBACK_RESPONSE` (no LLM
+/// synthesis, no tool activity) must not re-queue forever. After
+/// [`MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE`] consecutive empties the gate
+/// closes and the user must `continue` manually.
+pub(crate) const MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE: u8 = 2;
+
+/// Stable marker of the deterministic empty-turn fallback text in
+/// `turn_loop::PLANNING_COMPLETED_FALLBACK_RESPONSE`. Matched by substring so
+/// the gate stays pure (no cross-module constant import) and robust to
+/// surrounding file-list appends.
+pub(crate) fn is_plan_empty_fallback_text(text: &str) -> bool {
+    text.contains("without a final plan synthesis") && text.contains("do NOT re-read files already read this turn")
+}
+
 pub(crate) fn should_queue_plan_mode_auto_continue(
     auto_continue_enabled: bool,
     planning_active: bool,
@@ -401,11 +417,15 @@ pub(crate) fn should_queue_plan_mode_auto_continue(
     blocked_reason: Option<&str>,
     is_verification_block: bool,
     cross_turn_turns: u8,
+    consecutive_empty_fallbacks: u8,
 ) -> bool {
     if !auto_continue_enabled || !planning_active || cross_turn_turns == 0 {
         return false;
     }
     if plan_ready_for_approval || is_verification_block || turn_completed {
+        return false;
+    }
+    if consecutive_empty_fallbacks >= MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE {
         return false;
     }
     blocked_reason.is_some_and(plan_mode_recoverable_block)
@@ -543,9 +563,9 @@ mod tracker_continue_tests {
     #[test]
     fn plan_mode_auto_continue_gate_respects_user_gates_and_budget() {
         // Ready-for-approval is a user gate.
-        assert!(!should_queue_plan_mode_auto_continue(true, true, true, true, None, false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, true, true, None, false, 8, 0));
         // Ordinary completed planning turns never auto-continue (interview risk).
-        assert!(!should_queue_plan_mode_auto_continue(true, true, false, true, None, false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, true, None, false, 8, 0));
         // Recoverable blocked planning continues.
         assert!(should_queue_plan_mode_auto_continue(
             true,
@@ -554,7 +574,8 @@ mod tracker_continue_tests {
             false,
             Some("reached the safety cap"),
             false,
-            8
+            8,
+            0
         ));
         // Planning handoff / verification / blocked-without-reason stay off.
         // Production PLANNING_COMPLETED_TURN_FALLBACK_REASON is recoverable
@@ -568,7 +589,8 @@ mod tracker_continue_tests {
                 "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active."
             ),
             false,
-            8
+            8,
+            0
         ));
         // Compound permission+recovery stays denied.
         assert!(!should_queue_plan_mode_auto_continue(
@@ -578,7 +600,8 @@ mod tracker_continue_tests {
             false,
             Some("recovery fallback; permission denied for exec_command"),
             false,
-            8
+            8,
+            0
         ));
         assert!(!should_queue_plan_mode_auto_continue(
             true,
@@ -587,13 +610,42 @@ mod tracker_continue_tests {
             false,
             Some("pending verification"),
             true,
-            8
+            8,
+            0
         ));
-        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, None, false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, None, false, 8, 0));
         // Kill-switch / zero budget / inactive planning stay off.
-        assert!(!should_queue_plan_mode_auto_continue(false, true, false, false, Some("turn budget"), false, 8));
-        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, Some("turn budget"), false, 0));
-        assert!(!should_queue_plan_mode_auto_continue(true, false, false, false, Some("turn budget"), false, 8));
+        assert!(!should_queue_plan_mode_auto_continue(false, true, false, false, Some("turn budget"), false, 8, 0));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, Some("turn budget"), false, 0, 0));
+        assert!(!should_queue_plan_mode_auto_continue(true, false, false, false, Some("turn budget"), false, 8, 0));
+    }
+
+    #[test]
+    fn plan_mode_auto_continue_stops_after_consecutive_empty_fallbacks() {
+        let reason = Some(
+            "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active.",
+        );
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, reason, false, 32, 0));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, reason, false, 32, 1));
+        assert!(!should_queue_plan_mode_auto_continue(
+            true,
+            true,
+            false,
+            false,
+            reason,
+            false,
+            32,
+            MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE
+        ));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, reason, false, 32, 3));
+    }
+
+    #[test]
+    fn detects_plan_empty_fallback_text() {
+        let empty = "Planning remains active, but this turn ended without a final plan synthesis. The research gathered above is preserved; do NOT re-read files already read this turn. Type `keep planning`.";
+        assert!(is_plan_empty_fallback_text(empty));
+        assert!(!is_plan_empty_fallback_text("Planning turn ended via recovery fallback without confirming plan."));
+        assert!(!is_plan_empty_fallback_text(""));
     }
 
     #[test]
