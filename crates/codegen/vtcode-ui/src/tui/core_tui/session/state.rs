@@ -23,6 +23,7 @@ use super::reflow::is_info_box_line;
 use super::status_requires_shimmer;
 use super::{
     ActiveOverlay, InlinePromptSuggestionState, MouseDragTarget, Session, SuggestedPromptState,
+    action::Action,
     modal::{ModalListState, ModalSearchState, ModalState, WizardModalState},
 };
 use crate::tui::config::constants::ui;
@@ -35,7 +36,6 @@ const ACTION_REQUIRED_STATUS_TEXT: &str = "Action required";
 const APPROVAL_REQUIRED_STATUS_TEXT: &str = "Approval required";
 const INPUT_REQUIRED_STATUS_TEXT: &str = "Input required";
 const ACTIVE_PTY_STATUS_TEXT: &str = "Running PTY command...";
-const FOREGROUND_PTY_BACKGROUND_HINT: &str = "Ctrl+B background";
 
 impl Session {
     /// Mark dirty after task-panel body content changed. Terminal-title progress
@@ -630,8 +630,16 @@ impl Session {
         })
     }
 
-    pub(crate) fn foreground_pty_background_hint(&self) -> Option<&'static str> {
-        self.has_active_foreground_pty().then_some(FOREGROUND_PTY_BACKGROUND_HINT)
+    pub(crate) fn background_shortcut_label(&self) -> &str {
+        self.primary_binding_label(Action::BackgroundOperation).unwrap_or("Ctrl+B")
+    }
+
+    pub(crate) fn foreground_pty_background_hint(&self) -> Option<String> {
+        // The shared foreground counter covers both PTY and pipe exec sessions
+        // (see `ExecSessionManager::insert_session`); the name stays `pty` for
+        // surgical compatibility with existing callers.
+        self.has_active_foreground_pty()
+            .then(|| format!("{} background", self.background_shortcut_label()))
     }
 
     fn active_pty_status_text(&self) -> Option<&'static str> {

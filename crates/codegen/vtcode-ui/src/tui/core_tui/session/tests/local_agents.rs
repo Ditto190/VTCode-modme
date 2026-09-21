@@ -711,3 +711,68 @@ fn load_primary_agent_palette(session: &mut AppSession) {
     });
     session.close_transient();
 }
+
+#[test]
+fn foreground_pty_footer_hint_styles_shortcut_as_visual_indicator() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.active_pty_sessions = Some(Arc::new(AtomicUsize::new(1)));
+
+    let line = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let rendered = line_text(&line);
+    assert!(rendered.contains("Ctrl+B"), "PTY hint must show shortcut, got: {rendered:?}");
+    assert!(rendered.contains("background"), "PTY hint must explain background, got: {rendered:?}");
+
+    let key_span = line
+        .spans
+        .iter()
+        .find(|span| span.content.as_ref() == "Ctrl+B")
+        .expect("shortcut must be its own styled span");
+    assert!(
+        key_span.style.add_modifier.contains(Modifier::BOLD),
+        "shortcut key must be bold as a visual indicator"
+    );
+}
+
+#[test]
+fn foreground_pty_hint_follows_rebound_background_shortcut() {
+    use crate::tui::core_tui::session::action::BindingStore;
+
+    let mut overlay = hashbrown::HashMap::new();
+    overlay.insert("background_operation".to_owned(), vec!["ctrl+x".to_owned()]);
+    let bindings = BindingStore::new(overlay);
+
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.set_bindings(bindings);
+    session.active_pty_sessions = Some(Arc::new(AtomicUsize::new(1)));
+
+    let status = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let rendered = line_text(&status);
+    assert!(rendered.contains("Ctrl+X"), "footer must use rebound shortcut, got: {rendered:?}");
+    assert!(!rendered.contains("Ctrl+B"), "footer must not keep stale shortcut, got: {rendered:?}");
+
+    let header = session.header_suggestions_line().expect("header suggestions line");
+    let header_text = line_text(&header);
+    assert!(header_text.contains("Ctrl+X"), "header must use rebound shortcut, got: {header_text:?}");
+}
+
+#[test]
+fn combined_drawer_and_pty_hint_styles_both_shortcuts_once() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.local_agents = vec![sample_local_agent_entry(app_types::LocalAgentKind::Delegated)];
+    session.active_pty_sessions = Some(Arc::new(AtomicUsize::new(1)));
+
+    let line = session.render_input_status_line(VIEW_WIDTH).expect("input status line");
+    let rendered = line_text(&line);
+    assert!(rendered.contains("Alt+S"), "combined hint must keep drawer shortcut, got: {rendered:?}");
+    assert!(rendered.contains("Ctrl+B"), "combined hint must keep background shortcut, got: {rendered:?}");
+    assert_eq!(rendered.matches("Ctrl+B").count(), 1, "background shortcut must not duplicate, got: {rendered:?}");
+
+    for key in ["Alt+S", "Ctrl+B"] {
+        let span = line
+            .spans
+            .iter()
+            .find(|span| span.content.as_ref() == key)
+            .unwrap_or_else(|| panic!("{key} must be its own styled span, got: {rendered:?}"));
+        assert!(span.style.add_modifier.contains(Modifier::BOLD), "{key} must be bold as a visual indicator");
+    }
+}
