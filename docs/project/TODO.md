@@ -79,45 +79,6 @@ check and improve copy selection highlight, make it easier to output and unhighl
 
 ===
 
-CRITICAL: plan mode being stuck in infite loop and
-enventually failed with turn block
-
-• Plan — research/synthesis
-
-Turn blocked: planning recovery did not produce an
-approval-ready plan; planning remains active
-
-# Last-Turn Diagnostics
-
-Elapsed: 774941ms
-Tools used this session (1): command_session_internal
-Tool calls: requested=24 admitted=19 failed=0 denied=0
-preflight_failures=0 reused=0
-Turn usage: prompt=480554 cached=0 completion=5725
-
-What you can do:
-• In this session: Type 'continue' to resume, or
-describe alternative instructions
-You're in plan mode (read-only) — retrying the same
-tools
-will re-block:
-• Stay planning: type `continue` to resume research
-• Implement now: approve the plan or run `/mode
-  build`
-(`/mode auto` for unattended)
-• From terminal: Run `vtcode --resume session-
-  vtcode-20260921T045723Z_452479-85724`
-• Blocker details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/current_blocked.md
-• Archived details: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/tasks/blockers/session-vtcode-20260921t045723z_452479-85724-20260921T051026Z-4650574f-595b-485e-915e-b306fd55eed1.md
-Repeated follow-up after stalled turn detected;
-enforcing
-autonomous recovery and conclusion.
-
-== check session session-vtcode-20260921T045723Z_452479-85724
-and deep dive and fix
-
-===
-
 when background process is running (subagent, managed agents, background process) -> make sure to wire to global loading state so that the loading shimmer reflects the actual background activity.
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-21 at 12.34.33.png'
 
