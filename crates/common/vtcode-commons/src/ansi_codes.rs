@@ -707,6 +707,33 @@ pub fn set_window_title(title: &str) -> String {
     format!("{OSC_SET_TITLE_PREFIX}{title}{BEL}")
 }
 
+/// Build an OSC sequence to set the terminal icon name.
+///
+/// This is the text label terminals show in taskbars, docks, and tab
+/// overviews (for example iTerm2, Windows Terminal, Kitty, Ghostty, and
+/// WezTerm). It pairs with [`set_window_title`]: emulators that keep icon
+/// and title separate honor `OSC 1`, while `OSC 0` aliases both.
+#[inline]
+pub fn set_icon_name(name: &str) -> String {
+    format!("{OSC_SET_ICON_PREFIX}{name}{BEL}")
+}
+
+/// Build an OSC sequence to set both icon name and window title at once.
+#[inline]
+pub fn set_icon_and_title(title: &str) -> String {
+    format!("{OSC_SET_ICON_AND_TITLE_PREFIX}{title}{BEL}")
+}
+
+/// Build combined icon (`OSC 1`) plus title (`OSC 2`) sequences.
+///
+/// Emitting both explicitly keeps the built-in profile/tab icon label in
+/// sync on emulators that distinguish icon from title, instead of relying
+/// on every emulator aliasing `OSC 0` the same way.
+#[inline]
+pub fn set_terminal_title_and_icon(title: &str) -> String {
+    format!("{}{}", set_icon_name(title), set_window_title(title))
+}
+
 /// Build an OSC 8 hyperlink open sequence
 #[inline]
 pub fn hyperlink_open(url: &str) -> String {
@@ -731,5 +758,21 @@ mod tests {
     #[test]
     fn redraw_line_formats_expected_sequence() {
         assert_eq!(format_redraw_line("Done"), "\r\x1b[2KDone");
+    }
+
+    #[test]
+    fn icon_and_title_payloads_use_distinct_osc_codes() {
+        assert_eq!(set_icon_name("VT"), "\x1b]1;VT\x07");
+        assert_eq!(set_window_title("Code"), "\x1b]2;Code\x07");
+        assert_eq!(set_icon_and_title("VT Code"), "\x1b]0;VT Code\x07");
+    }
+
+    #[test]
+    fn terminal_title_and_icon_emits_both_sequences_in_order() {
+        let combined = set_terminal_title_and_icon("demo-project");
+        assert_eq!(combined, "\x1b]1;demo-project\x07\x1b]2;demo-project\x07");
+
+        let cleared = set_terminal_title_and_icon("");
+        assert_eq!(cleared, "\x1b]1;\x07\x1b]2;\x07");
     }
 }

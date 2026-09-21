@@ -5,6 +5,7 @@ This guide covers the terminal-specific settings that matter most when using VT 
 ## Table of Contents
 
 - [Theme and Appearance](#theme-and-appearance)
+- [Profile Icon](#profile-icon)
 - [Line Break Options](#line-break-options)
 - [Paste Handling](#paste-handling)
 - [Notification Setup](#notification-setup)
@@ -32,6 +33,18 @@ command_timeout_ms = 200
 ```
 
 See [status-line.md](./status-line.md) for the full status-line payload and examples.
+
+## Profile Icon
+
+VT Code sets both the terminal icon label (`OSC 1`) and window title
+(`OSC 2`) to the same sanitized status text, so tab/taskbar labels stay in
+sync on emulators that distinguish icon from title (iTerm2, Windows
+Terminal, Kitty, Ghostty, WezTerm, and others).
+
+For a graphical profile icon, configure it once in the terminal app using
+the bundled assets in `resources/icons/` (see its `README.md`):
+`vtcode-profile-32.png` for tabs, `vtcode-profile-120.png` for HiDPI
+profiles, and `vtcode-profile-180.ico`/`.png` for Windows Terminal.
 
 ## Line Break Options
 
