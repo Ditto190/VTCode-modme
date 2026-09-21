@@ -29,7 +29,7 @@ use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::tools::continuation::{
     NEXT_CONTINUE_PROMPT, NEXT_READ_PROMPT, PtyContinuationArgs, ReadChunkContinuationArgs,
 };
-use vtcode_core::tools::handlers::task_tracking::compact_task_tree_view_from_items;
+use vtcode_core::tools::handlers::task_tracking::{compact_task_tree_view_from_items, short_task_description};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_core::utils::style_helpers::{ColorPalette, render_styled};
 use vtcode_ui::tui::app::TaskPanelMetadata;
@@ -611,10 +611,41 @@ fn tracker_tree_row_glyph(display: &str) -> Option<(&str, &str)> {
 /// Bound one visible tracker row to a single short description.
 ///
 /// Applied after glyph stripping so the tree prefix and row structure survive;
-/// only the trailing description is trimmed. Never lets a row wrap into
-/// multiple lines in the panel or the compact current-task row.
+/// only the trailing description is shortened to its leading clause and then
+/// trimmed to the byte budget. Never lets a row wrap into multiple lines in
+/// the panel or the compact current-task row.
 fn tracker_row_text(text: String) -> String {
-    vtcode_commons::formatting::truncate_byte_budget(&text, TRACKER_ROW_DESCRIPTION_MAX_BYTES, "…")
+    let (prefix, body) = split_tree_prefix_for_shortening(&text);
+    let short = short_task_description(body);
+    let base = if short.trim().is_empty() {
+        body.trim()
+    } else {
+        short.trim()
+    };
+    let recombined = format!("{prefix}{base}");
+    vtcode_commons::formatting::truncate_byte_budget(&recombined, TRACKER_ROW_DESCRIPTION_MAX_BYTES, "…")
+}
+
+/// Split a glyphless tree row into its branch prefix and description body so
+/// shortening preserves `  ├ `/`  └ `/`  │ ` structure.
+fn split_tree_prefix_for_shortening(text: &str) -> (&str, &str) {
+    let mut index = 0;
+    while index < text.len() && text.as_bytes()[index] == b' ' {
+        index += 1;
+    }
+    loop {
+        let rest = &text[index..];
+        if let Some(after) = rest
+            .strip_prefix("├ ")
+            .or_else(|| rest.strip_prefix("└ "))
+            .or_else(|| rest.strip_prefix("│ "))
+        {
+            index = text.len() - after.len();
+            continue;
+        }
+        break;
+    }
+    text.split_at(index)
 }
 
 fn strip_tracker_status_glyph(display: &str) -> String {
@@ -652,15 +683,7 @@ fn tracker_progress_header(val: &Value) -> String {
     let Some((completed, total)) = tracker_progress_counts(val) else {
         return "• Tasks".to_string();
     };
-    let label = val
-        .get("checklist")
-        .and_then(Value::as_object)
-        .and_then(|checklist| checklist.get("title"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|title| !title.is_empty())
-        .map(humanize_tracker_title)
-        .unwrap_or_else(|| "Tasks".to_string());
+    let label = resolve_tracker_title(val, "Tasks");
     format!("• {label} {completed}/{total}")
 }
 
@@ -744,15 +767,66 @@ fn visible_tracker_view_row(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn tracker_panel_metadata(val: &Value) -> Option<TaskPanelMetadata> {
-    let checklist = val.get("checklist").and_then(Value::as_object)?;
-    let title = checklist
-        .get("title")
-        .and_then(Value::as_str)
-        .filter(|title| !title.trim().is_empty())
-        .map(humanize_tracker_title)
-        .unwrap_or_else(|| "Task tracker".to_string());
+    val.get("checklist").and_then(Value::as_object)?;
+    let title = resolve_tracker_title(val, "Task tracker");
     let (completed, total) = tracker_progress_counts(val)?;
     Some(TaskPanelMetadata { title, completed, total })
+}
+
+/// Descriptive header title: never surface a generated plan codename.
+///
+/// Checklist titles created from approved plans already carry the plan-summary
+/// clause, but older/manual payloads may still carry a timestamp slug
+/// (`1789108823046-jolly-forest`) or its humanized form (`Jolly Forest`).
+/// Those read as random names and say nothing about the work, so derive a
+/// purpose-indicating title from the first checklist item instead. User titles
+/// pass through verbatim (humanized only for timestamp slugs).
+fn resolve_tracker_title(val: &Value, fallback_default: &str) -> String {
+    let raw = val
+        .get("checklist")
+        .and_then(Value::as_object)
+        .and_then(|checklist| checklist.get("title"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty());
+    let Some(raw) = raw else {
+        return first_item_descriptive_title(val).unwrap_or_else(|| fallback_default.to_string());
+    };
+    if is_generated_tracker_title(raw) {
+        return first_item_descriptive_title(val).unwrap_or_else(|| fallback_default.to_string());
+    }
+    humanize_tracker_title(raw)
+}
+
+fn is_generated_tracker_title(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    let mut parts = trimmed.splitn(2, ['-', '_']);
+    let prefix = parts.next().unwrap_or_default();
+    let slug = parts.next().unwrap_or_default();
+    let is_timestamped =
+        prefix.len() >= 10 && prefix.chars().all(|character| character.is_ascii_digit()) && !slug.is_empty();
+    if is_timestamped {
+        return true;
+    }
+    vtcode_commons::slug::is_humanized_codename(&humanize_tracker_title(trimmed))
+}
+
+/// Fallback descriptive title from the first actionable checklist item.
+/// Bounds to the same 60-byte header budget used at tracker creation.
+fn first_item_descriptive_title(val: &Value) -> Option<String> {
+    let items = val.get("checklist")?.get("items")?.as_array()?;
+    for item in items {
+        let description = item
+            .get("description")
+            .and_then(Value::as_str)
+            .or_else(|| item.get("text").and_then(Value::as_str))?;
+        let short = short_task_description(description);
+        let short = short.trim();
+        if !short.is_empty() {
+            return Some(vtcode_commons::formatting::truncate_byte_budget(short, 60, "…"));
+        }
+    }
+    None
 }
 
 fn render_tracker_view(renderer: &mut AnsiRenderer, val: &Value) -> Result<bool> {
@@ -986,12 +1060,17 @@ mod tests {
                     resume contract in the second-tier command table row for `vtcode exec`";
         let bounded = tracker_row_text(long.to_string());
 
-        assert!(bounded.ends_with('…'), "long row must be bounded: {bounded:?}");
+        assert_eq!(bounded, "Add `vtcode exec resume` to the Commands section");
         assert!(
             bounded.len() <= TRACKER_ROW_DESCRIPTION_MAX_BYTES + '…'.len_utf8(),
             "row must stay within the budget: {} bytes",
             bounded.len()
         );
+
+        // Long clauses without a detail separator still truncate with an ellipsis.
+        let unbroken = "Implement a very long refactor across many modules and services that keeps going without a separator at all";
+        let truncated = tracker_row_text(unbroken.to_string());
+        assert!(truncated.ends_with('…'), "unbroken row must be bounded: {truncated:?}");
 
         // Short descriptions stay verbatim so the panel does not add noise.
         assert_eq!(tracker_row_text("Verify with cargo check".to_string()), "Verify with cargo check");
@@ -1012,10 +1091,11 @@ mod tests {
 
         let rows = tracker_tree_body_lines(&payload);
         assert_eq!(rows.len(), 1, "single item yields a single row: {rows:?}");
-        assert!(rows[0].ends_with('…'), "panel row must be bounded: {rows:?}");
+        assert_eq!(rows[0], "  └ Update the Everyday recipes block");
+        assert!(!rows[0].contains("headless"), "detail tail must not surface: {rows:?}");
 
         let current = tracker_current_tree_row(&payload).expect("pending row is the current task");
-        assert!(current.text.ends_with('…'), "compact current row must be bounded: {:?}", current.text);
+        assert_eq!(current.text, "  ▶ Update the Everyday recipes block");
     }
 
     #[test]
@@ -1883,8 +1963,9 @@ mod tests {
 
         let rows = tracker_progress_lines(&payload);
 
-        assert_eq!(rows, vec!["• Kind Lagoon 0/1"]);
+        assert_eq!(rows, vec!["• Investigate 0/1"]);
         assert!(!rows[0].contains("1789108823046"));
+        assert!(!rows[0].contains("Lagoon"));
         assert!(!rows[0].contains("next:"));
     }
 
@@ -1906,9 +1987,47 @@ mod tests {
 
         let rows = tracker_progress_lines(&payload);
 
-        assert_eq!(rows, vec!["• Kind Lagoon 2/5"]);
+        assert_eq!(rows, vec!["• Done one 2/5"]);
         assert!(!rows[0].contains("1789108823046"));
+        assert!(!rows[0].contains("Lagoon"));
         assert!(!rows[0].contains("Audit heavy-crate linkage"));
+    }
+
+    #[test]
+    fn tracker_header_replaces_humanized_codename_with_first_task() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Jolly Forest",
+                "items": [
+                    { "index_path": "1", "description": "Add vtcode exec resume to the Commands section – document the contract", "status": "pending" },
+                    { "index_path": "2", "description": "Verify links", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_progress_lines(&payload);
+        assert_eq!(rows, vec!["• Add vtcode exec resume to the Commands section 0/2"]);
+        assert!(!rows[0].contains("Jolly"));
+
+        let metadata = tracker_panel_metadata(&payload).expect("metadata");
+        assert_eq!(metadata.title, "Add vtcode exec resume to the Commands section");
+    }
+
+    #[test]
+    fn tracker_header_keeps_user_title_verbatim() {
+        let payload = json!({
+            "status": "updated",
+            "checklist": {
+                "title": "Release",
+                "items": [
+                    { "index_path": "1", "description": "Investigate", "status": "pending" },
+                ]
+            }
+        });
+
+        let rows = tracker_progress_lines(&payload);
+        assert_eq!(rows, vec!["• Release 0/1"]);
     }
 
     #[test]

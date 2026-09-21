@@ -2,7 +2,7 @@ use anyhow::{Context, bail};
 use std::collections::HashMap;
 use vtcode_commons::paths::ensure_path_within_workspace_resolved;
 use vtcode_core::config::constants::tools;
-use vtcode_core::tools::handlers::task_tracking::split_task_description_metadata;
+use vtcode_core::tools::handlers::task_tracking::{short_task_description, split_task_description_metadata};
 use vtcode_core::tools::registry::ToolRegistry;
 use vtcode_ui::tui::app::{InlineHandle, PlanContent};
 
@@ -305,12 +305,24 @@ const TRACKER_TITLE_MAX_BYTES: usize = 60;
 ///
 /// The plan file stem is a generated codename (`1789108823046-jolly-forest`),
 /// which reads as a random name in the TODO panel header and says nothing about
-/// the work. Prefer the plan summary's leading clause; fall back to the
-/// humanized file stem only when the summary is empty.
-fn descriptive_tracker_title(plan: &PlanContent, plan_file: &std::path::Path) -> String {
+/// the work. Prefer the plan summary's leading clause; fall back to the first
+/// task's short description and only then to the humanized file stem.
+fn descriptive_tracker_title(
+    plan: &PlanContent,
+    plan_file: &std::path::Path,
+    fallback_items: &[serde_json::Value],
+) -> String {
     let clause = leading_title_clause(&plan.summary);
     if !clause.is_empty() {
         return vtcode_commons::formatting::truncate_byte_budget(&clause, TRACKER_TITLE_MAX_BYTES, "…");
+    }
+    for item in fallback_items {
+        let description = item.get("description").and_then(|value| value.as_str()).unwrap_or_default();
+        let short = short_task_description(description);
+        let short = short.trim();
+        if !short.is_empty() {
+            return vtcode_commons::formatting::truncate_byte_budget(short, TRACKER_TITLE_MAX_BYTES, "…");
+        }
     }
     let stem = plan_file
         .file_stem()
@@ -407,7 +419,7 @@ pub(crate) async fn create_task_tracker_from_active_plan(
         .context("task_tracker is unavailable; approved-plan execution is blocked")?;
     let args = serde_json::json!({
         "action": "create",
-        "title": descriptive_tracker_title(&plan, &plan_file),
+        "title": descriptive_tracker_title(&plan, &plan_file, &items),
         "items": items,
     });
 
@@ -475,7 +487,7 @@ mod tests {
             None,
         );
 
-        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"));
+        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"), &[]);
 
         assert_eq!(title, "Refine `README.md` so it matches the current CLI surface");
         assert!(!title.contains("Jolly"), "the generated codename must not surface: {title}");
@@ -489,10 +501,24 @@ mod tests {
             None,
         );
 
-        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"));
+        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"), &[]);
 
         assert!(title.len() <= 60 + '…'.len_utf8(), "title must stay bounded: {title:?}");
         assert!(title.ends_with('…'), "bounded title keeps the ellipsis marker: {title:?}");
+    }
+
+    #[test]
+    fn descriptive_tracker_title_falls_back_to_first_item_before_codename() {
+        let plan = PlanContent::from_markdown("1789108823046-jolly-forest".to_string(), "## Scope\n", None);
+        assert!(plan.summary.trim().is_empty(), "fixture must keep the summary empty");
+        let items = vec![
+            json!({"description": "Add vtcode exec resume to the Commands section – document the resume contract", "status": "pending"}),
+        ];
+
+        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"), &items);
+
+        assert_eq!(title, "Add vtcode exec resume to the Commands section");
+        assert!(!title.contains("Jolly"), "the generated codename must not surface: {title}");
     }
 
     #[test]
@@ -502,7 +528,7 @@ mod tests {
         let plan = PlanContent::from_markdown("1789108823046-jolly-forest".to_string(), "## Scope\n", None);
         assert!(plan.summary.trim().is_empty(), "fixture must keep the summary empty");
 
-        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"));
+        let title = descriptive_tracker_title(&plan, Path::new("/plans/1789108823046-jolly-forest.md"), &[]);
 
         assert_eq!(title, "Jolly Forest");
     }
