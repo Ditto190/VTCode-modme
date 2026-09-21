@@ -133,3 +133,12 @@ autonomous recovery and conclusion.
 
 == check session session-vtcode-20260921T045723Z_452479-85724
 and deep dive and fix
+
+===
+
+fix the `vtcode-bash-runner --all-features` serde failure from the hawk run
+
+===
+
+when background process is running (subagent, managed agents, background process) -> make sure to wire to global loading state so that the loading shimmer reflects the actual background activity.
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-21 at 12.34.33.png'
