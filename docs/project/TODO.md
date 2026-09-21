@@ -85,8 +85,12 @@ Status: exited (0) · cwd . · pid 67321
     Finished `dev` profile [unoptimized] target(s) in 16.07s
 ```
 
-==> debug and fix the system again.
+==> debug and fix the system again. session session-vtcode-20260921T043353Z_547816-25453
 
 ===
 
 check and improve copy selection highlight, make it easier to output and unhighlight text when click in the TUI.
+
+===
+
+https://github.com/rui314/mold
