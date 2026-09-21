@@ -44,7 +44,7 @@ experimental_use_rmcp_client = true
 [[mcp.providers]]
 name = "memcode"
 enabled = true
-endpoint = "https://mcp.memcode.in/mcp"
+endpoint = "https://mcp.memcode.in/i/vtcode/mcp"
 handshake = "auto"
 max_concurrent_requests = 3
 
@@ -55,8 +55,8 @@ client_id = "REPLACE_WITH_REGISTERED_CLIENT_ID"
 scopes = ["memory:connections:write", "memory:read", "memory:write"]
 callback_port = 8768
 credentials_store_mode = "auto"
-extra_auth_params = { resource = "https://memory.memcode.in" }
-extra_token_params = { resource = "https://memory.memcode.in" }
+extra_auth_params = { resource = "https://mcp.memcode.in/mcp" }
+extra_token_params = { resource = "https://mcp.memcode.in/mcp" }
 ```
 
 When MCP requirement enforcement is enabled, also allow the exact endpoint:
@@ -64,7 +64,7 @@ When MCP requirement enforcement is enabled, also allow the exact endpoint:
 ```toml
 [mcp.requirements]
 enforce = true
-allowed_http_endpoints = ["https://mcp.memcode.in/mcp"]
+allowed_http_endpoints = ["https://mcp.memcode.in/i/vtcode/mcp"]
 ```
 
 ## 3. Sign in and verify
