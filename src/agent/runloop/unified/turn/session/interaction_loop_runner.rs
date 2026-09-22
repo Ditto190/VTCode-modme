@@ -15,12 +15,16 @@ use crate::agent::runloop::model_picker::ModelPickerProgress;
 use crate::agent::runloop::unified::display::display_user_message;
 use crate::agent::runloop::unified::external_url_guard::ExternalUrlGuardContext;
 use crate::agent::runloop::unified::inline_events::{
-    InlineEventLoopResources, InlineInterruptCoordinator, poll_inline_loop_action,
+    InlineEventLoopResources, InlineInterruptCoordinator, InlineLoopAction, poll_inline_loop_action,
 };
 use crate::agent::runloop::unified::model_selection::{ModelSwitchCompactionTargets, finalize_model_selection};
 use crate::agent::runloop::unified::palettes::ActivePalette;
+use crate::agent::runloop::unified::session_setup::refresh_local_agents;
 use crate::agent::runloop::unified::settings_interactive::{reload_state_from_disk, show_settings_palette};
 use crate::agent::runloop::unified::state::is_follow_up_prompt_like;
+use crate::agent::runloop::unified::turn::background_completion::{
+    background_completion_thread_event, drain_background_completions, drain_exec_session_completions,
+};
 use crate::agent::runloop::unified::turn::session::{
     mcp_lifecycle, memory_prompt, slash_command_handler, tool_dispatch,
 };
@@ -192,12 +196,61 @@ pub(super) async fn run_interaction_loop_impl(
             editor_open_sender: ctx.editor_open_sender,
             editor_open_dispatcher: ctx.editor_open_dispatcher.clone(),
             exec_sessions: Some(ctx.tool_registry.exec_session_manager()),
+            background_completion_notify: ctx.background_completion_notify.clone(),
+            exec_completion_notify: ctx.exec_completion_notify.clone(),
             webmcp_prompt_receiver: ctx.webmcp_prompt_receiver,
             idle_wake_delay,
         };
 
         let inline_action = poll_inline_loop_action(ctx.session, ctx.ctrl_c_notify, resources).await?;
         sync_mcp_approval_policy_for_context(ctx);
+
+        if matches!(&inline_action, InlineLoopAction::Continue) {
+            let completion_drain = drain_background_completions(
+                ctx.background_completion_receiver.as_mut(),
+                ctx.pending_background_completions,
+            );
+            let exec_completion_drain = drain_exec_session_completions(
+                ctx.exec_completion_receiver.as_mut(),
+                ctx.pending_background_completions,
+            );
+            if completion_drain.lagged
+                && let Some(controller) = ctx.tool_registry.subagent_controller()
+                && let Err(error) = controller.refresh_background_processes().await
+            {
+                tracing::warn!(error = %error, "Failed to reconcile lagged background completions");
+            }
+            for event in completion_drain.events.iter().chain(exec_completion_drain.events.iter()) {
+                let style = if matches!(event.status, vtcode_core::subagents::BackgroundSubprocessStatus::Error) {
+                    MessageStyle::Error
+                } else {
+                    MessageStyle::Info
+                };
+                let detail = event
+                    .summary
+                    .as_deref()
+                    .or(event.error.as_deref())
+                    .unwrap_or("no summary recorded");
+                let exit = event.exit_code.map(|code| format!(" (exit {code})")).unwrap_or_default();
+                ctx.renderer.line(
+                    style,
+                    &format!("Background task {} {}: {}{}", event.task_id, event.status.as_str(), detail, exit),
+                )?;
+                if let Some(emitter) = ctx.harness_emitter {
+                    let _ = emitter.emit(background_completion_thread_event(event));
+                }
+            }
+            if completion_drain.added.saturating_add(exec_completion_drain.added) > 0 {
+                let controller = ctx.tool_registry.subagent_controller();
+                if let Err(error) =
+                    refresh_local_agents(ctx.handle, controller.as_ref(), ctx.tool_registry.exec_session_manager())
+                        .await
+                {
+                    tracing::warn!(%error, "Failed to synchronize Local Agents after background completion");
+                }
+                return Ok(InteractionOutcome::BackgroundCompletionReady);
+            }
+        }
 
         let current_input_activity = ctx.input_activity_counter.load(Ordering::Relaxed);
         if current_input_activity != last_input_activity {

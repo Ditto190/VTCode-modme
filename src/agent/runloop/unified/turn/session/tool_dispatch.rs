@@ -9,7 +9,7 @@ use crate::agent::runloop::unified::shell::shell_quote_if_needed;
 use crate::agent::runloop::unified::status_line::InputStatusState;
 use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
 use crate::agent::runloop::unified::turn::session::direct_tool_completion::{
-    ReplyKind, generate_completion_reply_with_suggestions,
+    ReplyKind, generate_completion_reply_with_suggestions, latest_direct_background_completion_identity,
 };
 use crate::agent::runloop::unified::turn::session::interaction_loop::{InteractionLoopContext, InteractionOutcome};
 use crate::agent::runloop::unified::turn::tool_outcomes::handlers::{ToolOutcomeContext, handle_single_tool_call};
@@ -205,8 +205,15 @@ pub(crate) async fn execute_direct_tool_call(
     );
 
     // Direct tool paths already executed and rendered output; skip creating an
-    // immediate LLM turn for this interaction loop iteration.
-    Ok(Some(InteractionOutcome::DirectToolHandled))
+    // immediate LLM turn for this interaction loop iteration. If this call
+    // launched background work, retain its stable completion identity so only
+    // that user-directed completion stays non-autonomous.
+    Ok(Some(
+        latest_direct_background_completion_identity(ctx.interaction_ctx.conversation_history)
+            .map_or(InteractionOutcome::DirectToolHandled, |completion_identity| {
+                InteractionOutcome::DirectBackgroundToolHandled { completion_identity }
+            }),
+    ))
 }
 
 fn direct_tool_skips_confirmations(tool_name: &str) -> bool {

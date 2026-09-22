@@ -147,8 +147,9 @@ pub(super) async fn append_transient_turn_notes(
     workspace: &std::path::Path,
     tool_registry: &ToolRegistry,
     unrelated_dirty_note: Option<String>,
+    background_completion_note: Option<String>,
 ) -> Vec<String> {
-    let mut transient_system_notes = Vec::with_capacity(3);
+    let mut transient_system_notes = Vec::with_capacity(4);
 
     if let Some(note) = {
         let stale_paths = tool_registry.edited_file_monitor_ref().stale_tracked_paths();
@@ -168,6 +169,11 @@ pub(super) async fn append_transient_turn_notes(
     // pre-filled wait call so it needs zero reconstruction. This also covers
     // session restore — both paths flow through the same turn loop.
     if let Some(note) = build_exec_session_resume_note(tool_registry).await {
+        transient_system_notes.push(note.clone());
+        history.push(vtcode_core::llm::provider::Message::system(note));
+    }
+
+    if let Some(note) = background_completion_note {
         transient_system_notes.push(note.clone());
         history.push(vtcode_core::llm::provider::Message::system(note));
     }
@@ -659,7 +665,7 @@ mod tests {
         let registry = vtcode_core::tools::registry::ToolRegistry::new(temp.path().to_path_buf()).await;
         let mut history: Vec<vtcode_core::llm::provider::Message> = Vec::new();
 
-        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None).await;
+        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None, None).await;
         assert!(!transient.iter().any(|note| note.starts_with("Exec session resume:")));
         assert!(history.is_empty(), "no hint must leave history untouched");
     }
@@ -679,7 +685,7 @@ mod tests {
         let session_id = run["session_id"].as_str().expect("session id present").to_string();
 
         let mut history: Vec<vtcode_core::llm::provider::Message> = Vec::new();
-        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None).await;
+        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None, None).await;
 
         let hint = transient
             .iter()
@@ -716,7 +722,7 @@ mod tests {
         let session_id = run["session_id"].as_str().expect("session id present").to_string();
 
         let mut history: Vec<vtcode_core::llm::provider::Message> = Vec::new();
-        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None).await;
+        let transient = super::append_transient_turn_notes(&mut history, temp.path(), &registry, None, None).await;
 
         assert!(!transient.iter().any(|note| note.starts_with("Exec session resume:")));
         assert!(history.is_empty(), "retained background work must not force a resume wait");

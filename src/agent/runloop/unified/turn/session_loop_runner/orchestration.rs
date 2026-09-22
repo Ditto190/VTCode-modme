@@ -57,6 +57,7 @@ use crate::agent::runloop::unified::session_setup::{
 };
 use crate::agent::runloop::unified::state::SessionStats;
 use crate::agent::runloop::unified::status_line::InputStatusState;
+use crate::agent::runloop::unified::turn::background_completion::PendingBackgroundCompletions;
 use crate::agent::runloop::unified::turn::context::TurnLoopResult as RunLoopTurnLoopResult;
 use crate::agent::runloop::unified::turn::finalization::finalize_session;
 use crate::agent::runloop::unified::turn::primary_agent_runtime::{
@@ -69,6 +70,8 @@ use crate::agent::runloop::unified::turn::turn_loop_helpers::{
 };
 use crate::agent::runloop::unified::workspace_links::LinkedDirectory;
 use crate::updater::{InlineUpdateOutcome, display_update_notice, run_inline_update_prompt};
+
+const BACKGROUND_COMPLETION_CONTINUATION_PROMPT: &str = "Review the authoritative background subprocess completion notice and continue the user's request. Do not poll or wait for those completed tasks.";
 
 fn persist_primary_agent(
     session_archive: &mut Option<session_archive::SessionArchive>,
@@ -627,6 +630,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let mut prefer_latest_queued_input_once = false;
         let mut queued_inputs: VecDeque<crate::agent::runloop::unified::inline_events::QueuedInput> =
             VecDeque::with_capacity(8);
+        let mut background_completion_receiver = tool_registry
+            .subagent_controller()
+            .map(|controller| controller.subscribe_parent_background_completions());
+        let exec_session_manager = tool_registry.exec_session_manager();
+        let mut exec_completion_receiver = Some(exec_session_manager.subscribe_completion());
+        let exec_completion_notify = Some(exec_session_manager.completion_notify());
+        let mut pending_background_completions = PendingBackgroundCompletions::default();
         let (webmcp_prompt_sender, webmcp_prompt_receiver) = crate::agent::runloop::unified::webmcp::prompt_channel();
         let mut webmcp_prompt_receiver = Some(webmcp_prompt_receiver);
         let mut webmcp_bridge = None;
@@ -786,6 +796,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     controller.set_parent_messages(&runtime.state.messages).await;
                 }
 
+                if pending_background_completions.should_schedule_continuation(
+                    !queued_inputs.is_empty() || !session.events.is_empty(),
+                    runtime.has_pending_follow_up_inputs(),
+                ) {
+                    match runtime.try_queue_follow_up_input(BACKGROUND_COMPLETION_CONTINUATION_PROMPT.to_string()) {
+                        Ok(()) => pending_background_completions.mark_continuation_queued(),
+                        Err(error) => tracing::warn!(%error, "Unable to queue background completion continuation"),
+                    }
+                }
+
                 let interaction_outcome = if pending_approved_plan_execution_input {
                     // An approved-plan handoff is an internal state transition,
                     // not ordinary user steering. Consume it directly so a
@@ -804,6 +824,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     InteractionOutcome::Continue { input, prompt_message_index: None, turn_id }
                 } else {
                     let mut interaction_turn_metadata_cache = None;
+                    let background_completion_notify = tool_registry
+                        .subagent_controller()
+                        .map(|controller| controller.background_completion_notify());
                     let (session_state, runtime_steering) = runtime.split_mut();
                     let mut interaction_ctx =
                         crate::agent::runloop::unified::turn::session::interaction_loop::InteractionLoopContext {
@@ -865,6 +888,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             startup_update_notice_rx: &mut startup_update_notice_rx,
                             editor_open_sender: &editor_open_sender,
                             editor_open_dispatcher: editor_open_dispatcher.clone(),
+                            background_completion_notify,
+                            exec_completion_notify: exec_completion_notify.clone(),
+                            background_completion_receiver: &mut background_completion_receiver,
+                            exec_completion_receiver: &mut exec_completion_receiver,
+                            pending_background_completions: &mut pending_background_completions,
                         };
 
                     let mut interaction_state =
@@ -910,10 +938,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         session_end_reason = SessionEndReason::Completed;
                         break;
                     }
-                    InteractionOutcome::DirectToolHandled => {
-                        // Explicit `run ...` / `!cmd` interactions are direct command mode:
-                        // render the tool output and wait for the next user input instead of
-                        // fabricating an autonomous follow-up turn.
+                    InteractionOutcome::BackgroundCompletionReady => continue,
+                    InteractionOutcome::DirectToolHandled => continue,
+                    InteractionOutcome::DirectBackgroundToolHandled { completion_identity } => {
+                        pending_background_completions.suppress_autonomous_continuation(completion_identity);
                         continue;
                     }
                     InteractionOutcome::Continue { input, prompt_message_index, turn_id: next_turn_id } => {
@@ -1226,6 +1254,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     config.workspace.as_path(),
                     &tool_registry,
                     unrelated_dirty_note,
+                    pending_background_completions.take_transient_note(),
                 )
                 .await;
                 let turn_started_at = Instant::now();

@@ -7,8 +7,6 @@
 **Secure, open, universal terminal coding agent in Rust.**
 
 [![License](https://img.shields.io/badge/License-MIT_OR_Apache--2.0-30363D?style=flat-square)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.93.0-30363D?style=flat-square)](./docs/development/DEVELOPMENT_SETUP.md)
-[![Version](https://img.shields.io/badge/Version-0.164.2-30363D?style=flat-square)](https://github.com/vinhnx/VTCode/releases)
 [![Agent Skills](https://img.shields.io/badge/Agent_Skills-BFB38F?style=flat-square)](https://agentskills.io/)
 [![Agent Client Protocol](https://img.shields.io/badge/Agent_Client_Protocol-383B73?style=flat-square&logo=zedindustries&logoColor=white)](./docs/guides/zed-acp.md)
 [![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-A63333?style=flat-square&logo=modelcontextprotocol&logoColor=white)](./docs/guides/mcp-integration.md)
@@ -241,9 +239,11 @@ A second tier handles session lifecycle and day-to-day operations:
 | Command                              | Purpose                                                                               |
 | ------------------------------------ | ------------------------------------------------------------------------------------- |
 | `vtcode continue`                    | Resume the last session, or fork it into a new one with `--session-id`                |
+| `vtcode init`                        | Scaffold `vtcode.toml` and `AGENTS.md` in the workspace; review before committing     |
 | `vtcode exec resume`                 | Continue a finished headless run with a follow-up prompt: `--last` or a session id    |
 | `vtcode schedule`                    | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts   |
 | `vtcode secret`                      | Store provider API keys in your OS keyring, never in shell history or workspace files |
+| `vtcode login`                       | OAuth sign-in for ChatGPT and GitHub Copilot; see [OAuth authentication](./docs/guides/oauth-authentication.md) |
 | `vtcode models`                      | Inspect, test, and compare providers and models                                       |
 | `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots                                             |
 | `vtcode tool-policy`                 | Allow or deny specific tools per workspace                                            |
@@ -284,10 +284,10 @@ Durable cron schedules: [scheduled tasks guide](./docs/user-guide/scheduled-task
 
 | Layer   | Guides                                                                                                                                                                                                                                                                                   |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                                                                                  |
-| Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
+| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                                                                                  |
+| Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [Exec mode](./docs/user-guide/exec-mode.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Hooks](./docs/guides/hooks-guide.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
 | Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md)                                                                                                                |
-| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
+| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Evals](./docs/guides/eval.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
 
 The full catalog lives in the [Documentation Index](./docs/INDEX.md).
 

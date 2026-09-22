@@ -236,6 +236,15 @@ Background launches return a stable `session_id`, lifecycle state, PID when avai
 
 While any background task (managed subagent, background subprocess, or retained exec session) is running, the input status line shows a shimmering `Running N background task(s)...` indicator, so live background work stays visible even with the Local Agents drawer closed. The indicator is informational only: background work never locks mode switches, blocks slash commands, or converts your submissions into queued/steered input.
 
+Managed background subprocesses and user-launched background exec sessions report
+`Stopped` or `Error` automatically after confirmed process exit. The Local Agents
+drawer and transcript update without requiring `/subprocesses refresh` or an
+explicit `write_stdin` poll. If the main loop is idle, VT Code delivers a bounded
+completion note and performs one follow-up reasoning turn; completions that
+arrive during an active turn wait for its next boundary, and queued or new user
+input takes precedence. Direct commands remain non-autonomous. Use the explicit
+`wait` action when a caller needs to observe a result synchronously.
+
 Common backgrounded commands include:
 
 - Build systems (e.g., webpack, vite, make)

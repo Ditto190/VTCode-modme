@@ -32,10 +32,11 @@ pub use prompt::{
     extract_explicit_agent_mentions, normalize_requested_model_override, request_prompt, sanitize_subagent_input_items,
 };
 pub use types::{
-    BackgroundRecord, BackgroundSubprocessEntry, BackgroundSubprocessSnapshot, BackgroundSubprocessStatus, ChildRecord,
-    ChildRunResult, ControllerState, PersistedBackgroundRecord, PersistedBackgroundState, SendInputRequest,
-    SpawnAgentRequest, SpawnBackgroundSubprocessRequest, StatusEntryBuilder, SubagentInputItem, SubagentStatus,
-    SubagentStatusEntry, SubagentThreadSnapshot, TurnDelegationHints,
+    BackgroundCompletionEvent, BackgroundRecord, BackgroundSubprocessEntry, BackgroundSubprocessSnapshot,
+    BackgroundSubprocessStatus, ChildRecord, ChildRunResult, ControllerState, PersistedBackgroundRecord,
+    PersistedBackgroundState, SendInputRequest, SpawnAgentRequest, SpawnBackgroundSubprocessRequest,
+    StatusEntryBuilder, SubagentInputItem, SubagentStatus, SubagentStatusEntry, SubagentThreadSnapshot,
+    TurnDelegationHints,
 };
 
 // VerificationResult is defined in this module (below) and re-exported at the
@@ -82,11 +83,14 @@ pub struct VerificationResult {
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use futures::future::select_all;
+use parking_lot::Mutex as ParkingMutex;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock, broadcast};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::VTCodeConfig;
 use crate::config::types::ReasoningEffortLevel;
@@ -106,6 +110,58 @@ use self::config::*;
 use self::constants::*;
 use self::model::*;
 use vtcode_config::subagents::SUBAGENT_HARD_CONCURRENCY_LIMIT;
+
+const BACKGROUND_COMPLETION_CHANNEL_CAPACITY: usize = 64;
+
+struct BackgroundCompletionChannel {
+    sender: broadcast::Sender<BackgroundCompletionEvent>,
+    parent_sender: broadcast::Sender<BackgroundCompletionEvent>,
+    pending_parent_events: VecDeque<BackgroundCompletionEvent>,
+    parent_subscribed: bool,
+}
+
+impl BackgroundCompletionChannel {
+    fn new() -> Self {
+        let (sender, _) = broadcast::channel(BACKGROUND_COMPLETION_CHANNEL_CAPACITY);
+        let (parent_sender, _) = broadcast::channel(BACKGROUND_COMPLETION_CHANNEL_CAPACITY);
+        Self {
+            sender,
+            parent_sender,
+            pending_parent_events: VecDeque::new(),
+            parent_subscribed: false,
+        }
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<BackgroundCompletionEvent> {
+        self.sender.subscribe()
+    }
+
+    fn subscribe_parent(&mut self) -> (broadcast::Receiver<BackgroundCompletionEvent>, bool) {
+        let receiver = self.parent_sender.subscribe();
+        self.parent_subscribed = true;
+        let replayed = !self.pending_parent_events.is_empty();
+        while let Some(event) = self.pending_parent_events.pop_front() {
+            let _ = self.parent_sender.send(event);
+        }
+        (receiver, replayed)
+    }
+
+    fn publish(&mut self, event: BackgroundCompletionEvent) {
+        if !self.parent_subscribed {
+            if self.pending_parent_events.len() >= BACKGROUND_COMPLETION_CHANNEL_CAPACITY {
+                self.pending_parent_events.pop_front();
+                tracing::warn!(
+                    capacity = BACKGROUND_COMPLETION_CHANNEL_CAPACITY,
+                    "Dropping oldest undelivered parent background completion"
+                );
+            }
+            self.pending_parent_events.push_back(event.clone());
+        } else {
+            let _ = self.parent_sender.send(event.clone());
+        }
+        let _ = self.sender.send(event);
+    }
+}
 
 // ─── Controller Config ─────────────────────────────────────────────────────
 
@@ -159,6 +215,10 @@ pub struct SubagentController {
     /// state. Set only while `close_tree`/`signal_shutdown` are tearing a
     /// subtree down.
     closing: Arc<AtomicBool>,
+    background_completion_channel: Arc<ParkingMutex<BackgroundCompletionChannel>>,
+    background_completion_notify: Arc<Notify>,
+    background_completion_shutdown: CancellationToken,
+    background_completion_monitor: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl SubagentController {
@@ -197,7 +257,7 @@ impl SubagentController {
             .into_iter()
             .map(|record| (record.id.clone(), BackgroundRecord::from_persisted(record)))
             .collect();
-        Ok(Self {
+        let controller = Self {
             parent_session_id: Arc::new(RwLock::new(config.parent_session_id.clone())),
             lifecycle_hooks,
             config: Arc::new(config),
@@ -207,10 +267,37 @@ impl SubagentController {
                 turn_hints: TurnDelegationHints::default(),
                 children: std::collections::BTreeMap::new(),
                 background_children,
+                background_completion_identities: VecDeque::new(),
             })),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             closing: Arc::new(AtomicBool::new(false)),
-        })
+            background_completion_channel: Arc::new(ParkingMutex::new(BackgroundCompletionChannel::new())),
+            background_completion_notify: Arc::new(Notify::new()),
+            background_completion_shutdown: CancellationToken::new(),
+            background_completion_monitor: Arc::new(Mutex::new(None)),
+        };
+        controller.start_background_completion_monitor().await;
+        Ok(controller)
+    }
+
+    /// Subscribes to terminal notifications for managed background subprocesses.
+    pub fn subscribe_background_completions(&self) -> broadcast::Receiver<BackgroundCompletionEvent> {
+        self.background_completion_channel.lock().subscribe()
+    }
+
+    /// Subscribes the parent run loop and replays completions that arrived
+    /// before its receiver was installed.
+    pub fn subscribe_parent_background_completions(&self) -> broadcast::Receiver<BackgroundCompletionEvent> {
+        let (receiver, replayed) = self.background_completion_channel.lock().subscribe_parent();
+        if replayed {
+            self.background_completion_notify.notify_one();
+        }
+        receiver
+    }
+
+    /// Returns the wake signal used by the interactive loop while it is idle.
+    pub fn background_completion_notify(&self) -> Arc<Notify> {
+        Arc::clone(&self.background_completion_notify)
     }
 
     /// Re-discovers subagent specs from the workspace.

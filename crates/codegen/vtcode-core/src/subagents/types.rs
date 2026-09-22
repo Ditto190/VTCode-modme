@@ -73,6 +73,28 @@ impl BackgroundSubprocessStatus {
     }
 }
 
+/// Authoritative terminal notification for a managed background subprocess.
+///
+/// The controller publishes this only after the corresponding
+/// [`BackgroundRecord`] has been updated and persisted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BackgroundCompletionEvent {
+    pub task_id: String,
+    pub status: BackgroundSubprocessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub session_id: String,
+    pub exec_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+}
+
 // ─── Public DTOs ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -532,6 +554,7 @@ pub struct ControllerState {
     pub(crate) turn_hints: TurnDelegationHints,
     pub(crate) children: BTreeMap<String, ChildRecord>,
     pub(crate) background_children: BTreeMap<String, BackgroundRecord>,
+    pub(crate) background_completion_identities: VecDeque<String>,
 }
 
 // ─── Child Run Result ───────────────────────────────────────────────────────

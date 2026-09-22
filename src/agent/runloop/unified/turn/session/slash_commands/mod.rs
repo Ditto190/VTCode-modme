@@ -37,6 +37,7 @@ pub mod secrets;
 
 pub(crate) enum SlashCommandControl {
     Continue,
+    BackgroundCompletionHandled { completion_identity: String },
     SubmitPrompt(String),
     ReplaceInput(String),
     BreakWithReason(SessionEndReason),
