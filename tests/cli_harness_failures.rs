@@ -5,6 +5,7 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::process::Command;
+use vtcode_core::config::constants::models::openai::DEFAULT_MODEL;
 
 #[path = "../crates/codegen/vtcode-core/tests/support/mod.rs"]
 mod support;
@@ -13,8 +14,10 @@ use support::TestHarness;
 
 fn base_command(harness: &TestHarness) -> Command {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("vtcode"));
+    // Keep startup on the provider whose synthetic key this fixture supplies,
+    // regardless of the application's default provider and model.
     let _configured_command = cmd
-        .env("OLLAMA_API_KEY", "test-key")
+        .args(["--provider", "openai", "--model", DEFAULT_MODEL])
         .env("OPENAI_API_KEY", "test-key")
         .env("NO_COLOR", "1")
         .current_dir(harness.workspace());
