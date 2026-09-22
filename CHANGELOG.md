@@ -2,6 +2,28 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.166.0 - 2026-09-22
+
+### Highlights
+#### Bug Fixes
+
+- Avoid truncating swarm range samples (1e0ba7a3) (@ct-jaryn)
+- Honor default_provider/default_model from global config.toml (7af7d919) 
+- Redirect apply_patch shell collisions to the apply_patch tool (98792a32) 
+#### Documentation
+
+- Explain CLI failure fixture setup (d5225c1b) (@ct-jaryn)
+- Explain deterministic swarm range tests (f40b0b1c) (@ct-jaryn)
+- Update README with OAuth login, init command, and refreshed guide links (68c9ba40) 
+### Other Changes
+#### Other
+
+- Add GLM-5.3-FlashX model from Zai (d12a130d) 
+- Add XiaoMi Mimo's Mimo-v2.5 Pro, Mimo-v2.6 Flash and Mimo-v2.6 Ultraspeed (11f4b57d) 
+- Remove Jump to last change navigation (2c8c7ff0) 
+#### Tests
+
+- Pin failure harness provider and model (cb477d13) (@ct-jaryn)
 ## 0.165.0 - 2026-09-21
 
 ### Highlights
