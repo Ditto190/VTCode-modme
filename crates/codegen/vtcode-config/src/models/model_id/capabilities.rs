@@ -260,8 +260,11 @@ impl ModelId {
                 | ModelId::MergeGatewayDeepseekFlash
                 | ModelId::DeepSeekFlash
                 | ModelId::ZaiGlm53Flash
+                | ModelId::ZaiGlm53Flashx
                 | ModelId::MergeGatewayZaiGlm53Flash
+                | ModelId::MergeGatewayZaiGlm53Flashx
                 | ModelId::HuggingFaceGlm53FlashTogether
+                | ModelId::MiMoV26Flash
         )
     }
 
@@ -286,9 +289,11 @@ impl ModelId {
                 | ModelId::MergeGatewayDeepseekFlash
                 | ModelId::MetaMuseSpark11
                 | ModelId::MergeGatewayMinimaxH3
-                | ModelId::OpenCodeGoMimoV25
+                | ModelId::MiMoV26Flash
                 | ModelId::ZaiGlm53Flash
+                | ModelId::ZaiGlm53Flashx
                 | ModelId::MergeGatewayZaiGlm53Flash
+                | ModelId::MergeGatewayZaiGlm53Flashx
                 | ModelId::HuggingFaceGlm53FlashTogether
                 | ModelId::VercelDeepseekFlash
         )
@@ -314,7 +319,8 @@ impl ModelId {
                 | ModelId::ClaudeFable51
                 | ModelId::ClaudeOpus5
                 | ModelId::OpenCodeGoGlm53
-                | ModelId::OpenCodeGoMimoV25Pro
+                | ModelId::MiMoV26Pro
+                | ModelId::MiMoV26ProUltraspeed
                 | ModelId::OpenCodeGoMinimaxM3
                 | ModelId::MergeGatewayDeepseekFlash
                 | ModelId::VercelDeepseekFlash
@@ -388,13 +394,17 @@ impl ModelId {
             ModelId::MetaMuseSpark11 => "Muse-Spark-1.1",
             ModelId::MetaMuseSpark13 | ModelId::MetaMuseSpark13Contributor => "Muse-Spark-1.3",
             // Z.AI generations
-            ModelId::ZaiGlm53 | ModelId::ZaiGlm53Flash | ModelId::MergeGatewayZaiGlm53Flash => "5.3",
+            ModelId::ZaiGlm53
+            | ModelId::ZaiGlm53Flash
+            | ModelId::ZaiGlm53Flashx
+            | ModelId::MergeGatewayZaiGlm53Flash
+            | ModelId::MergeGatewayZaiGlm53Flashx => "5.3",
             ModelId::Gemini38Flash => "3.8",
             ModelId::MergeGatewayGoogleGemini38Flash => "3.8",
             ModelId::OpenCodeGoGlm53 => "5.3",
             ModelId::OpenCodeGoGpt56Luna => "5.6-luna",
             ModelId::OpenCodeGoKimiK3 => "k3",
-            ModelId::OpenCodeGoMimoV25 | ModelId::OpenCodeGoMimoV25Pro => "v2.5",
+            ModelId::MiMoV26Pro | ModelId::MiMoV26Flash | ModelId::MiMoV26ProUltraspeed => "v2.6",
             ModelId::OpenCodeGoMinimaxM3 => "m3",
             ModelId::OllamaGptOss20b => "oss",
             ModelId::OllamaGptOss20bCloud => "oss-cloud",

@@ -164,12 +164,16 @@ pub enum ModelId {
     ZaiGlm53,
     /// GLM-5.3 Flash - Z.ai efficient multimodal model with hybrid sparse+linear attention, 320B total / 18B active, 1M context, native vision
     ZaiGlm53Flash,
+    /// GLM-5.3 FlashX - Z.ai high-speed Flash variant with faster inference (up to 200 tok/s), 320B total / 18B active, 1M context, native vision
+    ZaiGlm53Flashx,
 
     // MiMo models
-    /// MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context
-    MiMoV25Pro,
-    /// MiMo V2.5 - Xiaomi's omni-modal model with full-modal understanding and 1M context
-    MiMoV25,
+    /// MiMo V2.6 Pro - Xiaomi's flagship reasoning model with 1M context
+    MiMoV26Pro,
+    /// MiMo V2.6 Flash - Xiaomi's efficient high-volume model with 1M context
+    MiMoV26Flash,
+    /// MiMo V2.6 Pro UltraSpeed - Xiaomi's fastest flagship variant with 1M context
+    MiMoV26ProUltraspeed,
 
     // Moonshot models
     /// Kimi K3 - Moonshot.ai's 2.8T parameter flagship with Delta Attention, native vision, 1M context
@@ -185,10 +189,6 @@ pub enum ModelId {
     OpenCodeGoGpt56Luna,
     /// Kimi K3 - Moonshot flagship 2.8T agentic model on OpenCode Go
     OpenCodeGoKimiK3,
-    /// MiMo-V2.5 - Xiaomi's omnimodal model on OpenCode Go
-    OpenCodeGoMimoV25,
-    /// MiMo-V2.5-Pro - Xiaomi's flagship reasoning model on OpenCode Go
-    OpenCodeGoMimoV25Pro,
     /// MiniMax M3 - Frontier multimodal coding model on OpenCode Go
     OpenCodeGoMinimaxM3,
     /// Muse Spark 1.2 Contributor - Meta long-context reasoning on OpenCode Go (limited regions)
@@ -255,16 +255,20 @@ pub enum ModelId {
     /// GLM-5.2 - Z.AI GLM-5.2 flagship model for long-horizon tasks via OpenRouter
     /// GLM-5.3 Flash - Z.AI efficient multimodal model with hybrid sparse+linear attention via OpenRouter
     OpenRouterZaiGlm53Flash,
+    /// GLM-5.3 FlashX - Z.AI high-speed Flash variant with faster inference via OpenRouter
+    OpenRouterZaiGlm53Flashx,
     /// Kimi K3 - Moonshot AI's 2.8T parameter flagship via OpenRouter
     OpenRouterMoonshotaiKimiK3,
     /// Grok 4.6 - xAI's flagship reasoning model with reasoning_effort support via OpenRouter
     OpenRouterXAiGrok46,
     /// Grok 4.7 - xAI's flagship reasoning model with reasoning_effort support via OpenRouter
     OpenRouterXAiGrok47,
-    /// MiMo-V2.5 - Xiaomi's omnimodal agentic model for complex software engineering via OpenRouter
-    OpenRouterXiaomiMimoV25,
-    /// MiMo-V2.5-Pro - Xiaomi's flagship agentic model for complex software engineering via OpenRouter
-    OpenRouterXiaomiMimoV25Pro,
+    /// MiMo-V2.6-Pro - Xiaomi's flagship agentic model for complex software engineering via OpenRouter
+    OpenRouterXiaomiMimoV26Pro,
+    /// MiMo-V2.6-Flash - Xiaomi's efficient high-volume agentic model via OpenRouter
+    OpenRouterXiaomiMimoV26Flash,
+    /// MiMo-V2.6-Pro-UltraSpeed - Xiaomi's fastest flagship variant via OpenRouter
+    OpenRouterXiaomiMimoV26ProUltraspeed,
 
     // Vercel AI Gateway models (namespaced as `vendor/model` on the gateway)
     /// Claude Sonnet 5 served through the Vercel AI Gateway

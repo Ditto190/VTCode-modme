@@ -495,20 +495,34 @@ model_id_table! {
         display: "GLM 5.3 Flash",
         description: "Z.ai efficient multimodal model with hybrid sparse+linear attention, 320B total / 18B active, 1M context and native vision",
     },
+    ZaiGlm53Flashx {
+        provider: ZAI,
+        id: models::zai::GLM_5_3_FLASHX,
+        parse: [models::zai::GLM_5_3_FLASHX],
+        display: "GLM 5.3 FlashX",
+        description: "Z.ai high-speed Flash variant with faster inference (up to 200 tok/s), 320B total / 18B active, 1M context and native vision",
+    },
     // MiMo models
-    MiMoV25Pro {
+    MiMoV26Pro {
         provider: MiMo,
-        id: models::mimo::MIMO_V2_5_PRO,
-        parse: [models::mimo::MIMO_V2_5_PRO],
-        display: "MiMo V2.5 Pro",
+        id: models::mimo::MIMO_V2_6_PRO,
+        parse: [models::mimo::MIMO_V2_6_PRO],
+        display: "MiMo V2.6 Pro",
         description: "Xiaomi's flagship reasoning model with advanced capabilities (1M context)",
     },
-    MiMoV25 {
+    MiMoV26Flash {
         provider: MiMo,
-        id: models::mimo::MIMO_V2_5,
-        parse: [models::mimo::MIMO_V2_5],
-        display: "MiMo V2.5",
-        description: "Xiaomi's omni-modal model with full-modal understanding and 1M context",
+        id: models::mimo::MIMO_V2_6_FLASH,
+        parse: [models::mimo::MIMO_V2_6_FLASH],
+        display: "MiMo V2.6 Flash",
+        description: "Xiaomi's efficient high-volume model for professional office scenarios (1M context)",
+    },
+    MiMoV26ProUltraspeed {
+        provider: MiMo,
+        id: models::mimo::MIMO_V2_6_PRO_ULTRASPEED,
+        parse: [models::mimo::MIMO_V2_6_PRO_ULTRASPEED],
+        display: "MiMo V2.6 Pro UltraSpeed",
+        description: "Xiaomi's fastest flagship variant for real-time production scenarios (1M context)",
     },
     // Moonshot models
     MoonshotKimiK3 {
@@ -540,20 +554,6 @@ model_id_table! {
         parse: [],
         display: "Kimi K3 (OpenCode Go)",
         description: "Kimi K3 included with the OpenCode Go subscription for frontier agentic coding",
-    },
-    OpenCodeGoMimoV25 {
-        provider: OpenCodeGo,
-        id: models::opencode_go::MIMO_V2_5,
-        parse: [],
-        display: "MiMo-V2.5 (OpenCode Go)",
-        description: "MiMo-V2.5 included with the OpenCode Go subscription for high-volume coding workloads",
-    },
-    OpenCodeGoMimoV25Pro {
-        provider: OpenCodeGo,
-        id: models::opencode_go::MIMO_V2_5_PRO,
-        parse: [],
-        display: "MiMo-V2.5-Pro (OpenCode Go)",
-        description: "MiMo-V2.5-Pro included with the OpenCode Go subscription for complex agentic tasks",
     },
     OpenCodeGoMinimaxM3 {
         provider: OpenCodeGo,

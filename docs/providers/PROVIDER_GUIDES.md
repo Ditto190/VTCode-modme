@@ -305,13 +305,14 @@ replace the retained evidence or expose provider chain-of-thought.
     -   [API overview](https://openrouter.ai/docs/api-reference/overview/llms)
     -   [Streaming](https://openrouter.ai/docs/api-reference/streaming/llms)
     -   [Model catalog](https://openrouter.ai/docs/llms)
--   Default model: `xiaomi/mimo-v2.5-pro` (VT Code's default). Xiaomi MiMo V2.5 and V2.5 Pro are also available.
+-   Default model: `xiaomi/mimo-v2.6-pro` (VT Code's default). Xiaomi MiMo V2.6 Flash and V2.6 Pro UltraSpeed are also available.
 -   For Meta Muse, prefer the official [`meta` provider](./meta.md) when direct Meta access is desired. OpenRouter's `meta/...` entries are separately namespaced marketplace routes.
 -   **Meta Muse models via OpenRouter:** `meta/muse-glimmer-30b` and `meta/muse-spark-1.2`
--   **Curated picker catalog:** `openrouter/meta/muse-glimmer-30b`, `openrouter/meta/muse-spark-1.2`, `openrouter/deepseek/deepseek-chat`, `openrouter/z-ai/glm-5.1`, `openrouter/z-ai/glm-5.2`, `openrouter/z-ai/glm-5.3-flash`, `openrouter/moonshotai/kimi-k3`, `openrouter/moonshotai/kimi-k2.6`, `openrouter/moonshotai/kimi-k2.7-code`, `openrouter/qwen/qwen3.7-max`, `openrouter/tencent/hy3-preview`, `openrouter/x-ai/grok-build-0.1`, `openrouter/x-ai/grok-4.6`, `openrouter/xiaomi/mimo-v2.5`, `openrouter/xiaomi/mimo-v2.5-pro`, `openrouter/poolside/laguna-m.1:free`, `openrouter/poolside/laguna-s-2.1:free`, `openrouter/google/gemini-3.5-flash-lite`, `openrouter/google/gemini-3.6-flash`, `openrouter/google/gemini-3.7-flash`, and `openrouter/qwen/qwen3.8-27b`
+-   **Curated picker catalog:** `openrouter/meta/muse-glimmer-30b`, `openrouter/meta/muse-spark-1.2`, `openrouter/deepseek/deepseek-chat`, `openrouter/z-ai/glm-5.1`, `openrouter/z-ai/glm-5.2`, `openrouter/z-ai/glm-5.3-flash`, `openrouter/z-ai/glm-5.3-flashx`, `openrouter/moonshotai/kimi-k3`, `openrouter/moonshotai/kimi-k2.6`, `openrouter/moonshotai/kimi-k2.7-code`, `openrouter/qwen/qwen3.7-max`, `openrouter/tencent/hy3-preview`, `openrouter/x-ai/grok-build-0.1`, `openrouter/x-ai/grok-4.6`, `openrouter/xiaomi/mimo-v2.6-pro`, `openrouter/xiaomi/mimo-v2.6-flash`, `openrouter/xiaomi/mimo-v2.6-pro-ultraspeed`, `openrouter/poolside/laguna-m.1:free`, `openrouter/poolside/laguna-s-2.1:free`, `openrouter/google/gemini-3.5-flash-lite`, `openrouter/google/gemini-3.6-flash`, `openrouter/google/gemini-3.7-flash`, and `openrouter/qwen/qwen3.8-27b`
 -   **Xiaomi MiMo models:**
-    -   `xiaomi/mimo-v2.5-pro` — flagship agentic model, 1M context, reasoning + tool calls
-    -   `xiaomi/mimo-v2.5` — omnimodal model, 1M context, reasoning + tool calls
+    -   `xiaomi/mimo-v2.6-pro` — flagship agentic model, 1M context, reasoning + tool calls
+    -   `xiaomi/mimo-v2.6-flash` — efficient high-volume model, 1M context, reasoning + tool calls
+    -   `xiaomi/mimo-v2.6-pro-ultraspeed` — fastest flagship variant, 1M context, reasoning + tool calls
 
 ## Atlas Cloud
 
@@ -350,8 +351,9 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Pricing:** [Pay-as-you-go](https://platform.xiaomimimo.com/docs/en-US/price/pay-as-you-go) · [Subscription](https://platform.xiaomimimo.com/docs/en-US/price/tokenplan/subscription) · [Quick Access](https://platform.xiaomimimo.com/docs/en-US/price/tokenplan/quick-access)
 -   **Setup:** Set `MIMO_API_KEY` or use the MiMo provider in VT Code's configuration
 -   **Models:**
-    -   `mimo-v2.5-pro` — flagship agentic model, 1M context, deep thinking
-    -   `mimo-v2.5` — omnimodal model (text, image, audio, video), 1M context
+    -   `mimo-v2.6-pro` — flagship agentic model, 1M context, deep thinking
+    -   `mimo-v2.6-flash` — efficient high-volume model (text, image, audio, video), 1M context
+    -   `mimo-v2.6-pro-ultraspeed` — fastest flagship variant, 1M context
 
 ## Ollama Local & Cloud Models
 
@@ -524,7 +526,7 @@ VT Code provides compatibility with the Anthropic Messages API to help connect e
 -   **Authentication:** `OPENCODE_GO_API_KEY` environment variable
 -   **Base URL:** `https://opencode.ai/zen/go/v1`, override with `OPENCODE_GO_BASE_URL`
 -   **Default model:** `opencode-go/glm-5.1`
--   **Curated picker models:** `opencode-go/glm-5.1`, `opencode-go/glm-5.2`, `opencode-go/kimi-k2.7-code`, `opencode-go/kimi-k2.6`, `opencode-go/mimo-v2.5-pro`, `opencode-go/mimo-v2.5`, `opencode-go/minimax-m3`, `opencode-go/minimax-m2.7`, `opencode-go/qwen3.7-max`, `opencode-go/qwen3.7-plus`, `opencode-go/qwen3.6-plus`, `opencode-go/deepseek-v4-pro`, `opencode-go/deepseek-v4-flash`
+-   **Curated picker models:** `opencode-go/glm-5.1`, `opencode-go/glm-5.2`, `opencode-go/kimi-k2.7-code`, `opencode-go/kimi-k2.6`, `opencode-go/minimax-m3`, `opencode-go/minimax-m2.7`, `opencode-go/qwen3.7-max`, `opencode-go/qwen3.7-plus`, `opencode-go/qwen3.6-plus`, `opencode-go/deepseek-v4-pro`, `opencode-go/deepseek-v4-flash`
 -   **Setup:** Set `OPENCODE_GO_API_KEY` from the [OpenCode Go console](https://opencode.ai/docs/go/), then configure `provider = "opencode-go"` in `vtcode.toml`
 -   **Features:** Subscription-based access to flagship open models for agentic coding
 

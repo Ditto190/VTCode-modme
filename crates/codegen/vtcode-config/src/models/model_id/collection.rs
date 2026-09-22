@@ -71,9 +71,11 @@ impl ModelId {
             // Z.AI models
             ModelId::ZaiGlm53,
             ModelId::ZaiGlm53Flash,
+            ModelId::ZaiGlm53Flashx,
             // MiMo models
-            ModelId::MiMoV25Pro,
-            ModelId::MiMoV25,
+            ModelId::MiMoV26Pro,
+            ModelId::MiMoV26Flash,
+            ModelId::MiMoV26ProUltraspeed,
             // Moonshot models
             ModelId::MoonshotKimiK3,
             // OpenCode Zen models
@@ -81,8 +83,6 @@ impl ModelId {
             ModelId::OpenCodeGoGlm53,
             ModelId::OpenCodeGoGpt56Luna,
             ModelId::OpenCodeGoKimiK3,
-            ModelId::OpenCodeGoMimoV25,
-            ModelId::OpenCodeGoMimoV25Pro,
             ModelId::OpenCodeGoMinimaxM3,
             // Ollama models
             ModelId::OllamaGptOss20b,

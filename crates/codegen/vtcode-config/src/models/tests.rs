@@ -123,7 +123,7 @@ fn test_provider_defaults() {
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::NVIDIA), ModelId::NvidiaNemotron3Ultra550bA55b);
     assert_eq!(
         ModelId::default_orchestrator_for_provider(Provider::OpenRouter),
-        ModelId::OpenRouterXiaomiMimoV25Pro
+        ModelId::OpenRouterXiaomiMimoV26Pro
     );
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::Ollama), ModelId::OllamaGptOss20b);
     assert_eq!(ModelId::default_orchestrator_for_provider(Provider::ZAI), ModelId::ZaiGlm53);
@@ -539,8 +539,6 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
         assert!(!model.description().is_empty());
         assert!(!model.generation().is_empty());
         let parsed = match model {
-            ModelId::OpenCodeGoMimoV25 => ModelId::from_str("opencode-go/mimo-v2.5"),
-            ModelId::OpenCodeGoMimoV25Pro => ModelId::from_str("opencode-go/mimo-v2.5-pro"),
             ModelId::OpenCodeGoMinimaxM3 => ModelId::from_str("opencode-go/minimax-m3"),
             // LlamaCpp/Ollama GPT-OSS-20B share the same model string as OpenAI's variant;
             // `gpt-oss-20b` resolves to OpenAIGptOss20b first.

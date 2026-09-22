@@ -1680,7 +1680,7 @@ mod tests {
         - Model providers: 21+ LLMs (Anthropic, OpenAI, Gemini, OpenRouter, Ollama, LM Studio, etc.)\n\
         - Safety: restricted shell sandbox, tool guardrails, subprocess isolation, full audit logging\n\
         - Protocols: Open Responses, Agent2Agent (A2A), ATIF, Anthropic Messages API\n\n\
-        **Default model**: MiMo V2.5 (Xiaomi), 1M-token context (`mimo-v2.5-pro`).\n\n\
+        **Default model**: MiMo V2.6 Pro (Xiaomi), 1M-token context (`mimo-v2.6-pro`).\n\n\
         **Other top-level dirs**: `docs/`, `plans/`, `rules/`, `examples/`, `tests/`, `evals/`, `fuzz/`, `scripts/`, `extensions/vscode-extension/`, `extensions/zed-extension/`, `crates/codegen/xtask/`, `homebrew/`.\n\n\
         Quick start:\n\
         ```shell\n\
