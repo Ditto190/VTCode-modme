@@ -2366,6 +2366,7 @@ mod tests {
         }
     }
 
+    /// Preserves the full-width reference sequence for ranges shared by 32- and 64-bit targets.
     #[test]
     fn swarm_rng_range_uses_full_width_samples() {
         let mut rng = SwarmRng::new(0);
@@ -2376,6 +2377,7 @@ mod tests {
         }
     }
 
+    /// Keeps samples inside half-open ranges, including one-element and maximum-width bounds.
     #[test]
     fn swarm_rng_range_handles_usize_boundaries() {
         let mut rng = SwarmRng::new(0);
@@ -2397,10 +2399,12 @@ mod tests {
     }
 
     impl SwarmRng {
+        /// Initializes the deterministic generator from an explicit test seed.
         const fn new(seed: u64) -> Self {
             Self { state: seed }
         }
 
+        /// Advances SplitMix64 and returns the next full-width sample.
         fn next_u64(&mut self) -> u64 {
             self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
             let mut value = self.state;
@@ -2422,6 +2426,7 @@ mod tests {
             low + offset
         }
 
+        /// Shuffles the slice in place using deterministic Fisher-Yates swaps.
         fn shuffle_str(&mut self, items: &mut [&str]) {
             for index in (1..items.len()).rev() {
                 let other = self.range(0, index + 1);
