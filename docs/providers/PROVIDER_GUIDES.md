@@ -287,7 +287,7 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Authentication:** `MERGE_GATEWAY_API_KEY` (Bearer token; create a key in the [Merge dashboard](https://dashboard.merge.dev/))
 -   **Base URL:** `https://api-gateway.merge.dev/v1` (native Responses), override with `MERGE_GATEWAY_BASE_URL`; explicit `/v1/openai` selects legacy Chat Completions
 -   **Default model:** `default_routing`
--   **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`, `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `meta/muse-spark-1.1`, `zai/glm-5.3-flash`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, and `openai/gpt-5.6-terra`
+-   **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`, `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `meta/muse-spark-1.1`, `zai/glm-5.3-flash`, `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, and `openai/gpt-5.6-terra`
 -   **Features:** Native Responses, streaming, tool calling, structured outputs, authenticated paginated model catalog, cache-backed picker metadata, and arbitrary explicit Merge route IDs
 -   **Limitations:** Reasoning controls remain route-specific and are not inferred generically; routing metadata and billed cost remain outside VT Code's normalized response fields. Explicit `/v1/openai` endpoints retain the legacy compatibility path.
 
@@ -426,6 +426,7 @@ VT Code provides compatibility with the Anthropic Messages API to help connect e
 -   **Models:**
     -   `glm-5.3` — flagship coding model, 1M context, reasoning + tool calls
     -   `glm-5.3-flash` — efficient multimodal model, 320B total / 18B active, hybrid sparse+linear attention, 1M context, native vision (text+image), reasoning + tool calls
+    -   `glm-5.3-flashx` — high-speed Flash variant (up to 200 tok/s), same Flash multimodal stack, 1M context, native vision, reasoning + tool calls
     -   `glm-5.2` — flagship model for long-horizon tasks, 1M context, reasoning + tool calls
 -   **Default:** `glm-5.3`
 -   **Features:** Streaming, tool calling, reasoning effort support, native vision (Flash), context caching, structured output, tool streaming

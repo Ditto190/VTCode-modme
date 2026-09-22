@@ -164,6 +164,40 @@
         "doc_comment": "GLM-5.3 Flash - Z.AI efficient multimodal model with hybrid sparse+linear attention via OpenRouter"
       }
     },
+    "z-ai/glm-5.3-flashx": {
+      "id": "z-ai/glm-5.3-flashx",
+      "name": "Z.AI: GLM-5.3 FlashX",
+      "description": "Z.AI high-speed Flash variant with faster inference (up to 200 tok/s), sharing the Flash multimodal stack (320B total / 18B active), 1M context and native vision for efficient coding and long-horizon agent tasks.",
+      "reasoning": true,
+      "tool_call": true,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "context": 1048576,
+      "max_output_tokens": 131072,
+      "cost": {
+        "input": 3.7e-07,
+        "output": 1.25e-06,
+        "cache_read": 7.5e-08
+      },
+      "vtcode": {
+        "variant": "OpenRouterZaiGlm53Flashx",
+        "constant": "ZAI_GLM_5_3_FLASHX",
+        "vendor": "z-ai",
+        "display": "GLM-5.3 FlashX",
+        "description": "Z.AI GLM-5.3 FlashX high-speed efficient multimodal model via OpenRouter",
+        "efficient": true,
+        "top_tier": true,
+        "generation": "5.3",
+        "doc_comment": "GLM-5.3 FlashX - Z.AI high-speed Flash variant with faster inference via OpenRouter"
+      }
+    },
     "openai/gpt-oss-120b": {
       "id": "openai/gpt-oss-120b",
       "name": "OpenAI: gpt-oss-120b",

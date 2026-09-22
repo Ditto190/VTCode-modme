@@ -57,6 +57,7 @@ impl ModelId {
             ModelId::MergeGatewayMetaMuseSpark11,
             ModelId::MergeGatewayMetaMuseSpark13,
             ModelId::MergeGatewayZaiGlm53Flash,
+            ModelId::MergeGatewayZaiGlm53Flashx,
             ModelId::MergeGatewayOpenAIGpt56Luna,
             ModelId::MergeGatewayOpenAIGpt56Sol,
             ModelId::MergeGatewayOpenAIGpt56Terra,
@@ -111,6 +112,7 @@ impl ModelId {
             ModelId::EvolinkClaudeHaiku45,
             ModelId::OpenRouterMoonshotaiKimiK3,
             ModelId::OpenRouterZaiGlm53Flash,
+            ModelId::OpenRouterZaiGlm53Flashx,
             // xAI models
             ModelId::XaiGrok46,
             ModelId::XaiGrok47,

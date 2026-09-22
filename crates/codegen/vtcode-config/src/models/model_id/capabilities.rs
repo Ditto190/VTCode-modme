@@ -323,7 +323,9 @@ impl ModelId {
                 | ModelId::MergeGatewayMetaMuseSpark13
                 | ModelId::ZaiGlm53
                 | ModelId::ZaiGlm53Flash
+                | ModelId::ZaiGlm53Flashx
                 | ModelId::MergeGatewayZaiGlm53Flash
+                | ModelId::MergeGatewayZaiGlm53Flashx
                 | ModelId::HuggingFaceGlm53FlashTogether
                 | ModelId::HuggingFaceGlm53Together
                 | ModelId::HuggingFaceMinimaxM3Novita

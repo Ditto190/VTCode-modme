@@ -108,6 +108,8 @@ pub enum ModelId {
     MergeGatewayMetaMuseSpark13,
     /// Z.AI GLM-5.3 Flash through Merge Gateway
     MergeGatewayZaiGlm53Flash,
+    /// Z.AI GLM-5.3 FlashX through Merge Gateway
+    MergeGatewayZaiGlm53Flashx,
     /// OpenAI GPT-5.6 Luna through Merge Gateway
     MergeGatewayOpenAIGpt56Luna,
     /// OpenAI GPT-5.6 Sol through Merge Gateway

@@ -1320,6 +1320,50 @@
     "name": "Z.AI",
     "doc": "https://docs.z.ai/guides/llm/glm-5",
     "models": {
+      "glm-5.3-flashx": {
+        "id": "glm-5.3-flashx",
+        "name": "GLM-5.3 FlashX",
+        "description": "Z.ai high-speed Flash variant with faster inference (up to 200 tok/s), sharing the Flash multimodal stack (320B total / 18B active, hybrid sparse+linear attention), 1M context and native vision for coding and visual workflows.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "file"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "max_output_tokens": 128000,
+        "capabilities": {
+          "thinking": true,
+          "streaming": true,
+          "function_calling": true,
+          "context_caching": true,
+          "structured_output": true,
+          "tool_streaming": true,
+          "vision": true
+        },
+        "vtcode": {
+          "variant": "ZaiGlm53Flashx",
+          "constant": "Z_AI_GLM_5_3_FLASHX",
+          "display": "GLM-5.3 FlashX",
+          "description": "Z.ai high-speed Flash variant with faster inference, 1M context and native vision.",
+          "efficient": true,
+          "top_tier": true,
+          "generation": "5.3",
+          "doc_comment": "GLM-5.3 FlashX - Z.ai high-speed Flash variant with faster inference, 320B total / 18B active, 1M context, native vision"
+        },
+        "reasoning_efforts": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
       "glm-5.3-flash": {
         "id": "glm-5.3-flash",
         "name": "GLM-5.3 Flash",
@@ -3555,6 +3599,34 @@
           ]
         },
         "context": 1310720,
+        "max_output_tokens": 131072,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": true
+        }
+      },
+      "zai/glm-5.3-flashx": {
+        "id": "zai/glm-5.3-flashx",
+        "name": "GLM-5.3 FlashX (Merge Gateway)",
+        "description": "Z.AI GLM-5.3 FlashX high-speed efficient multimodal model via Merge Gateway (320B total / 18B active, hybrid attention, native vision, up to 200 tok/s).",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1048576,
         "max_output_tokens": 131072,
         "capabilities": {
           "streaming": true,

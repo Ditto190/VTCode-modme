@@ -336,6 +336,13 @@ model_id_table! {
         display: "GLM-5.3 Flash (Merge Gateway)",
         description: "Z.AI GLM-5.3 Flash efficient multimodal model via Merge Gateway",
     },
+    MergeGatewayZaiGlm53Flashx {
+        provider: MergeGateway,
+        id: models::merge_gateway::ZAI_GLM_5_3_FLASHX,
+        parse: [models::merge_gateway::ZAI_GLM_5_3_FLASHX],
+        display: "GLM-5.3 FlashX (Merge Gateway)",
+        description: "Z.AI GLM-5.3 FlashX high-speed efficient multimodal model via Merge Gateway",
+    },
     MergeGatewayOpenAIGpt56Luna {
         provider: MergeGateway,
         id: models::merge_gateway::OPENAI_GPT_5_6_LUNA,

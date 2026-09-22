@@ -14,6 +14,7 @@ pub const THINKINGMACHINES_INKLING: &str = "thinkingmachines/inkling";
 pub const META_MUSE_SPARK_1_1: &str = "meta/muse-spark-1.1";
 pub const META_MUSE_SPARK_1_3: &str = "meta/muse-spark-1.3";
 pub const ZAI_GLM_5_3_FLASH: &str = "zai/glm-5.3-flash";
+pub const ZAI_GLM_5_3_FLASHX: &str = "zai/glm-5.3-flashx";
 pub const OPENAI_GPT_5_6_LUNA: &str = "openai/gpt-5.6-luna";
 pub const OPENAI_GPT_5_6_SOL: &str = "openai/gpt-5.6-sol";
 pub const OPENAI_GPT_5_6_TERRA: &str = "openai/gpt-5.6-terra";
@@ -46,6 +47,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     META_MUSE_SPARK_1_1,
     META_MUSE_SPARK_1_3,
     ZAI_GLM_5_3_FLASH,
+    ZAI_GLM_5_3_FLASHX,
     OPENAI_GPT_5_6_LUNA,
     OPENAI_GPT_5_6_SOL,
     OPENAI_GPT_5_6_TERRA,
@@ -62,6 +64,7 @@ pub const REASONING_EFFORT_ROUTES: &[&str] = &[
     META_MUSE_SPARK_1_1,
     META_MUSE_SPARK_1_3,
     ZAI_GLM_5_3_FLASH,
+    ZAI_GLM_5_3_FLASHX,
     OPENAI_GPT_5_6_LUNA,
     OPENAI_GPT_5_6_SOL,
     OPENAI_GPT_5_6_TERRA,
@@ -98,6 +101,7 @@ pub const REASONING_MODELS: &[&str] = &[
     META_MUSE_SPARK_1_1,
     META_MUSE_SPARK_1_3,
     ZAI_GLM_5_3_FLASH,
+    ZAI_GLM_5_3_FLASHX,
     OPENAI_GPT_5_6_LUNA,
     OPENAI_GPT_5_6_SOL,
     OPENAI_GPT_5_6_TERRA,

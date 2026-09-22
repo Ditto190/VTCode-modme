@@ -67,6 +67,7 @@ vtcode --provider merge-gateway --model anthropic/claude-opus-5
 | `thinkingmachines/inkling` | 1M | No | Thinking Machines route |
 | `meta/muse-spark-1.1` | 1M | Yes | Meta route |
 | `zai/glm-5.3-flash` | 1.31M | Yes | Z.AI route (320B/18B hybrid attention, native vision) |
+| `zai/glm-5.3-flashx` | 1M | Yes | Z.AI high-speed route (Flash stack, up to 200 tok/s, native vision) |
 | `openai/gpt-5.6-luna` | 1.1M | Yes | OpenAI route |
 | `openai/gpt-5.6-sol` | 1.1M | Yes | OpenAI route |
 | `openai/gpt-5.6-terra` | 1.1M | Yes | OpenAI route |

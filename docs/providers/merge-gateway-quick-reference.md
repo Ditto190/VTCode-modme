@@ -33,6 +33,7 @@ moonshot/kimi-k3
 thinkingmachines/inkling
 meta/muse-spark-1.1
 zai/glm-5.3-flash
+zai/glm-5.3-flashx
 openai/gpt-5.6-luna
 openai/gpt-5.6-sol
 openai/gpt-5.6-terra
