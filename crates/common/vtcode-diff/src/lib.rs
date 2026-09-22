@@ -2366,6 +2366,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn swarm_rng_range_uses_full_width_samples() {
+        let mut rng = SwarmRng::new(0);
+        // Keep the 64-bit sequence on narrower targets too: truncating the
+        // first sample to 32 bits before taking the remainder would yield 3.
+        for expected in [5, 4, 5, 7] {
+            assert_eq!(rng.range(3, 10), expected);
+        }
+    }
+
+    #[test]
+    fn swarm_rng_range_handles_usize_boundaries() {
+        let mut rng = SwarmRng::new(0);
+        for (low, high) in [
+            (0, 1),
+            (usize::MAX - 1, usize::MAX),
+            (0, usize::MAX),
+            (usize::MAX - 7, usize::MAX),
+        ] {
+            for _ in 0..128 {
+                assert!((low..high).contains(&rng.range(low, high)));
+            }
+        }
+    }
+
     /// Minimal deterministic PRNG (splitmix64): no new dependencies, stable CI.
     struct SwarmRng {
         state: u64,
@@ -2384,10 +2409,17 @@ mod tests {
             value ^ (value >> 31)
         }
 
+        /// Samples `[low, high)` using the full 64-bit sample before narrowing,
+        /// keeping the sequence identical for ranges shared by 32- and 64-bit targets.
+        ///
+        /// # Panics
+        /// Panics if `low >= high`.
         fn range(&mut self, low: usize, high: usize) -> usize {
             assert!(low < high, "empty range");
-            let span = high - low;
-            low + (self.next_u64() as usize % span)
+            let span = u64::try_from(high - low).expect("usize range width fits in u64");
+            // Reduce before narrowing so the remainder fits in usize on every target.
+            let offset = usize::try_from(self.next_u64() % span).expect("remainder is smaller than the usize range");
+            low + offset
         }
 
         fn shuffle_str(&mut self, items: &mut [&str]) {
