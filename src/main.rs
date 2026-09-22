@@ -421,6 +421,16 @@ async fn run(prepared: PreparedRun) -> Result<()> {
     }
 
     let dispatch_result = cli::dispatch(&args, &startup, print_mode).await;
+    // The interactive palette probe runs concurrently with startup and
+    // dispatch. Paths that never enter the agent loop (e.g. `continue` with
+    // no archived sessions) would otherwise exit while the probe is still
+    // waiting on `/dev/tty`, leaving the terminal's OSC/DA1 replies to be
+    // printed by the shell as visible escape-code garbage after exit.
+    // Finish it here so TTY replies are consumed before returning; when the
+    // agent loop already awaited the probe this returns immediately.
+    if startup_policy.run_terminal_probe() {
+        agent::probe::finish_terminal_palette_probe().await;
+    }
     perform_queued_runtime_relaunch();
     vtcode_core::utils::trace_writer::flush_trace_log();
     dispatch_result?;
