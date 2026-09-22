@@ -377,6 +377,7 @@ pub(super) fn persist_blocked_handoff_quiet(
     workspace: &Path,
     session_id: &str,
     blocker_summary: &str,
+    resume: BlockedHandoffResume<'_>,
     planning_active: bool,
 ) {
     match write_blocked_handoff_with_resume(
@@ -385,7 +386,7 @@ pub(super) fn persist_blocked_handoff_quiet(
         "blocked",
         blocker_summary,
         &existing_harness_artifact_paths(workspace),
-        BlockedHandoffResume::Unavailable(NO_ARCHIVE_RESUME_EXPLANATION),
+        resume,
         planning_active,
     ) {
         Ok(_) => {}

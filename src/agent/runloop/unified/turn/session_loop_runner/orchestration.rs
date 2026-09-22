@@ -2076,6 +2076,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             &config.workspace,
                             &harness_snapshot.session_id,
                             &summary,
+                            checkpoint_outcome.blocked_handoff_resume(),
                             tool_registry.is_planning_active(),
                         );
                     }

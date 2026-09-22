@@ -87,7 +87,7 @@ use parking_lot::Mutex as ParkingMutex;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::{Mutex, Notify, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -202,7 +202,8 @@ pub struct SubagentControllerConfig {
 }
 
 /// Central controller that manages spawning, lifecycle, and state of all subagents.
-#[derive(Clone)]
+/// The background completion monitor is cancelled when the final controller
+/// owner is dropped; its task-held clone is intentionally non-owning.
 pub struct SubagentController {
     config: Arc<SubagentControllerConfig>,
     parent_session_id: Arc<RwLock<String>>,
@@ -219,6 +220,48 @@ pub struct SubagentController {
     background_completion_notify: Arc<Notify>,
     background_completion_shutdown: CancellationToken,
     background_completion_monitor: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Counts controller clones that participate in monitor ownership.
+    background_completion_owners: Arc<AtomicUsize>,
+    /// The monitor task retains a clone for processing but must not keep the
+    /// monitor alive after all external controller owners are gone.
+    background_completion_monitor_owner: bool,
+}
+
+impl Clone for SubagentController {
+    fn clone(&self) -> Self {
+        self.background_completion_owners.fetch_add(1, Ordering::Relaxed);
+        Self {
+            config: Arc::clone(&self.config),
+            parent_session_id: Arc::clone(&self.parent_session_id),
+            lifecycle_hooks: self.lifecycle_hooks.clone(),
+            state: Arc::clone(&self.state),
+            shutdown_requested: Arc::clone(&self.shutdown_requested),
+            closing: Arc::clone(&self.closing),
+            background_completion_channel: Arc::clone(&self.background_completion_channel),
+            background_completion_notify: Arc::clone(&self.background_completion_notify),
+            background_completion_shutdown: self.background_completion_shutdown.clone(),
+            background_completion_monitor: Arc::clone(&self.background_completion_monitor),
+            background_completion_owners: Arc::clone(&self.background_completion_owners),
+            background_completion_monitor_owner: true,
+        }
+    }
+}
+
+impl Drop for SubagentController {
+    fn drop(&mut self) {
+        if !self.background_completion_monitor_owner
+            || self.background_completion_owners.fetch_sub(1, Ordering::AcqRel) != 1
+        {
+            return;
+        }
+
+        self.background_completion_shutdown.cancel();
+        if let Ok(mut monitor_slot) = self.background_completion_monitor.try_lock()
+            && let Some(monitor) = monitor_slot.take()
+        {
+            monitor.abort();
+        }
+    }
 }
 
 impl SubagentController {
@@ -275,6 +318,8 @@ impl SubagentController {
             background_completion_notify: Arc::new(Notify::new()),
             background_completion_shutdown: CancellationToken::new(),
             background_completion_monitor: Arc::new(Mutex::new(None)),
+            background_completion_owners: Arc::new(AtomicUsize::new(1)),
+            background_completion_monitor_owner: true,
         };
         controller.start_background_completion_monitor().await;
         Ok(controller)

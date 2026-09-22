@@ -1894,6 +1894,25 @@ async fn background_completion_monitor_shutdown_cancels_and_joins_task() {
 }
 
 #[tokio::test]
+async fn background_completion_monitor_is_cancelled_when_last_owner_drops() {
+    let temp = TempDir::new().expect("tempdir");
+    let controller =
+        SubagentController::new(test_controller_config(temp.path().to_path_buf(), VTCodeConfig::default()))
+            .await
+            .expect("controller");
+    let shutdown = controller.background_completion_shutdown.clone();
+    let monitor_slot = Arc::clone(&controller.background_completion_monitor);
+    let controller_clone = controller.clone();
+
+    drop(controller);
+    assert!(!shutdown.is_cancelled(), "a live clone must keep the monitor running");
+
+    drop(controller_clone);
+    assert!(shutdown.is_cancelled(), "dropping the final owner must cancel the monitor");
+    assert!(monitor_slot.lock().await.is_none(), "the monitor handle must be reclaimed");
+}
+
+#[tokio::test]
 #[cfg(unix)]
 async fn managed_background_nonzero_completion_is_delivered_as_error() {
     let temp = TempDir::new().expect("tempdir");

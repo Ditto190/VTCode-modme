@@ -40,9 +40,26 @@ use super::*;
 const BACKGROUND_COMPLETION_IDENTITY_CAPACITY: usize = 256;
 
 impl SubagentController {
+    fn clone_for_background_completion_monitor(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            parent_session_id: Arc::clone(&self.parent_session_id),
+            lifecycle_hooks: self.lifecycle_hooks.clone(),
+            state: Arc::clone(&self.state),
+            shutdown_requested: Arc::clone(&self.shutdown_requested),
+            closing: Arc::clone(&self.closing),
+            background_completion_channel: Arc::clone(&self.background_completion_channel),
+            background_completion_notify: Arc::clone(&self.background_completion_notify),
+            background_completion_shutdown: self.background_completion_shutdown.clone(),
+            background_completion_monitor: Arc::clone(&self.background_completion_monitor),
+            background_completion_owners: Arc::clone(&self.background_completion_owners),
+            background_completion_monitor_owner: false,
+        }
+    }
+
     pub(super) async fn start_background_completion_monitor(&self) {
         let mut completion_rx = self.config.exec_sessions.subscribe_completion();
-        let controller = self.clone();
+        let controller = self.clone_for_background_completion_monitor();
         let shutdown = self.background_completion_shutdown.clone();
         let monitor = tokio::spawn(async move {
             loop {
