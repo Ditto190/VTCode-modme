@@ -12,10 +12,11 @@ mod support;
 
 use support::TestHarness;
 
+/// Builds a CLI command using OpenAI's default model and a synthetic API key.
+///
+/// Pins the provider and model so startup does not depend on application defaults.
 fn base_command(harness: &TestHarness) -> Command {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("vtcode"));
-    // Keep startup on the provider whose synthetic key this fixture supplies,
-    // regardless of the application's default provider and model.
     let _configured_command = cmd
         .args(["--provider", "openai", "--model", DEFAULT_MODEL])
         .env("OPENAI_API_KEY", "test-key")
