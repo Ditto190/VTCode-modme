@@ -363,7 +363,7 @@ impl SnapshotManager {
         let relative = sanitize_relative_path(relative).context("Checkpoint path escapes the workspace")?;
         anyhow::ensure!(!relative.as_os_str().is_empty(), "Checkpoint path must name a file");
         let absolute = workspace.join(&relative);
-        let storage = storage.canonicalize().unwrap_or_else(|_| storage.to_path_buf());
+        let storage = canonicalize(storage).unwrap_or_else(|_| storage.to_path_buf());
         anyhow::ensure!(!absolute.starts_with(&storage), "Checkpoint cannot restore its own storage");
         let mut current = workspace.to_path_buf();
         for part in relative.components() {

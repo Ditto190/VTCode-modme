@@ -76,56 +76,192 @@ fn file_records(manifest: &filesnap::Manifest, workspace: &Path, engine: &str) -
         .collect()
 }
 
+// Only literal POSIX-shell redirects whose cwd stays unchanged can provide
+// reliable preimages. Never execute or expand shell text to discover a path.
+fn shell_redirect_paths(args: &serde_json::Value) -> BTreeSet<PathBuf> {
+    use crate::command_safety::shell_parser::contains_dynamic_shell_syntax;
+
+    let collect = || -> Option<BTreeSet<PathBuf>> {
+        if cfg!(windows) {
+            return None;
+        }
+        if let Some(shell) = args.get("shell").and_then(serde_json::Value::as_str) {
+            let name = Path::new(shell).file_name()?.to_str()?;
+            if !matches!(name, "bash" | "sh" | "dash" | "zsh" | "ksh") {
+                return None;
+            }
+        }
+        let script = args
+            .get("raw_command")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| crate::tools::command_args::raw_command_text(args))?;
+        if !script.contains('>') {
+            return None;
+        }
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_bash::LANGUAGE.into()).ok()?;
+        let tree = parser.parse(&script, None)?;
+        if tree.root_node().has_error() {
+            return None;
+        }
+        let mut paths = BTreeSet::new();
+        let mut pending = vec![tree.root_node()];
+        while let Some(node) = pending.pop() {
+            match node.kind() {
+                "program" | "list" | "pipeline" | "redirected_statement" => {
+                    let mut cursor = node.walk();
+                    pending.extend(node.named_children(&mut cursor));
+                }
+                "command" => {
+                    let name = node.child_by_field_name("name")?.utf8_text(script.as_bytes()).ok()?;
+                    if contains_dynamic_shell_syntax(name) {
+                        return None;
+                    }
+                    let words = shell_words::split(name).ok()?;
+                    if words.len() != 1
+                        || matches!(
+                            words.first()?.as_str(),
+                            "cd" | "pushd"
+                                | "popd"
+                                | "source"
+                                | "."
+                                | "eval"
+                                | "exec"
+                                | "command"
+                                | "builtin"
+                                | "alias"
+                                | "unalias"
+                                | "trap"
+                                | "enable"
+                                | "shopt"
+                        )
+                    {
+                        return None;
+                    }
+                    let mut cursor = node.walk();
+                    pending.extend(
+                        node.named_children(&mut cursor)
+                            .filter(|child| matches!(child.kind(), "file_redirect" | "heredoc_redirect")),
+                    );
+                }
+                "file_redirect" => {
+                    let text = node.utf8_text(script.as_bytes()).ok()?;
+                    let operator = text.trim_start_matches(|c: char| c.is_ascii_digit());
+                    if !operator.starts_with('>') && !operator.starts_with("&>") {
+                        continue;
+                    }
+                    let mut cursor = node.walk();
+                    for destination in node.children_by_field_name("destination", &mut cursor) {
+                        let raw = destination.utf8_text(script.as_bytes()).ok()?;
+                        if contains_dynamic_shell_syntax(raw) {
+                            return None;
+                        }
+                        let words = shell_words::split(raw).ok()?;
+                        if words.len() != 1 {
+                            return None;
+                        }
+                        let path = words.first()?;
+                        if operator.starts_with(">&") && (path == "-" || path.chars().all(|c| c.is_ascii_digit())) {
+                            continue;
+                        }
+                        if path.is_empty() || path.starts_with('~') {
+                            return None;
+                        }
+                        paths.insert(PathBuf::from(path));
+                    }
+                }
+                // Here-doc contents and comments are data, not shell commands.
+                "heredoc_redirect" | "comment" => {}
+                // Functions, loops, subshells and dynamic cwd changes need a
+                // richer execution model; do not guess their target paths.
+                _ => return None,
+            }
+        }
+        Some(paths)
+    };
+    collect().unwrap_or_default()
+}
+
 /// Capture final local write arguments after host hook rewriting and before tool execution.
 pub async fn declare_prompt_edit(session: String, name: String, args: serde_json::Value) -> Result<()> {
     let active = active_map()
         .lock()
-        .map_err(|_| anyhow::anyhow!("Checkpoint lock poisoned"))?
+        .map_err(|error| anyhow::anyhow!("Checkpoint lock poisoned: {error}"))?
         .get(&session)
         .cloned();
     let Some(active) = active else {
         return Ok(());
     };
+    let is_shell = crate::tools::tool_intent::is_command_run_tool_call(&name, &args);
     let operation = args.get("action").and_then(serde_json::Value::as_str).unwrap_or(&name);
-    if !["write", "edit", "patch", "delete", "remove", "create", "move", "rename"]
-        .iter()
-        .any(|verb| operation.contains(verb))
+    if !is_shell
+        && !["write", "edit", "patch", "delete", "remove", "create", "move", "rename"]
+            .iter()
+            .any(|verb| operation.contains(verb))
     {
         return Ok(());
     }
     tokio::task::spawn_blocking(move || -> Result<()> {
-        let active = active.lock().map_err(|_| anyhow::anyhow!("Checkpoint lock poisoned"))?;
+        let active = active
+            .lock()
+            .map_err(|error| anyhow::anyhow!("Checkpoint lock poisoned: {error}"))?;
         let mut paths = BTreeSet::new();
-        for key in [
-            "path",
-            "file_path",
-            "destination",
-            "destination_path",
-            "new_path",
-            "source",
-        ] {
-            if let Some(path) = args.get(key).and_then(serde_json::Value::as_str) {
-                paths.insert(PathBuf::from(path));
+        if is_shell {
+            let redirects = shell_redirect_paths(&args);
+            if redirects.is_empty() {
+                return Ok(());
             }
-        }
-        for key in ["patch", "input", "patch_text"] {
-            if let Some(patch) = args.get(key).and_then(serde_json::Value::as_str) {
-                for line in patch.lines() {
-                    for prefix in [
-                        "*** Add File: ",
-                        "*** Update File: ",
-                        "*** Delete File: ",
-                        "*** Move to: ",
-                    ] {
-                        if let Some(path) = line.strip_prefix(prefix) {
-                            paths.insert(PathBuf::from(path));
+            let cwd = crate::tools::command_args::working_dir_text(&args)
+                .map_or_else(|| active.workspace.clone(), |path| active.workspace.join(path));
+            let cwd = canonicalize(&cwd)?;
+            paths.extend(redirects.into_iter().map(|path| cwd.join(path)));
+        } else {
+            for key in [
+                "path",
+                "file_path",
+                "destination",
+                "destination_path",
+                "new_path",
+                "source",
+            ] {
+                if let Some(path) = args.get(key).and_then(serde_json::Value::as_str) {
+                    paths.insert(PathBuf::from(path));
+                }
+            }
+            for key in ["patch", "input", "patch_text"] {
+                if let Some(patch) = args.get(key).and_then(serde_json::Value::as_str) {
+                    for line in patch.lines() {
+                        for prefix in [
+                            "*** Add File: ",
+                            "*** Update File: ",
+                            "*** Delete File: ",
+                            "*** Move to: ",
+                        ] {
+                            if let Some(path) = line.strip_prefix(prefix) {
+                                paths.insert(PathBuf::from(path));
+                            }
                         }
                     }
                 }
             }
         }
+        if paths.is_empty() {
+            return Ok(());
+        }
         let store = filesnap::WorkspaceStore::open(&active.storage, &active.workspace)?;
+        let target = store.target_for_turn(&active.engine)?.context("Missing active checkpoint")?;
+        let before = store.manifest(target.manifest_id())?;
+        let ignore = filesnap::load_ignore(&active.workspace);
         for path in paths {
+            // Shells may also redirect to devices or outside this workspace.
+            // Those paths are outside this checkpoint's restore authority.
+            if is_shell
+                && (path.is_absolute() && !path.starts_with(&active.workspace)
+                    || path.components().any(|part| part == Component::ParentDir))
+            {
+                continue;
+            }
             let relative = if path.is_absolute() {
                 path.strip_prefix(&active.workspace)
                     .context("Edit outside checkpoint workspace")?
@@ -134,12 +270,21 @@ pub async fn declare_prompt_edit(session: String, name: String, args: serde_json
                 path
             };
             let path = SnapshotManager::checked_file_path(&active.workspace, &active.storage, &relative)?;
+            if filesnap::is_ignored(&ignore, &path) {
+                continue;
+            }
+            store.declare_paths(&active.watch, &active.engine, std::slice::from_ref(&path))?;
+            let key = path.to_string_lossy();
+            // The first preimage owns the turn boundary. A second write must
+            // never replace a recorded absence with the newly created bytes.
+            if before.entries.contains_key(key.as_ref()) || before.absent.contains(key.as_ref()) {
+                continue;
+            }
             let image = match fs::read(&path) {
                 Ok(bytes) => filesnap::PreEditImage::Existed(bytes),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => filesnap::PreEditImage::DidNotExist,
                 Err(error) => return Err(error.into()),
             };
-            store.declare_paths(&active.watch, &active.engine, &[path.clone()])?;
             filesnap::declare_edits(
                 &store,
                 &active.engine,
@@ -245,7 +390,7 @@ impl SnapshotManager {
         atomic_json(&self.navigation_path(session)?, &state)?;
         active_map()
             .lock()
-            .map_err(|_| anyhow::anyhow!("Checkpoint lock poisoned"))?
+            .map_err(|error| anyhow::anyhow!("Checkpoint lock poisoned: {error}"))?
             .insert(session.into(), Arc::new(Mutex::new(active)));
         Ok(PromptCheckpointLease { key: session.into(), _lock: lock })
     }
@@ -387,6 +532,155 @@ mod tests {
     use super::*;
     use crate::llm::provider::MessageRole;
     use tempfile::TempDir;
+    #[test]
+    #[cfg(unix)]
+    fn shell_redirects_only_capture_literal_targets_with_a_known_cwd() {
+        let paths = |script: &str| shell_redirect_paths(&serde_json::json!({"cmd": script}));
+        assert_eq!(paths("printf 'hello' > hello.py && cat hello.py"), BTreeSet::from([PathBuf::from("hello.py")]));
+        assert_eq!(
+            paths("cat > 'hello world.py' <<'PY'\nprint('> not-a-path')\nPY"),
+            BTreeSet::from([PathBuf::from("hello world.py")])
+        );
+        assert_eq!(paths("printf hi >> log.txt 2>&1"), BTreeSet::from([PathBuf::from("log.txt")]));
+        for script in [
+            "cat hello.py",
+            "cat < input.txt",
+            "printf '> innocent.txt'",
+            "echo hi 2>&1",
+            "echo hi > $OUTPUT",
+            "echo hi > $(pwd)/hello.py",
+            "echo hi > ~/hello.py",
+            "cd nested && echo hi > hello.py",
+            "command cd nested; echo hi > hello.py",
+            "eval 'cd nested'; echo hi > hello.py",
+            "f() { echo hi > hello.py; }; f",
+            "echo hi >",
+        ] {
+            assert!(paths(script).is_empty(), "must not guess paths for {script}");
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn shell_preimages_respect_ignore_and_workspace_boundaries() -> Result<()> {
+        let dir = TempDir::new()?;
+        let outside = TempDir::new()?;
+        fs::write(dir.path().join(".filesnapignore"), "ignored.txt\n")?;
+        let manager = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
+        let session = uuid::Uuid::new_v4().to_string();
+        let lease = manager.begin_prompt(1, &session, "create files", &[]).await?;
+        let outside_file = outside.path().join("outside.txt");
+        let script =
+            format!("echo hi > ignored.txt; echo hi > {}", shell_words::quote(&outside_file.to_string_lossy()));
+        declare_prompt_edit(session.clone(), "exec_command".into(), serde_json::json!({"cmd":script})).await?;
+        fs::write(dir.path().join("ignored.txt"), "ignored")?;
+        fs::write(&outside_file, "outside")?;
+        // No input or display text should be mistaken for a shell write.
+        declare_prompt_edit(session.clone(), "exec_command".into(), serde_json::json!({"cmd":"cat ignored.txt"}))
+            .await?;
+        assert!(manager.load_snapshot(1).await?.expect("checkpoint").files.is_empty());
+        drop(lease);
+        manager.navigate_prompt(Some(1), RevertScope::Both, &session, &[]).await?;
+        assert_eq!(fs::read_to_string(dir.path().join("ignored.txt"))?, "ignored");
+        assert_eq!(fs::read_to_string(outside_file)?, "outside");
+        let _lease = manager.begin_prompt(2, &session, "next prompt", &[]).await?;
+        assert!(manager.load_snapshot(2).await?.expect("next checkpoint").files.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn shell_creation_rewind_redo_then_rewind_creation_removes_file() -> Result<()> {
+        let dir = TempDir::new()?;
+        let manager = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
+        let session = uuid::Uuid::new_v4().to_string();
+        let nested = dir.path().join("nested");
+        fs::create_dir(&nested)?;
+        let file = nested.join("hello.py");
+        let neighbor = dir.path().join("hello.py");
+        fs::write(&neighbor, "unrelated existing file")?;
+        let original = vec![SessionMessage::new(MessageRole::User, "pwd")];
+        let created = vec![SessionMessage::new(MessageRole::User, "add a hello world py")];
+        let current = vec![SessionMessage::new(MessageRole::User, "add greetings")];
+        let hello = "print(\"Hello, World!\")\n";
+        let greetings = "print(\"Hello, Ada!\")\n";
+
+        let lease = manager.begin_prompt(1, &session, "add a hello world py", &original).await?;
+        let script = "printf 'print(\"Hello, World!\")\\n' > hello.py && cat hello.py";
+        declare_prompt_edit(
+            session.clone(),
+            "exec_command".into(),
+            serde_json::json!({"cmd":script,"workdir":"nested"}),
+        )
+        .await?;
+        let output = tokio::process::Command::new("sh")
+            .args(["-c", script])
+            .current_dir(&nested)
+            .output()
+            .await?;
+        assert!(output.status.success());
+        assert_eq!(fs::read_to_string(&file)?, hello);
+        // A subsequent write in the same prompt must retain the first absence.
+        declare_prompt_edit(
+            session.clone(),
+            "exec_command".into(),
+            serde_json::json!({"cmd":script,"workdir":"nested"}),
+        )
+        .await?;
+        assert!(
+            manager
+                .load_snapshot(1)
+                .await?
+                .expect("creation checkpoint")
+                .files
+                .iter()
+                .any(|f| f.path == "nested/hello.py" && f.deleted)
+        );
+        drop(lease);
+
+        let lease = manager.begin_prompt(2, &session, "add greetings", &created).await?;
+        let script = "cat > hello.py <<'PY'\nprint(\"Hello, Ada!\")\nPY";
+        declare_prompt_edit(
+            session.clone(),
+            "unified_exec".into(),
+            serde_json::json!({"action":"run","command":script,"working_dir":nested}),
+        )
+        .await?;
+        let output = tokio::process::Command::new("sh")
+            .args(["-c", script])
+            .current_dir(&nested)
+            .output()
+            .await?;
+        assert!(output.status.success());
+        assert_eq!(fs::read_to_string(&file)?, greetings);
+        drop(lease);
+        // A file never declared or captured must not be swept away by rewind.
+        fs::write(dir.path().join("unrelated.txt"), "leave me alone")?;
+
+        let restored = manager.navigate_prompt(Some(2), RevertScope::Both, &session, &current).await?;
+        assert_eq!(restored.conversation, created);
+        assert_eq!(fs::read_to_string(&file)?, hello);
+        let restored = manager
+            .navigate_prompt(None, RevertScope::Both, &session, &restored.conversation)
+            .await?;
+        assert_eq!(restored.conversation, current);
+        assert_eq!(fs::read_to_string(&file)?, greetings);
+        let restored = manager
+            .navigate_prompt(Some(1), RevertScope::Both, &session, &restored.conversation)
+            .await?;
+        assert_eq!(restored.conversation, original);
+        assert!(!file.exists());
+        assert_eq!(fs::read_to_string(&neighbor)?, "unrelated existing file");
+        assert_eq!(fs::read_to_string(dir.path().join("unrelated.txt"))?, "leave me alone");
+        let resumed = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
+        let restored = resumed
+            .navigate_prompt(None, RevertScope::Both, &session, &restored.conversation)
+            .await?;
+        assert_eq!(restored.conversation, current);
+        assert_eq!(fs::read_to_string(&file)?, greetings);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn native_history_restores_prompt_prefix_binary_assets_and_nested_redo() -> Result<()> {
         let dir = TempDir::new()?;

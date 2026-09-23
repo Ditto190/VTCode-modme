@@ -17,8 +17,17 @@ starts with prompts captured by this build, not legacy file-only checkpoints.
 
 Capture is bounded. Ignored, remote, or uncaptured files are not protected.
 Known local write/edit paths are declared before mutation, including absent files;
-binary files are restored as bytes. Shell/MCP writes need pre-existing capture
-coverage. These commands do not call a model.
+binary files are restored as bytes. On Unix, literal output redirects in simple
+POSIX shell commands (including `printf > file`, `cat > file` with a here-document,
+and `>> file`) also declare their targets before execution, relative to the tool's
+working directory. Repeated writes preserve the first pre-image in the prompt.
+Dynamic destinations, scripts that change directory, nested shell scripts,
+interpreter file writes and other opaque shell/MCP writes still need pre-existing
+capture coverage. These commands do not call a model.
+
+Checkpoints made before shell redirection tracking was added may lack absence
+records for shell-created files. They cannot safely infer which files to delete;
+use a new prompt checkpoint to validate this behavior.
 
 The interactive runtime captures the conversation prefix before the user prompt
 and records file pre-images after tool argument normalization. Native list modals
