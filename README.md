@@ -38,6 +38,7 @@
 - [Contributing](#contributing)
   - [Contributors](#contributors)
 - [Support](#support)
+  - [Contact](#contact)
   - [Sponsorship](#sponsorship)
 - [License](#license)
 
@@ -375,6 +376,14 @@ Thank you to everyone who shaped VT Code.
 </details>
 
 ## Support
+
+### Contact
+
+For partnership and collaboration inquiries:
+`vinhnguyen2308 [at] gmail [dot] com`
+
+For bugs and feature requests, prefer
+[GitHub Issues](https://github.com/vinhnx/vtcode/issues).
 
 ### Sponsorship
 
