@@ -810,8 +810,9 @@ impl ToolRegistry {
             .and_then(|registration| registration.parameter_schema().cloned());
         let normalized_args = execution_kernel::normalize_tool_args(&tool_name, args, parameter_schema.as_ref())?;
         // Plan-mode inspections default to a smaller per-result preview so a
-        // research fan-out fits the turn budget; explicit caller values and
-        // verification commands keep the full default (same predicate as the
+        // research fan-out fits the turn budget; explicit non-verification
+        // values are clamped to the plan max while verification commands keep
+        // the full default (same predicate as the
         // fast-reuse exemption below).
         let is_verification_command = matches!(
             tool_intent::classify_shell_activity(&tool_name, normalized_args.as_ref()),

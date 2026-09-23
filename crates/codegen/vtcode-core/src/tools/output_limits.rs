@@ -11,9 +11,18 @@ pub(crate) const OUTPUT_PREVIEW_CHARS_PER_TOKEN: usize = 4;
 /// Default per-result preview budget for plan-mode inspections that omit an
 /// explicit `max_output_tokens` (`2_000` tokens ≈ 8 KiB). Planning research
 /// fans out across many reads, so the smaller default keeps a dozen previews
-/// inside the `96 KiB` plan turn budget. Explicit caller values and
+/// inside the `96 KiB` plan turn budget. Explicit large values on
+/// non-verification calls are clamped to [`PLAN_MODE_MAX_OUTPUT_TOKENS`];
 /// verification commands are never clamped.
 pub(crate) const PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS: usize = 2_000;
+
+/// Maximum per-result preview budget for plan-mode non-verification calls
+/// (`4_000` tokens ≈ 16 KiB). Session `session-vtcode-20260923T065602Z`
+/// requested `12_000-30_000` tokens per inspection, exhausting the `96 KiB`
+/// turn budget after two previews and forcing stubbed retries. Clamping keeps
+/// at least six previews visible before exhaustion while spool paging (with
+/// preview credit) stays available for full content.
+pub(crate) const PLAN_MODE_MAX_OUTPUT_TOKENS: usize = 4_000;
 
 /// Validates and returns the requested model-visible result preview budget.
 ///
@@ -26,13 +35,19 @@ pub(crate) fn max_output_tokens(args: &Value) -> Result<usize> {
 
 /// Planning-aware variant of [`max_output_tokens`].
 ///
-/// An explicitly provided integer keeps existing validation exactly;
-/// verification commands keep the full default so build/test output stays
-/// authoritative. Only an omitted value on a non-verification call while
-/// planning is active resolves to [`PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS`].
+/// An omitted value on a non-verification call while planning is active
+/// resolves to [`PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS`]. An explicit value on
+/// a non-verification planning call is clamped to
+/// [`PLAN_MODE_MAX_OUTPUT_TOKENS`] so one large inspection cannot exhaust the
+/// turn preview budget; verification commands keep the full default so
+/// build/test output stays authoritative.
 pub(crate) fn resolve_max_output_tokens(args: &Value, planning_active: bool, is_verification: bool) -> Result<usize> {
-    if args.get(MAX_OUTPUT_TOKENS_FIELD).is_none() && planning_active && !is_verification {
-        return Ok(PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS);
+    if planning_active && !is_verification {
+        if args.get(MAX_OUTPUT_TOKENS_FIELD).is_none() {
+            return Ok(PLAN_MODE_DEFAULT_MAX_OUTPUT_TOKENS);
+        }
+        let tokens = max_output_tokens_uncapped(args)?;
+        return Ok(tokens.min(PLAN_MODE_MAX_OUTPUT_TOKENS));
     }
     max_output_tokens_uncapped(args)
 }
@@ -101,12 +116,22 @@ mod tests {
             resolve_max_output_tokens(&json!({}), true, false).unwrap()
                 < resolve_max_output_tokens(&json!({}), false, false).unwrap()
         );
-        // Explicit caller values are never clamped, even in planning.
+        // Explicit large values in planning are clamped to the plan max so a
+        // single inspection cannot exhaust the turn preview budget.
         assert_eq!(
             resolve_max_output_tokens(&json!({"max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS}), true, false).unwrap(),
-            DEFAULT_MAX_OUTPUT_TOKENS
+            PLAN_MODE_MAX_OUTPUT_TOKENS
         );
+        assert_eq!(
+            resolve_max_output_tokens(&json!({"max_output_tokens": 30_000}), true, false).unwrap(),
+            PLAN_MODE_MAX_OUTPUT_TOKENS
+        );
+        // Small explicit values below the max are preserved.
         assert_eq!(resolve_max_output_tokens(&json!({"max_output_tokens": 1}), true, false).unwrap(), 1);
+        assert_eq!(
+            resolve_max_output_tokens(&json!({"max_output_tokens": PLAN_MODE_MAX_OUTPUT_TOKENS}), true, false).unwrap(),
+            PLAN_MODE_MAX_OUTPUT_TOKENS
+        );
         // Verification commands keep the full default in planning.
         assert_eq!(resolve_max_output_tokens(&json!({}), true, true).unwrap(), DEFAULT_MAX_OUTPUT_TOKENS);
         // Execution mode is untouched.

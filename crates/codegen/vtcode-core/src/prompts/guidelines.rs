@@ -13,6 +13,7 @@ const TOOL_WRITE_STDIN: &str = tools::WRITE_STDIN;
 const TOOL_CODE_SEARCH: &str = tools::CODE_SEARCH;
 const TOOL_READ_FILE: &str = tools::READ_FILE;
 const TOOL_LIST_FILES: &str = tools::LIST_FILES;
+const TOOL_GREP_FILE: &str = tools::GREP_FILE;
 const TOOL_APPLY_PATCH: &str = tools::APPLY_PATCH;
 const TOOL_REQUEST_USER_INPUT: &str = tools::REQUEST_USER_INPUT;
 const TOOL_TASK_TRACKER: &str = tools::TASK_TRACKER;
@@ -300,6 +301,18 @@ pub fn append_runtime_tool_prompt_sections_for_model(
         generate_tool_guidelines_with_capabilities(&names, capability_level, shell_profile, profile, parallel_tools);
     if tool_snapshot.planning_active {
         guidance.push_str("\n- Planning is read-only. Stop research when the plan is specified or the budget is near; emit one `<proposed_plan>` block with concrete targets and verification for each step.");
+        let read_tools = [TOOL_READ_FILE, TOOL_GREP_FILE, TOOL_CODE_SEARCH, TOOL_LIST_FILES]
+            .into_iter()
+            .filter(|tool| names.iter().any(|name| name == tool))
+            .collect::<Vec<_>>();
+        if read_tools.is_empty() {
+            guidance.push_str("\n- Keep inspections small: keep `max_output_tokens` small, page spool files in small ranges, avoid batching multiple large inspections in parallel; start git history with `git log --oneline` before targeted `git show --stat`.");
+        } else {
+            guidance.push_str(&format!(
+                "\n- Keep inspections small: prefer `{}` over `exec_command` shell reads; keep `max_output_tokens` small, page spool files in small ranges, avoid batching multiple large inspections in parallel; start git history with `git log --oneline` before targeted `git show --stat`.",
+                read_tools.join("`/`")
+            ));
+        }
         if names.iter().any(|name| name == TOOL_TASK_TRACKER) {
             guidance.push_str("\n- Keep blockers and verification open in `task_tracker`; updates use positive indices or index_path, with index 0 reserved for checklist completion.");
         }

@@ -288,7 +288,7 @@ pub(super) fn classify_execution_summary(
 ) -> ExecutionSummaryStatus {
     match result {
         TurnLoopResult::Completed { .. } => {
-            if final_response_was_fallback || !changed_files {
+            if final_response_was_fallback {
                 return ExecutionSummaryStatus::Blocked;
             }
             let Some(checklist) = checklist else {
@@ -305,15 +305,61 @@ pub(super) fn classify_execution_summary(
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_default();
             let blocked = checklist.get("blocked").and_then(serde_json::Value::as_u64).unwrap_or_default();
-            if total > 0 && completed >= total && pending == 0 && in_progress == 0 && blocked == 0 {
-                ExecutionSummaryStatus::Completed
-            } else {
-                ExecutionSummaryStatus::Blocked
+            if total == 0 || completed < total || pending != 0 || in_progress != 0 || blocked != 0 {
+                return ExecutionSummaryStatus::Blocked;
             }
+            // Read-only review plans complete without file mutations:
+            // session-20260923 was marked Blocked despite a fully completed
+            // review checklist because no files changed. Implementation plans
+            // still require evidence of mutation.
+            if !changed_files && !checklist_is_review_only(checklist) {
+                return ExecutionSummaryStatus::Blocked;
+            }
+            ExecutionSummaryStatus::Completed
         }
         TurnLoopResult::Blocked { .. } => ExecutionSummaryStatus::Blocked,
         TurnLoopResult::Aborted | TurnLoopResult::Cancelled | TurnLoopResult::Exit => ExecutionSummaryStatus::Failed,
     }
+}
+
+/// Whether an approved-plan checklist describes read-only review work with no
+/// file mutations expected. All item descriptions must match review verbs and
+/// none may match mutation verbs; empty or malformed checklists fail closed
+/// as implementation work so the file-change requirement is preserved.
+fn checklist_is_review_only(checklist: &serde_json::Value) -> bool {
+    let Some(items) = checklist.get("items").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    if items.is_empty() {
+        return false;
+    }
+    items.iter().all(|item| {
+        let description = item
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if description.trim().is_empty() {
+            return false;
+        }
+        let is_review = description.contains("review")
+            || description.contains("inspect")
+            || description.contains("assess")
+            || description.contains("audit")
+            || description.contains("investigat")
+            || description.contains("analy");
+        if !is_review {
+            return false;
+        }
+        !(description.contains("implement")
+            || description.contains("fix")
+            || description.contains("edit")
+            || description.contains("create")
+            || description.contains("update")
+            || description.contains("delete")
+            || description.contains("refactor")
+            || description.contains("migrat"))
+    })
 }
 
 fn pending_checklist_items(checklist: &serde_json::Value) -> Vec<String> {
@@ -338,7 +384,10 @@ fn execution_summary_blocker(
     if final_response_was_fallback {
         return Some("recovery ended with a deterministic fallback and did not confirm the requested work".to_string());
     }
-    if !changed_files && matches!(result, TurnLoopResult::Completed { .. }) {
+    if !changed_files
+        && matches!(result, TurnLoopResult::Completed { .. })
+        && !checklist.is_some_and(checklist_is_review_only)
+    {
         return Some(
             "the approved-plan turn produced no file changes, so implementation completion was not confirmed"
                 .to_string(),
@@ -781,7 +830,8 @@ mod tests {
             "completed": 1,
             "pending": 0,
             "in_progress": 0,
-            "blocked": 0
+            "blocked": 0,
+            "items": [{"description": "Implement feature", "status": "completed"}]
         });
         let result = TurnLoopResult::Completed { plan_approved_execution_pending: false };
 
@@ -789,5 +839,54 @@ mod tests {
             classify_execution_summary(&result, false, Some(&checklist), false),
             ExecutionSummaryStatus::Blocked
         );
+    }
+
+    #[test]
+    fn completed_review_only_plan_without_file_changes_is_completed() {
+        let checklist = json!({
+            "total": 3,
+            "completed": 3,
+            "pending": 0,
+            "in_progress": 0,
+            "blocked": 0,
+            "items": [
+                {"description": "Review background completion monitoring", "status": "completed"},
+                {"description": "Review bounded completion-event handling", "status": "completed"},
+                {"description": "Inspect additional runtime diffs", "status": "completed"}
+            ]
+        });
+        let result = TurnLoopResult::Completed { plan_approved_execution_pending: false };
+
+        assert_eq!(
+            classify_execution_summary(&result, false, Some(&checklist), false),
+            ExecutionSummaryStatus::Completed
+        );
+        assert!(super::checklist_is_review_only(&checklist));
+    }
+
+    #[test]
+    fn review_only_checklist_rejects_mutation_descriptions() {
+        let mixed = json!({
+            "items": [
+                {"description": "Review background completion", "status": "completed"},
+                {"description": "Implement fix", "status": "completed"}
+            ]
+        });
+        assert!(!super::checklist_is_review_only(&mixed));
+
+        let empty_items = json!({"items": []});
+        assert!(!super::checklist_is_review_only(&empty_items));
+
+        let missing_items = json!({"total": 1});
+        assert!(!super::checklist_is_review_only(&missing_items));
+
+        // Asymmetric boundary: colon/suffix forms still count as mutation,
+        // and `prefix` fail-closes toward implementation (safe direction:
+        // preserves the file-change requirement rather than waiving it).
+        let fix_colon = json!({"items": [{"description": "Review then Fix: race", "status": "completed"}]});
+        assert!(!super::checklist_is_review_only(&fix_colon));
+
+        let prefix_mention = json!({"items": [{"description": "Review prefix handling", "status": "completed"}]});
+        assert!(!super::checklist_is_review_only(&prefix_mention));
     }
 }
