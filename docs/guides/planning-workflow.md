@@ -361,6 +361,15 @@ same outcome — for docs changes, `grep -n 'symbol' path` or
 `sed -n '1,40p' path` are valid; `verify: [run checks]` and
 `verify: [git diff --check]` are not.
 
+Read-only reviews may use targeted Git history checks as verification:
+`git log -5 --oneline`, `git show --stat HEAD`, `git diff HEAD~1 -- src/main.rs`,
+or `git blame src/main.rs`. Select a revision, path, or filter so the check
+provides evidence for the step. Bare Git commands, mutating Git commands, and
+`git diff --check` do not verify a review outcome. During planning recovery,
+the agent synthesizes from evidence already visible in the transcript. A
+single repeated read among productive inspections does not force synthesis;
+the low-signal and repeated-navigation guards still bound genuine loops.
+
 `Next open decision` and `Open question` entries are explicit reopen markers for follow-up planning; use a resolved statement such as `No remaining scope decisions` when none remain.
 
 ### Reasoning and Evidence

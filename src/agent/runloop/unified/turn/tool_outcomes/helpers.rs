@@ -1188,7 +1188,7 @@ pub(crate) const NAVIGATION_LOOP_THRESHOLD: usize = 15;
 pub(crate) const LISTING_LOOP_TRIP_COUNT: usize = 3;
 
 /// Planning listing tripwire: planning owns dedicated convergence guards (6
-/// consecutive / 10 total low-signal, 12-step nav synthesis), so three
+/// consecutive / 10 total low-signal), so three
 /// successful listings are legitimate exploration there rather than churn.
 pub(crate) const PLANNING_LISTING_LOOP_TRIP_COUNT: usize = 5;
 
@@ -1197,12 +1197,6 @@ pub(crate) const PLANNING_LISTING_LOOP_TRIP_COUNT: usize = 5;
 /// tool-free synthesis pass while the evidence is still useful.
 pub(crate) const PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD: u8 = 6;
 pub(crate) const PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD: u8 = 10;
-/// Consecutive planning inspections are allowed to be productive, but a
-/// repeated request after this bounded research window means the model should
-/// synthesize before it narrows the search indefinitely. This catches
-/// successful reads that are not low-signal by payload shape.
-pub(crate) const PLANNING_NAVIGATION_SYNTHESIS_THRESHOLD: usize = 12;
-
 /// Execution-mode total low-signal guard. Planning converges via its adaptive
 /// thresholds (6 consecutive / 10 total); execution mode previously converged
 /// only through per-family repeats, the 15-step navigation loop, or the final
@@ -1394,8 +1388,7 @@ impl LoopTracker {
     }
 
     /// Number of redundant navigations (total - unique) in the current window.
-    /// The generic navigation-loop guard requires at least 3; planning's
-    /// bounded convergence checkpoint also uses a single repeated request.
+    /// The navigation-loop guard requires at least 3 redundant requests.
     pub(crate) fn repeated_navigation_count(&self) -> usize {
         self.consecutive_navigations.saturating_sub(self.nav_signatures.len())
     }

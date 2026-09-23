@@ -137,10 +137,12 @@ mod tests {
 
     #[test]
     fn execution_directive_avoids_redundant_inspection_for_review_plans() {
-        assert!(
-            PLAN_APPROVED_EXECUTION_DIRECTIVE.contains("read-only review/inspection"),
-            "execution handoff must tell the model not to re-run large inspections for review plans"
-        );
+        let prior_evidence = "Review outcome: background completion emits one terminal event; no file edits expected.";
+        let prompt = build_approved_plan_execution_prompt(PlanExecutionContext::Current, Some(prior_evidence));
+        assert!(prompt.contains("read-only review/inspection"));
+        assert!(prompt.contains("do not re-run large inspections"));
+        assert!(prompt.contains("summarize from existing evidence and mark tracker complete"));
+        assert!(prompt.contains(prior_evidence));
     }
 
     #[test]
