@@ -50,6 +50,8 @@ pub enum ModelId {
     ClaudeFable51,
     /// Claude Opus 5 - Anthropic's newest Opus-tier model with 1M context, thinking on by default
     ClaudeOpus5,
+    /// Claude Opus 5.5 - Opus-tier successor for long-running agentic coding, adaptive thinking always on, 1M context, 128K output, default effort medium
+    ClaudeOpus55,
     /// GitHub Copilot auto model selection
     CopilotAuto,
     /// GitHub Copilot GPT-5.2 Codex
@@ -86,6 +88,8 @@ pub enum ModelId {
     MergeGatewayDefaultRouting,
     /// Anthropic Claude Opus 5 through Merge Gateway
     MergeGatewayAnthropicClaudeOpus5,
+    /// Anthropic Claude Opus 5.5 through Merge Gateway
+    MergeGatewayAnthropicClaudeOpus55,
     /// Anthropic Claude Sonnet 5 through Merge Gateway
     MergeGatewayAnthropicClaudeSonnet5,
     /// Google Gemini 3.6 Flash through Merge Gateway
@@ -275,6 +279,8 @@ pub enum ModelId {
     VercelAnthropicClaudeSonnet5,
     /// Claude Opus 5 served through the Vercel AI Gateway
     VercelAnthropicClaudeOpus5,
+    /// Claude Opus 5.5 served through the Vercel AI Gateway
+    VercelAnthropicClaudeOpus55,
     /// Claude Haiku 4.5 served through the Vercel AI Gateway
     VercelAnthropicClaudeHaiku45,
     /// GPT-5.6 Sol served through the Vercel AI Gateway

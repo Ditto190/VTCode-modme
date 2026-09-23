@@ -185,7 +185,7 @@ support them; other models hide those levels instead of aliasing silently.
 | --- | --- | --- | --- |
 | OpenAI GPT-5.6 family (`gpt-5.6`, `-sol`, `-terra`, `-luna`), `gpt-6-astra` | Native | Native (5.6+ only; `minimal` dropped on 5.6+) | `reasoning: { effort, summary: "auto" }` |
 | OpenAI GPT-5 Codex / 5.2 Codex, GPT-5.1-mini, `gpt-oss-*` | Codex only | Not supported | Same Responses shape |
-| Anthropic adaptive (`claude-sonnet-5`, `-fable-5`/`-5-1`, `-mythos-5`/`-5-1`, `claude-opus-5`, Opus 4.8/4.7) | Native (4.7+; 4.6 exposes `max` without `xhigh`) | Native | `thinking: { type: "adaptive" }` + `output_config: { effort }` |
+| Anthropic adaptive (`claude-sonnet-5`, `-fable-5`/`-5-1`, `-mythos-5`/`-5-1`, `claude-opus-5`, `claude-opus-5-5`, Opus 4.8/4.7) | Native (4.7+; 4.6 exposes `max` without `xhigh`) | Native | `thinking: { type: "adaptive" }` + `output_config: { effort }` |
 | xAI `grok-4.6+` | Native | Clamped to `xhigh` (no native `max`; older models treat `xhigh` as `high`) | `reasoning_effort` |
 | Meta Muse Spark 1.1–1.3 | Native | Aliased to `xhigh` (`max` ships after additional safety testing) | `reasoning_effort` |
 | DeepSeek V4 Pro / Flash | Alias to `high` | Native (`low` also native; `medium` maps to `high`) | `thinking: { type: "enabled" }` + `reasoning_effort` |

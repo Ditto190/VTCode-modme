@@ -163,6 +163,13 @@ model_id_table! {
         display: "Claude Opus 5",
         description: "Anthropic's newest Opus-tier model with 1M context, thinking on by default, and full effort ladder support",
     },
+    ClaudeOpus55 {
+        provider: Anthropic,
+        id: models::CLAUDE_OPUS_5_5,
+        parse: [models::CLAUDE_OPUS_5_5],
+        display: "Claude Opus 5.5",
+        description: "Opus-tier successor for long-running agentic coding and knowledge work, adaptive thinking always on, 1M context, 128K output, default effort medium",
+    },
     // GitHub Copilot models
     CopilotAuto {
         provider: Copilot,
@@ -265,6 +272,13 @@ model_id_table! {
         parse: [models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5],
         display: "Claude Opus 5 (Merge Gateway)",
         description: "Anthropic Claude Opus 5 accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayAnthropicClaudeOpus55 {
+        provider: MergeGateway,
+        id: models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5_5,
+        parse: [models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5_5],
+        display: "Claude Opus 5.5 (Merge Gateway)",
+        description: "Anthropic Claude Opus 5.5 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayAnthropicClaudeSonnet5 {
         provider: MergeGateway,
@@ -672,6 +686,13 @@ model_id_table! {
         display: "Claude Opus 5 (Vercel AI Gateway)",
         description: "Anthropic Claude Opus 5 flagship model served through the Vercel AI Gateway (ai-gateway.vercel.sh)",
     },
+    VercelAnthropicClaudeOpus55 {
+        provider: Vercel,
+        id: models::vercel::ANTHROPIC_CLAUDE_OPUS_5_5,
+        parse: [models::vercel::ANTHROPIC_CLAUDE_OPUS_5_5],
+        display: "Claude Opus 5.5 (Vercel AI Gateway)",
+        description: "Anthropic Claude Opus 5.5 flagship model served through the Vercel AI Gateway (ai-gateway.vercel.sh)",
+    },
     VercelAnthropicClaudeHaiku45 {
         provider: Vercel,
         id: models::vercel::ANTHROPIC_CLAUDE_HAIKU_4_5,
@@ -756,6 +777,7 @@ mod tests {
             || matches!(
                 model,
                 ModelId::MergeGatewayAnthropicClaudeOpus5
+                    | ModelId::MergeGatewayAnthropicClaudeOpus55
                     | ModelId::MergeGatewayAnthropicClaudeSonnet5
                     | ModelId::MergeGatewayGoogleGemini38Flash
                     | ModelId::MergeGatewayMetaMuseSpark13
@@ -766,6 +788,7 @@ mod tests {
                 model,
                 ModelId::VercelAnthropicClaudeSonnet5
                     | ModelId::VercelAnthropicClaudeOpus5
+                    | ModelId::VercelAnthropicClaudeOpus55
                     | ModelId::VercelOpenAiGpt6Astra
                     | ModelId::VercelOpenAiGpt56Sol
                     | ModelId::VercelOpenAiGpt56Luna

@@ -1056,7 +1056,7 @@
     "api": "https://api.anthropic.com/v1",
     "name": "Anthropic",
     "doc": "https://docs.anthropic.com/claude/docs/models-overview",
-    "default_model": "claude-opus-5",
+    "default_model": "claude-opus-5-5",
     "models": {
       "claude-sonnet-5": {
         "id": "claude-sonnet-5",
@@ -1237,6 +1237,42 @@
         "output_tokens": 128000,
         "status": "current",
         "version": "4.8",
+        "is_pro": true,
+        "lightweight_model": "claude-sonnet-5",
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "claude-opus-5-5": {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "description": "Opus-tier successor for long-running agentic coding and knowledge work, adaptive thinking always on, 1M context, 128K output, default effort medium",
+        "reasoning": true,
+        "effort": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "output_tokens": 128000,
+        "status": "current",
+        "version": "5.5",
+        "cost": {
+          "input": 4e-06,
+          "output": 2e-05,
+          "cache_read": 2e-07,
+          "cache_write": 5e-06
+        },
         "is_pro": true,
         "lightweight_model": "claude-sonnet-5",
         "reasoning_efforts": [
@@ -3127,6 +3163,29 @@
           "structured_output": true
         }
       },
+      "claude-opus-5-5": {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5 (Evolink)",
+        "description": "Claude Opus 5.5 served through Evolink via Anthropic Messages API.",
+        "reasoning": false,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 200000,
+        "capabilities": {
+          "thinking": false,
+          "streaming": false,
+          "function_calling": true,
+          "structured_output": true
+        }
+      },
       "claude-sonnet-5": {
         "id": "claude-sonnet-5",
         "name": "Claude Haiku 4.5 (Evolink)",
@@ -3330,6 +3389,37 @@
         "id": "anthropic/claude-opus-5",
         "name": "Claude Opus 5 (Merge Gateway)",
         "description": "Anthropic Claude Opus 5 served through Merge Gateway's native Responses API.",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "output_tokens": 128000,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": false
+        }
+      },
+      "anthropic/claude-opus-5-5": {
+        "id": "anthropic/claude-opus-5-5",
+        "name": "Claude Opus 5.5 (Merge Gateway)",
+        "description": "Anthropic Claude Opus 5.5 served through Merge Gateway's native Responses API.",
         "reasoning": true,
         "reasoning_efforts": [
           "minimal",
@@ -4073,6 +4163,38 @@
         "cost": {
           "input": 5e-06,
           "output": 2.5e-05
+        }
+      },
+      "anthropic/claude-opus-5-5": {
+        "id": "anthropic/claude-opus-5-5",
+        "name": "Claude Opus 5.5 (Vercel AI Gateway)",
+        "description": "Anthropic Claude Opus 5.5 flagship model served through the Vercel AI Gateway",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1000000,
+        "capabilities": {
+          "thinking": true,
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": true,
+          "input": [
+            "text",
+            "image",
+            "file"
+          ]
+        },
+        "max_output_tokens": 64000,
+        "cost": {
+          "input": 4e-06,
+          "output": 2e-05
         }
       },
       "anthropic/claude-haiku-4.5": {

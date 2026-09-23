@@ -50,6 +50,13 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             false,
         ),
         (
+            models::merge_gateway::ANTHROPIC_CLAUDE_OPUS_5_5,
+            "Claude Opus 5.5 (Merge Gateway)",
+            "Anthropic Claude Opus 5.5 through Merge Gateway",
+            1_000_000,
+            false,
+        ),
+        (
             models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5,
             "Claude Sonnet 5 (Merge Gateway)",
             "Anthropic Claude Sonnet 5 through Merge Gateway",

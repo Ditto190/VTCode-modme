@@ -318,6 +318,7 @@ impl ModelId {
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
                 | ModelId::ClaudeOpus5
+                | ModelId::ClaudeOpus55
                 | ModelId::OpenCodeGoGlm53
                 | ModelId::MiMoV26Pro
                 | ModelId::MiMoV26ProUltraspeed
@@ -388,6 +389,7 @@ impl ModelId {
             ModelId::ClaudeFable5 => "5",
             ModelId::ClaudeFable51 => "5.1",
             ModelId::ClaudeOpus5 => "5",
+            ModelId::ClaudeOpus55 => "5.5",
             // DeepSeek generations
             ModelId::DeepSeekFlash => "4",
             ModelId::MergeGatewayDeepseekFlash => "4.1",
@@ -437,6 +439,7 @@ impl ModelId {
             // Qwen models
             ModelId::MergeGatewayDefaultRouting => "routing",
             ModelId::MergeGatewayAnthropicClaudeOpus5 => "5",
+            ModelId::MergeGatewayAnthropicClaudeOpus55 => "5.5",
             ModelId::MergeGatewayAnthropicClaudeSonnet5 => "5",
             ModelId::MergeGatewayAnthropicClaudeFable51 => "5.1",
             ModelId::MergeGatewayAnthropicClaudeHaiku4520251001 => "4.5",
@@ -451,6 +454,7 @@ impl ModelId {
             // Vercel AI Gateway models
             ModelId::VercelAnthropicClaudeSonnet5 => "5",
             ModelId::VercelAnthropicClaudeOpus5 => "5",
+            ModelId::VercelAnthropicClaudeOpus55 => "5.5",
             ModelId::VercelAnthropicClaudeHaiku45 => "4.5",
             ModelId::VercelOpenAiGpt56Sol | ModelId::VercelOpenAiGpt56Luna => "5.6",
             ModelId::VercelOpenAiGpt6Astra => "6",

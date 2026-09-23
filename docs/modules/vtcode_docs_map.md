@@ -918,6 +918,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Quick navigation, Model comparison, Where to make changes in VT Code, Migrating to Claude Fable 5 / Claude Mythos 5, Migrating to Claude Opus 5
   - **User Questions**: "What can you tell me about Migrating Claude models in VT Code?", "How does Quick navigation work?", "How does Model comparison work?"
 
+- **File**: `docs/build-with-claude/migrating-to-claude-opus-5-5.md`
+  - **Content**: Migrating to Claude Opus 5.5 in VT Code
+  - **Topics**: Quick navigation, Model comparison, Where to make changes in VT Code, Opus 5 → Opus 5.5, Opus 4.8 → Opus 5.5
+  - **User Questions**: "What can you tell me about Migrating to Claude Opus 5.5 in VT Code?", "How does Quick navigation work?", "How does Model comparison work?"
+
 - **File**: `docs/installation/NATIVE_INSTALLERS.md`
   - **Content**: Native Installers
   - **Topics**: macOS & Linux (Shell), Windows (PowerShell)

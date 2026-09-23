@@ -247,8 +247,8 @@ fn effort_description(level: ReasoningEffortLevel, model: &str) -> &'static str 
         ReasoningEffortLevel::Low => "Quick, straightforward implementation with minimal overhead",
         ReasoningEffortLevel::Medium => "Balanced approach with standard implementation and testing",
         ReasoningEffortLevel::High => "Comprehensive implementation with extensive testing and documentation",
-        ReasoningEffortLevel::XHigh if model == "claude-opus-5" => {
-            "Deeper reasoning than high, just below maximum (Opus 4.8/5 only)"
+        ReasoningEffortLevel::XHigh if model == "claude-opus-5" || model == "claude-opus-5-5" => {
+            "Deeper reasoning than high, just below maximum (Opus 4.8/5/5.5 only)"
         }
         ReasoningEffortLevel::XHigh => "Extra reasoning for the hardest long-running tasks",
         ReasoningEffortLevel::Max => "Uncapped maximum reasoning; highest cost and latency",
@@ -264,7 +264,11 @@ mod tests {
     fn xhigh_description_matches_requested_opus_copy() {
         assert_eq!(
             effort_description(ReasoningEffortLevel::XHigh, "claude-opus-5"),
-            "Deeper reasoning than high, just below maximum (Opus 4.8/5 only)"
+            "Deeper reasoning than high, just below maximum (Opus 4.8/5/5.5 only)"
+        );
+        assert_eq!(
+            effort_description(ReasoningEffortLevel::XHigh, "claude-opus-5-5"),
+            "Deeper reasoning than high, just below maximum (Opus 4.8/5/5.5 only)"
         );
     }
 }

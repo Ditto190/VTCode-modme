@@ -105,6 +105,25 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
         });
     }
 
+    // `claude-opus-5-5` contains `claude-opus-5`, so the 5.5 profile must be
+    // checked before the 5 profile. Opus 5.5 runs adaptive thinking always on
+    // (it cannot be disabled) with a `medium` default effort.
+    if matches_model(requested, models::anthropic::CLAUDE_OPUS_5_5) {
+        return Some(ClaudeThinkingProfile {
+            mode: ClaudeThinkingMode::Adaptive,
+            supports_manual_budget: false,
+            adaptive_only: true,
+            default_thinking_enabled: true,
+            manual_interleaved_beta: false,
+            supports_effort: true,
+            supports_task_budget: true,
+            default_display: ThinkingDisplay::Omitted,
+            default_effort: reasoning::MEDIUM,
+            supports_xhigh_effort: true,
+            supports_max_effort: true,
+        });
+    }
+
     if matches_model(requested, models::anthropic::CLAUDE_OPUS_5) {
         return Some(ClaudeThinkingProfile {
             mode: ClaudeThinkingMode::Adaptive,
@@ -335,4 +354,30 @@ pub(crate) fn effort_is_at_most_high(
         return matches!(effort, ReasoningEffortLevel::Low | ReasoningEffortLevel::Medium | ReasoningEffortLevel::High);
     }
     matches!(anthropic_config.effort.as_str(), "low" | "medium" | "high")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opus_5_5_runs_adaptive_thinking_always_on_with_medium_default() {
+        let profile = claude_thinking_profile(models::anthropic::CLAUDE_OPUS_5_5, "").expect("opus 5.5 profile");
+        assert!(profile.adaptive_only);
+        assert_eq!(profile.default_effort, reasoning::MEDIUM);
+        assert!(profile.supports_xhigh_effort);
+        assert!(profile.supports_max_effort);
+        assert!(adaptive_thinking_always_on(models::anthropic::CLAUDE_OPUS_5_5, ""));
+        assert_eq!(default_effort_for_model(models::anthropic::CLAUDE_OPUS_5_5, ""), Some(reasoning::MEDIUM));
+    }
+
+    #[test]
+    fn opus_5_profile_is_unchanged_by_opus_5_5() {
+        // `claude-opus-5-5` contains `claude-opus-5`; the 5 profile must still
+        // resolve for the exact 5 id with its high default and opt-out support.
+        let profile = claude_thinking_profile(models::anthropic::CLAUDE_OPUS_5, "").expect("opus 5 profile");
+        assert!(!profile.adaptive_only);
+        assert_eq!(profile.default_effort, reasoning::HIGH);
+        assert!(!adaptive_thinking_always_on(models::anthropic::CLAUDE_OPUS_5, ""));
+    }
 }

@@ -74,7 +74,10 @@ pub fn validate_request(
         return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
     }
 
-    if matches_model(resolved_model, vtcode_config::constants::models::anthropic::CLAUDE_OPUS_5)
+    if matches_model(resolved_model, vtcode_config::constants::models::anthropic::CLAUDE_OPUS_5_5) {
+        // Opus 5.5 is adaptive-only, so a disabled-thinking request is already
+        // rejected above; never apply the Opus 5 effort-gated allowance here.
+    } else if matches_model(resolved_model, vtcode_config::constants::models::anthropic::CLAUDE_OPUS_5)
         && matches!(effective_thinking_mode, EffectiveThinkingMode::Disabled)
     {
         if !effort_is_at_most_high(request, anthropic_config) {
@@ -91,7 +94,7 @@ pub fn validate_request(
     {
         let formatted_error = error_display::format_llm_error(
             provider_name,
-            "Claude Opus 5, Sonnet 5, Fable 5, Mythos 5, and Opus 4.8 reject explicit temperature, top_p, and top_k values; omit sampling parameters entirely.",
+            "Claude Opus 5, Opus 5.5, Sonnet 5, Fable 5, Mythos 5, and Opus 4.8 reject explicit temperature, top_p, and top_k values; omit sampling parameters entirely.",
         );
         return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
     }

@@ -30,6 +30,7 @@ impl ModelId {
             ModelId::ClaudeFable5,
             ModelId::ClaudeFable51,
             ModelId::ClaudeOpus5,
+            ModelId::ClaudeOpus55,
             ModelId::CopilotAuto,
             ModelId::CopilotGPT52Codex,
             ModelId::CopilotGPT51CodexMax,
@@ -48,6 +49,7 @@ impl ModelId {
             // Merge Gateway routes
             ModelId::MergeGatewayDefaultRouting,
             ModelId::MergeGatewayAnthropicClaudeOpus5,
+            ModelId::MergeGatewayAnthropicClaudeOpus55,
             ModelId::MergeGatewayAnthropicClaudeSonnet5,
             ModelId::MergeGatewayXaiGrok46,
             ModelId::MergeGatewayXaiGrok47,
@@ -119,6 +121,7 @@ impl ModelId {
             // Vercel AI Gateway models
             ModelId::VercelAnthropicClaudeSonnet5,
             ModelId::VercelAnthropicClaudeOpus5,
+            ModelId::VercelAnthropicClaudeOpus55,
             ModelId::VercelAnthropicClaudeHaiku45,
             ModelId::VercelOpenAiGpt56Sol,
             ModelId::VercelOpenAiGpt6Astra,

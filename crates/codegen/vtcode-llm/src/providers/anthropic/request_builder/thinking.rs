@@ -64,6 +64,12 @@ pub(crate) fn build_thinking_config(
         match overrides.thinking_mode {
             AnthropicThinkingModeOverride::Disabled => {
                 if default_thinking {
+                    // Opus 5.5 runs adaptive thinking always on; it never
+                    // accepts `thinking: {type: "disabled"}`. Its id contains
+                    // the Opus 5 id, so exclude it from the Opus 5 allowance.
+                    if matches_model(resolved_model, anthropic::CLAUDE_OPUS_5_5) {
+                        return Ok((None, None));
+                    }
                     if matches_model(resolved_model, anthropic::CLAUDE_OPUS_5) {
                         if effort_is_at_most_high(request, anthropic_config) {
                             return Ok((Some(ThinkingConfig::Disabled), None));

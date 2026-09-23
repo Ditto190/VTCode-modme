@@ -55,6 +55,7 @@ vtcode --provider merge-gateway --model anthropic/claude-opus-5
 | `default_routing` | 128k baseline | No | Merge chooses the route |
 | `openai/gpt-5.5` | 1.1M | No | OpenAI route |
 | `anthropic/claude-opus-5` | 1M | Yes | Anthropic route |
+| `anthropic/claude-opus-5-5` | 1M | Yes | Anthropic route |
 | `anthropic/claude-sonnet-5` | 1M | Yes | Anthropic route |
 | `google/gemini-3.6-flash` | 1M | Yes | Google route |
 | `google/gemini-3.7-flash` | 1M | Yes | Google route |

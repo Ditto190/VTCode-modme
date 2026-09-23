@@ -30,7 +30,7 @@ impl ModelId {
         match provider {
             Provider::Gemini => ModelId::Gemini38Flash,
             Provider::OpenAI => ModelId::GPT56Sol,
-            Provider::Anthropic => ModelId::ClaudeOpus5,
+            Provider::Anthropic => ModelId::ClaudeOpus55,
             Provider::Copilot => ModelId::CopilotAuto,
             Provider::Minimax => ModelId::MinimaxM3,
             Provider::MiMo => ModelId::MiMoV26Pro,
