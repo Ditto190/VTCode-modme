@@ -316,8 +316,10 @@ enable_tracing = true
     fn aux_dotconfig_ollama_provider_applies_when_canonical_is_default() {
         let mut config = VTCodeConfig::default();
         assert_eq!(config.agent.provider, "openrouter");
-        let mut preferences = vtcode_core::utils::dot_config::UserPreferences::default();
-        preferences.default_provider = "ollama".to_string();
+        let preferences = vtcode_core::utils::dot_config::UserPreferences {
+            default_provider: "ollama".to_string(),
+            ..Default::default()
+        };
         // Auxiliary model left at the compiled-in default: the ollama default
         // model must be adopted instead of keeping the openrouter route.
         apply_dot_preferences(&mut config, &preferences, false, false);
@@ -329,8 +331,10 @@ enable_tracing = true
     fn aux_dotconfig_does_not_clobber_explicit_canonical_provider() {
         let mut config = VTCodeConfig::default();
         config.agent.provider = "openai".to_string();
-        let mut preferences = vtcode_core::utils::dot_config::UserPreferences::default();
-        preferences.default_provider = "ollama".to_string();
+        let preferences = vtcode_core::utils::dot_config::UserPreferences {
+            default_provider: "ollama".to_string(),
+            ..Default::default()
+        };
         apply_dot_preferences(&mut config, &preferences, true, false);
         assert_eq!(config.agent.provider, "openai");
     }
@@ -338,9 +342,11 @@ enable_tracing = true
     #[test]
     fn aux_dotconfig_custom_model_applies_when_canonical_model_is_default() {
         let mut config = VTCodeConfig::default();
-        let mut preferences = vtcode_core::utils::dot_config::UserPreferences::default();
-        preferences.default_provider = "openrouter".to_string();
-        preferences.default_model = "custom-route/model".to_string();
+        let preferences = vtcode_core::utils::dot_config::UserPreferences {
+            default_provider: "openrouter".to_string(),
+            default_model: "custom-route/model".to_string(),
+            ..Default::default()
+        };
         apply_dot_preferences(&mut config, &preferences, true, false);
         assert_eq!(config.agent.default_model, "custom-route/model");
     }
