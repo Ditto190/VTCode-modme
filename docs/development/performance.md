@@ -311,14 +311,56 @@ These scripts append `-C target-cpu=native` for local runs only. They do not cha
 
 ## Benchmarks
 
-Current Criterion benches:
+Current benches (`criterion` except standalone `startup`):
 
 ```bash
+cargo bench --bench allocator_throughput
 cargo bench -p vtcode-core --bench tool_pipeline
 cargo bench -p vtcode-core --bench agent_harness
+cargo bench -p vtcode-ui --bench markdown_render
+cargo bench -p vtcode-ui --bench transcript
 ```
 
+Standalone process startup (needs a release binary) stays separate; see
+[Standalone startup benchmark](#standalone-startup-benchmark).
+
 Use benches when a hotspot is stable and repeatable. Use the baseline/profile scripts when the question is broader end-to-end behavior.
+
+### Benchmark discipline (benchmaxxing guardrails)
+
+Follow this loop for any claimed speedup; it adapts iterative
+`criterion` benchmaxxing to an I/O-bound agent loop where 1.2-1.5x per
+converged pass is a strong result:
+
+- Capture a True Performance Baseline first: run the relevant bench
+  without library changes, sequentially, on a fixed machine/binary/env.
+- Optimize library code only. Do not modify existing bench measurement
+  logic to hit a goal; a speedup claim that edits timed code paths is
+  invalid. Adding new coverage benches in a separate change is allowed.
+- Run benches sequentially. Never run two benches in parallel; they
+  compete for resources and invalidate results.
+- Keep comparisons portable. Never use `RUSTFLAGS` or
+  `-C target-cpu=native` for before/after numbers; native builds are
+  local-only via `scripts/perf/native-*.sh`.
+- Keep iterations independent. Use `iter_batched` with fresh setup per
+  iteration so no cache built in one iteration leaks into the next,
+  except explicit `cache_hit` benches where a shared warm cache is the
+  point being measured. Filesystem setup stays outside the timed
+  section.
+- Use `criterion` directly with `black_box` on outputs. Do not invent
+  custom timing harnesses.
+- Cover small and large inputs. A win on one size only is not a win;
+  report median + statistical significance from `criterion`.
+- Gate on correctness. Compare output against the known-good path
+  (golden tests, `size_of` guards, catalog-hash stability asserts);
+  accept at most a documented minor regression for a major speedup.
+- Target at least 1.2x faster than baseline per pass, then keep
+  iterating on quick high-impact wins until gains converge to ~3-5%
+  noise. Prefer single-agent iteration; spawn parallel hypothesis work
+  only when the slices are independent.
+- No `unsafe` for speed. VT Code prohibits `unsafe` in product code;
+  use iterators, `memchr`, `with_capacity`, `Arc` sharing, and enum
+  footprint reduction per `rust-performance-principles.md`.
 
 ### Interactive latency workloads
 
