@@ -29,6 +29,10 @@ pub enum ModelId {
     // OpenAI models
     /// GPT-6 Astra - Most capable model for hardest end-to-end work with complex reasoning, coding, computer use, and research
     GPT6Astra,
+    /// GPT-6 Sol - Cost-efficient high-end model in the GPT-6 series for demanding professional work
+    GPT6Sol,
+    /// GPT-6 Luna - Fast cost-efficient model in the GPT-6 series for high-volume latency-sensitive workloads
+    GPT6Luna,
     /// GPT-5.6 Sol - Frontier model for complex professional work in the GPT-5.6 family
     GPT56Sol,
     /// GPT-5.6 Terra - GPT-5.6 model that balances intelligence and cost
@@ -128,6 +132,10 @@ pub enum ModelId {
     MergeGatewayAnthropicClaudeFable51,
     /// OpenAI GPT-6 Astra through Merge Gateway
     MergeGatewayOpenAIGpt6Astra,
+    /// OpenAI GPT-6 Sol through Merge Gateway
+    MergeGatewayOpenAIGpt6Sol,
+    /// OpenAI GPT-6 Luna through Merge Gateway
+    MergeGatewayOpenAIGpt6Luna,
 
     // Mistral AI models
     /// Mistral Large 3 - State-of-the-art open-weight general-purpose multimodal model
@@ -240,6 +248,10 @@ pub enum ModelId {
     OpenRouterOpenAIGptOss20b,
     /// OpenAI GPT-6 Astra - OpenAI's flagship model for demanding end-to-end work via OpenRouter
     OpenRouterOpenAIGpt6Astra,
+    /// GPT-6 Sol - Cost-efficient high-end model in the GPT-6 series via OpenRouter
+    OpenRouterOpenAIGpt6Sol,
+    /// GPT-6 Luna - Fast cost-efficient model in the GPT-6 series via OpenRouter
+    OpenRouterOpenAIGpt6Luna,
 
     /// Meta Muse Glimmer 30B via OpenRouter
     OpenRouterMetaMuseGlimmer30b,

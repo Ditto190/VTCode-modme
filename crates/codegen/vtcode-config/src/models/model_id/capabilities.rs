@@ -283,7 +283,9 @@ impl ModelId {
             ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::GPT56Luna
+                | ModelId::GPT6Luna
                 | ModelId::MergeGatewayOpenAIGpt56Luna
+                | ModelId::MergeGatewayOpenAIGpt6Luna
                 | ModelId::CopilotGPT54Mini
                 | ModelId::DeepSeekFlash
                 | ModelId::MergeGatewayDeepseekFlash
@@ -309,11 +311,14 @@ impl ModelId {
             ModelId::Gemini38Flash
                 | ModelId::MergeGatewayGoogleGemini38Flash
                 | ModelId::GPT6Astra
+                | ModelId::GPT6Sol
                 | ModelId::GPT56Sol
                 | ModelId::MergeGatewayOpenAIGpt56Sol
                 | ModelId::MergeGatewayOpenAIGpt56Terra
                 | ModelId::MergeGatewayOpenAIGpt56Luna
                 | ModelId::MergeGatewayOpenAIGpt6Astra
+                | ModelId::MergeGatewayOpenAIGpt6Sol
+                | ModelId::MergeGatewayOpenAIGpt6Luna
                 | ModelId::ClaudeSonnet5
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
@@ -381,7 +386,7 @@ impl ModelId {
         match self {
             // Gemini generations
             // OpenAI generations
-            ModelId::GPT6Astra => "6",
+            ModelId::GPT6Astra | ModelId::GPT6Sol | ModelId::GPT6Luna => "6",
             ModelId::GPT56Sol | ModelId::GPT56Terra | ModelId::GPT56Luna => "5.6",
             ModelId::OpenAIGptOss20b | ModelId::OpenAIGptOss120b => "5",
             // Anthropic generations
@@ -450,7 +455,9 @@ impl ModelId {
             ModelId::MergeGatewayOpenAIGpt56Luna
             | ModelId::MergeGatewayOpenAIGpt56Sol
             | ModelId::MergeGatewayOpenAIGpt56Terra => "5.6",
-            ModelId::MergeGatewayOpenAIGpt6Astra => "6",
+            ModelId::MergeGatewayOpenAIGpt6Astra
+            | ModelId::MergeGatewayOpenAIGpt6Sol
+            | ModelId::MergeGatewayOpenAIGpt6Luna => "6",
             // Vercel AI Gateway models
             ModelId::VercelAnthropicClaudeSonnet5 => "5",
             ModelId::VercelAnthropicClaudeOpus5 => "5",
@@ -469,7 +476,15 @@ impl ModelId {
 
     /// Determine if this model supports GPT-5.1+/5.2+/5.3+ shell tool type
     pub(crate) fn supports_shell_tool(&self) -> bool {
-        matches!(self, ModelId::GPT6Astra | ModelId::GPT56Sol | ModelId::GPT56Terra | ModelId::GPT56Luna)
+        matches!(
+            self,
+            ModelId::GPT6Astra
+                | ModelId::GPT6Sol
+                | ModelId::GPT6Luna
+                | ModelId::GPT56Sol
+                | ModelId::GPT56Terra
+                | ModelId::GPT56Luna
+        )
     }
 
     /// Determine if this model supports optimized apply_patch tool

@@ -132,8 +132,8 @@ Name-based OpenAI sampling gates apply to custom endpoints too: models named
 `gpt`, `gpt-5.2`, `gpt-5.4`, `gpt-5.5*` accept sampling only while reasoning
 effort resolves to `none` (pinned values are silently omitted otherwise),
 `gpt-5`/`gpt-5-mini`/`gpt-5-nano` never receive sampling parameters, and
-`gpt-6-astra` never receives sampling parameters (`temperature`/`top_p` are
-unsupported by the model). Prefer neutral model IDs on gateways if you need
+`gpt-6-astra`, `gpt-6-sol`, and `gpt-6-luna` never receive sampling parameters (`temperature`/`top_p` are
+unsupported by the GPT-6 family). Prefer neutral model IDs on gateways if you need
 pinned values on such names.
 
 ### Validate the configuration
@@ -208,6 +208,8 @@ replace the retained evidence or expose provider chain-of-thought.
 -   VT Code applies a compact GPT-5.4 prompt contract rather than a verbatim cookbook prompt: compact outputs, low-risk follow-through, dependency-aware tool use, completeness checks, verification, and conditional grounding/citation rules.
 -   Deprecated models (gpt-5, gpt-5-mini, gpt-5-nano, o3, o4-mini, gpt-5-codex, gpt-5.1-codex, etc.) are removed from the model picker but retained in routing constants for backward compatibility with existing configs.
 -   **GPT-6 Astra (`gpt-6-astra`):** most capable OpenAI model for end-to-end agentic work (1,050,000 context, 128k max output, reasoning `low`/`medium`/`high`/`xhigh`/`max`). The catalog drives its Responses API route, sampling and logprob capabilities, cache TTL, prompt contract, and supported reasoning levels. Unsupported reasoning requests are blocked before transport unless `agent.allow_reasoning_effort_downgrade` explicitly permits selection of the nearest lower catalog level.
+-   **GPT-6 Sol (`gpt-6-sol`):** cost-efficient high-end GPT-6 model for demanding professional work (1,050,000 context, 128k max output, reasoning `low`/`medium`/`high`/`xhigh`/`max`, default `medium`). Same Responses API route, GPT-6 prompt contract, explicit cache breakpoints, and `30m` cache TTL as Astra; sampling and logprobs unsupported.
+-   **GPT-6 Luna (`gpt-6-luna`):** fast cost-efficient GPT-6 model for high-volume latency-sensitive workloads (1,050,000 context, 128k max output, reasoning `low`/`medium`/`high`/`xhigh`/`max`, default `medium`). Same Responses API route, GPT-6 prompt contract, explicit cache breakpoints, and `30m` cache TTL as Astra; sampling and logprobs unsupported.
 -   File inputs are supported for native OpenAI Responses API requests through `input_file` parts.
 -   Supported file input fields in VT Code message parts: `file_id`, `file_data`, `file_url`, `filename`.
 -   `file_url` is Responses API only; VT Code rejects `file_url` when a request uses Chat Completions.
@@ -287,7 +289,7 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Authentication:** `MERGE_GATEWAY_API_KEY` (Bearer token; create a key in the [Merge dashboard](https://dashboard.merge.dev/))
 -   **Base URL:** `https://api-gateway.merge.dev/v1` (native Responses), override with `MERGE_GATEWAY_BASE_URL`; explicit `/v1/openai` selects legacy Chat Completions
 -   **Default model:** `default_routing`
--   **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `anthropic/claude-opus-5-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`, `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `meta/muse-spark-1.1`, `zai/glm-5.3-flash`, `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, and `openai/gpt-5.6-terra`
+-   **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `anthropic/claude-opus-5-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`, `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `meta/muse-spark-1.1`, `zai/glm-5.3-flash`, `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-6-astra`, `openai/gpt-6-sol`, and `openai/gpt-6-luna`
 -   **Features:** Native Responses, streaming, tool calling, structured outputs, authenticated paginated model catalog, cache-backed picker metadata, and arbitrary explicit Merge route IDs
 -   **Limitations:** Reasoning controls remain route-specific and are not inferred generically; routing metadata and billed cost remain outside VT Code's normalized response fields. Explicit `/v1/openai` endpoints retain the legacy compatibility path.
 

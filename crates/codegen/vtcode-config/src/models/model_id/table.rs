@@ -99,6 +99,20 @@ model_id_table! {
         display: "GPT-6 Astra",
         description: "Most capable model for hardest end-to-end work with complex reasoning, coding, computer use, research, and document creation",
     },
+    GPT6Sol {
+        provider: OpenAI,
+        id: models::openai::GPT_6_SOL,
+        parse: [models::openai::GPT_6_SOL],
+        display: "GPT-6 Sol",
+        description: "Cost-efficient high-end model in the GPT-6 series for demanding professional work",
+    },
+    GPT6Luna {
+        provider: OpenAI,
+        id: models::openai::GPT_6_LUNA,
+        parse: [models::openai::GPT_6_LUNA],
+        display: "GPT-6 Luna",
+        description: "Fast cost-efficient model in the GPT-6 series for high-volume latency-sensitive workloads",
+    },
     GPT56Sol {
         provider: OpenAI,
         id: models::openai::GPT_5_6_SOL,
@@ -384,6 +398,20 @@ model_id_table! {
         parse: [models::merge_gateway::OPENAI_GPT_6_ASTRA],
         display: "GPT-6 Astra (Merge Gateway)",
         description: "OpenAI GPT-6 Astra accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayOpenAIGpt6Sol {
+        provider: MergeGateway,
+        id: models::merge_gateway::OPENAI_GPT_6_SOL,
+        parse: [models::merge_gateway::OPENAI_GPT_6_SOL],
+        display: "GPT-6 Sol (Merge Gateway)",
+        description: "OpenAI GPT-6 Sol accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayOpenAIGpt6Luna {
+        provider: MergeGateway,
+        id: models::merge_gateway::OPENAI_GPT_6_LUNA,
+        parse: [models::merge_gateway::OPENAI_GPT_6_LUNA],
+        display: "GPT-6 Luna (Merge Gateway)",
+        description: "OpenAI GPT-6 Luna accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayGoogleGemini38Flash {
         provider: MergeGateway,
@@ -782,6 +810,8 @@ mod tests {
                     | ModelId::MergeGatewayGoogleGemini38Flash
                     | ModelId::MergeGatewayMetaMuseSpark13
                     | ModelId::MergeGatewayOpenAIGpt6Astra
+                    | ModelId::MergeGatewayOpenAIGpt6Sol
+                    | ModelId::MergeGatewayOpenAIGpt6Luna
                     | ModelId::MergeGatewayDeepseekFlash
             )
             || matches!(

@@ -72,6 +72,9 @@ vtcode --provider merge-gateway --model anthropic/claude-opus-5
 | `openai/gpt-5.6-luna` | 1.1M | Yes | OpenAI route |
 | `openai/gpt-5.6-sol` | 1.1M | Yes | OpenAI route |
 | `openai/gpt-5.6-terra` | 1.1M | Yes | OpenAI route |
+| `openai/gpt-6-astra` | 1.05M | Yes | OpenAI route |
+| `openai/gpt-6-sol` | 1.05M | Yes | OpenAI route |
+| `openai/gpt-6-luna` | 1.05M | Yes | OpenAI route |
 
 These are the models shown in VT Code's picker. Merge model IDs are not a
 closed local allowlist: any valid explicit `provider/model` route can be used

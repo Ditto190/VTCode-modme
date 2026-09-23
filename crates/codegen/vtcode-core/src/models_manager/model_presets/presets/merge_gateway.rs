@@ -175,6 +175,20 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             1_050_000,
             false,
         ),
+        (
+            models::merge_gateway::OPENAI_GPT_6_SOL,
+            "GPT-6 Sol (Merge Gateway)",
+            "OpenAI GPT-6 Sol through Merge Gateway",
+            1_050_000,
+            false,
+        ),
+        (
+            models::merge_gateway::OPENAI_GPT_6_LUNA,
+            "GPT-6 Luna (Merge Gateway)",
+            "OpenAI GPT-6 Luna through Merge Gateway",
+            1_050_000,
+            false,
+        ),
     ]
     .into_iter()
     .map(|(model, display_name, description, context_window, is_default)| {

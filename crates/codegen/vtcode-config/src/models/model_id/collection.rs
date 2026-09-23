@@ -20,6 +20,8 @@ impl ModelId {
             ModelId::Gemini38Flash,
             // OpenAI models
             ModelId::GPT6Astra,
+            ModelId::GPT6Sol,
+            ModelId::GPT6Luna,
             ModelId::GPT56Sol,
             ModelId::GPT56Terra,
             ModelId::GPT56Luna,
@@ -68,6 +70,8 @@ impl ModelId {
             ModelId::MergeGatewayAnthropicClaudeFable51,
             ModelId::MergeGatewayDeepseekFlash,
             ModelId::MergeGatewayOpenAIGpt6Astra,
+            ModelId::MergeGatewayOpenAIGpt6Sol,
+            ModelId::MergeGatewayOpenAIGpt6Luna,
             // Mistral models
             ModelId::MistralLarge3,
             // Z.AI models
