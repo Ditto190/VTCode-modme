@@ -2,6 +2,16 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.169.0 - 2026-09-23
+
+### Highlights
+#### Features
+
+- Add gpt-6-sol and gpt-6-luna to openai, merge-gateway, openrouter (51725911) 
+### Other Changes
+#### Other
+
+- Update README (edc13cf3) 
 ## 0.168.0 - 2026-09-23
 
 ### Highlights
