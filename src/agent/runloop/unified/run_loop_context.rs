@@ -509,6 +509,7 @@ pub(crate) struct HarnessTurnState {
     raw_spooled_bytes: u64,
     model_visible_output_bytes: u64,
     model_visible_tool_preview_bytes: usize,
+    model_visible_tiny_tool_preview_bytes: usize,
     model_visible_tool_metadata_bytes: usize,
     model_visible_tool_preview_budget_exhausted: bool,
     suppressed_tool_previews: u32,
@@ -699,6 +700,7 @@ impl HarnessTurnState {
             raw_spooled_bytes: 0,
             model_visible_output_bytes: 0,
             model_visible_tool_preview_bytes: 0,
+            model_visible_tiny_tool_preview_bytes: 0,
             model_visible_tool_metadata_bytes: 0,
             model_visible_tool_preview_budget_exhausted: false,
             suppressed_tool_previews: 0,
@@ -948,14 +950,20 @@ impl HarnessTurnState {
         }
 
         // Verifier bypass: payloads at or under `TINY_PREVIEW_BYPASS_BYTES`
-        // stay visible even after exhaustion. Session-vtcode-20260913T074747Z
-        // exhausted 32 KiB on a 24 KiB README read then blinded 25 later
-        // verifier outputs (5-byte `grep -c`, short `BROKEN:` lists),
-        // forcing repeated identical shell runs. Use the full content length
-        // here so metadata-heavy payloads (e.g. large `diagnosis` blocks)
-        // still exhaust the budget instead of bypassing on a small `output`.
+        // use a separate finite per-turn reserve instead of the regular
+        // preview budget. This keeps short checks available after that budget
+        // is exhausted. Charge full serialized content so metadata overhead
+        // cannot bypass either bound.
         if content.len() <= vtcode_config::constants::output_limits::TINY_PREVIEW_BYPASS_BYTES {
-            return content;
+            let tiny_budget = vtcode_config::constants::output_limits::TURN_TINY_PREVIEW_BUDGET_BYTES;
+            let remaining = tiny_budget.saturating_sub(self.model_visible_tiny_tool_preview_bytes);
+            if content.len() <= remaining {
+                self.model_visible_tiny_tool_preview_bytes =
+                    self.model_visible_tiny_tool_preview_bytes.saturating_add(content.len());
+                return content;
+            }
+            self.model_visible_tiny_tool_preview_bytes = tiny_budget;
+            return self.suppress_model_visible_tool_preview(tool_call_id, tool_name, content);
         }
 
         let budget = budget_bytes.max(1);
@@ -969,6 +977,15 @@ impl HarnessTurnState {
         }
 
         self.model_visible_tool_preview_bytes = budget;
+        self.suppress_model_visible_tool_preview(tool_call_id, tool_name, content)
+    }
+
+    fn suppress_model_visible_tool_preview(
+        &mut self,
+        tool_call_id: Option<&str>,
+        tool_name: Option<&str>,
+        content: String,
+    ) -> String {
         self.model_visible_tool_preview_budget_exhausted = true;
         self.record_suppressed_tool_preview(tool_call_id);
         let metadata_remaining =
@@ -2118,7 +2135,10 @@ mod tests {
         ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion,
         ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId, full_auto_loop_grants_enabled,
     };
-    use vtcode_config::constants::output_limits::{TURN_PREVIEW_BUDGET_BYTES, TURN_PREVIEW_BUDGET_BYTES_PLANNING};
+    use vtcode_config::constants::output_limits::{
+        TINY_PREVIEW_BYPASS_BYTES, TURN_PREVIEW_BUDGET_BYTES, TURN_PREVIEW_BUDGET_BYTES_PLANNING,
+        TURN_TINY_PREVIEW_BUDGET_BYTES,
+    };
     use vtcode_core::config::loader::VTCodeConfig;
 
     #[test]
@@ -2226,6 +2246,42 @@ mod tests {
             "aggregate metadata bytes grew unboundedly: {aggregate_metadata_bytes}"
         );
         assert_eq!(state.model_visible_tool_metadata_bytes, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES);
+    }
+
+    #[test]
+    fn tiny_verifier_previews_use_a_bounded_reserve_after_regular_budget_exhaustion() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
+        let primary =
+            state.bound_model_visible_tool_preview(Some("read_file"), "a".repeat(TURN_PREVIEW_BUDGET_BYTES + 1));
+        assert!(primary.contains("preview_budget_exhausted"));
+
+        let output = "3";
+        let tiny = serde_json::json!({"success": true, "exit_code": 0, "output": output}).to_string();
+        assert!(tiny.len() <= TINY_PREVIEW_BYPASS_BYTES);
+        let admitted_count = TURN_TINY_PREVIEW_BUDGET_BYTES / tiny.len();
+        assert!(admitted_count > 0);
+        for index in 0..admitted_count {
+            let visible = state.bound_model_visible_tool_preview_for_call_with_budget(
+                &format!("call-verifier-{index}"),
+                Some("exec_command"),
+                tiny.clone(),
+                TURN_PREVIEW_BUDGET_BYTES,
+            );
+            assert_eq!(visible, tiny);
+        }
+
+        let suppressed = state.bound_model_visible_tool_preview_for_call_with_budget(
+            "call-verifier-overflow",
+            Some("exec_command"),
+            tiny,
+            TURN_PREVIEW_BUDGET_BYTES,
+        );
+        assert!(suppressed.contains("preview_budget_exhausted"));
+        assert!(!suppressed.contains("\"output\":\"3\""));
+        assert!(suppressed.contains("\"success\":true"));
+        assert!(suppressed.contains("\"exit_code\":0"));
+        assert_eq!(state.model_visible_tiny_tool_preview_bytes, TURN_TINY_PREVIEW_BUDGET_BYTES);
+        assert_eq!(state.suppressed_tool_previews, 2);
     }
 
     #[test]
