@@ -2,6 +2,21 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.169.1 - 2026-09-23
+
+### Highlights
+#### Bug Fixes
+
+- Strip clear_at for non-turn-scoped providers (a54e8cd2) 
+- Bound plan-mode previews and complete review-only plans without file changes (84c45c8b) 
+#### Documentation
+
+- Clarify quick start and navigation (456bc44a) 
+#### Features
+
+- Cap execution-mode preview budget at 6k tokens (bf4fbd29) 
+- Allow read-only git commands as plan verify evidence (8c0192c8) 
+### Other Changes
 ## 0.169.0 - 2026-09-23
 
 ### Highlights
