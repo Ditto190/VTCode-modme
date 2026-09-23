@@ -2,6 +2,21 @@
 
 All notable changes to vtcode will be documented in this file.
 ## v0.73.2 - 2026-01-29
+## 0.167.0 - 2026-09-23
+
+### Highlights
+#### Bug Fixes
+
+- Drain terminal palette probe before dispatch early-exit (9d234b60) 
+- Harden recovery handoffs and completion lifecycles (694541d5) 
+#### Features
+
+- Show release notes immediately after install (6be474b0) 
+- Add Claude Opus 5.5 across model registries (aa1d8a8c) 
+### Other Changes
+#### Other
+
+- Update provider guides (f4f91f9a) 
 ## 0.166.0 - 2026-09-22
 
 ### Highlights
