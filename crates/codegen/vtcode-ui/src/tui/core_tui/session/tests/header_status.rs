@@ -189,6 +189,19 @@ fn permission_overlay_surfaces_action_required_status() {
 }
 
 #[test]
+fn reduced_motion_keeps_background_task_status_as_static_text() {
+    let mut session = fresh_session();
+    session.appearance.reduce_motion_mode = true;
+    session.set_background_activity_count(2);
+
+    let rendered = session.render_input_status_line(VIEW_WIDTH).expect("background status line");
+    let text = rendered.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+    assert!(text.contains("Running 2 background tasks..."), "background status should remain readable: {text}");
+    assert_eq!(rendered.spans[0].content.as_ref(), "Running 2 background tasks...");
+}
+
+#[test]
 fn header_meta_line_renders_active_primary_agent() {
     let mut session = fresh_session();
     session.header_context.primary_agent = Some("planner".to_string());

@@ -1277,8 +1277,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/user-guide/interactive-mode.md`
   - **Content**: Interactive Mode Reference
-  - **Topics**: Keyboard Shortcuts, Fullscreen Rendering, Scheduled Prompts And Reminders, Vim Mode, Prompt Suggestions, Tasks, and Jobs
-  - **User Questions**: "What can you tell me about Interactive Mode Reference?", "How does Keyboard Shortcuts work?", "How does Fullscreen Rendering work?"
+  - **Topics**: Keyboard Shortcuts, Reduced Motion, Fullscreen Rendering, Scheduled Prompts And Reminders, Vim Mode
+  - **User Questions**: "What can you tell me about Interactive Mode Reference?", "How does Keyboard Shortcuts work?", "How does Reduced Motion work?"
 
 ## Enhanced Trigger Questions
 

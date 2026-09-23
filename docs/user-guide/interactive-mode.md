@@ -27,6 +27,19 @@ Multiline methods (`Shift+Enter`, `Option+Enter`, `\`+`Enter`, `Ctrl+J`, paste) 
 
 Composer triggers (`#`, `/`, `!`, `@`, `@agent-<name>`, `Alt+P`) are tabulated in [Keyboard Shortcuts](./keyboard-shortcuts.md#quick-commands).
 
+## Reduced Motion
+
+Set `ui.reduce_motion_mode = true` to keep progress labels visible while
+stopping shimmer and spinner animation. You can also enable it for a run with
+`VTCODE_REDUCE_MOTION=1 vtcode` when `ui.reduce_motion_mode` is omitted from
+the configuration. An explicit setting takes precedence. Background-task and
+local-agent status labels remain visible as static text, and transcript
+file-operation markers remain static.
+
+To keep progress animation while reduced motion is enabled, set
+`ui.reduce_motion_keep_progress_animation = true`. Screen reader mode always
+keeps progress animation disabled.
+
 ## Fullscreen Rendering
 
 When VT Code is running in alternate-screen mode, the transcript and composer use a fixed fullscreen layout similar to terminal applications such as `vim` or `less`. The input stays pinned at the bottom, mouse handling is internal to VT Code, and the tool-output viewer/search happens inside the app instead of your terminal scrollback.

@@ -877,8 +877,8 @@ python3 scripts/generate_config_field_reference.py
 | `ui.notifications.tool_success` | `boolean` | no | `false` | Notify on successful tool calls. |
 | `ui.reasoning_display_mode` | `string` | no | `"toggle"` | Reasoning display mode for chat UI ("always", "toggle", or "hidden") |
 | `ui.reasoning_visible_default` | `boolean` | no | `true` | Default visibility for reasoning when display mode is "toggle" |
-| `ui.reduce_motion_keep_progress_animation` | `boolean` | no | `false` | Keep animated progress indicators while reduce_motion_mode is enabled. |
-| `ui.reduce_motion_mode` | `boolean` | no | `false` | Reduce motion mode: minimizes shimmer/flashing animations. Can also be enabled via VTCODE_REDUCE_MOTION=1 environment variable. |
+| `ui.reduce_motion_keep_progress_animation` | `boolean` | no | `false` | Keep animated progress indicators while reduce_motion_mode is enabled. Screen reader mode still disables progress animation. |
+| `ui.reduce_motion_mode` | `boolean` | no | `false` | Reduce motion mode: keeps progress labels visible without animated effects. Defaults from VTCODE_REDUCE_MOTION when the setting is omitted. |
 | `ui.safe_colors_only` | `boolean` | no | `false` | Restrict color palette to the 11 "safe" ANSI colors portable across common themes. Safe colors: red, green, yellow, blue, magenta, cyan + brred, brgreen, brmagenta, brcyan Problematic colors avoided: brblack (invisible in Solarized Dark), bryellow (light themes), white/brwhite (light themes), brblue (Basic Dark). See: <https://blog.xoria.org/terminal-colors/> |
 | `ui.screen_reader_mode` | `boolean` | no | `false` | Screen reader mode: disables animations, uses plain text indicators, and optimizes output for assistive technology compatibility. Can also be enabled via VTCODE_SCREEN_READER=1 environment variable. |
 | `ui.show_diagnostics_in_transcript` | `boolean` | no | `false` | Show warning/error/fatal diagnostic lines in the TUI transcript and log panel. Also controls whether ERROR-level tracing logs appear in the TUI session log. Errors are always captured in the session archive JSON regardless of this setting. |

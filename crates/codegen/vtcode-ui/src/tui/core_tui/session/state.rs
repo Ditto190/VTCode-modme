@@ -323,10 +323,10 @@ impl Session {
 
     /// Advance animation state on tick and request redraw when a frame changes.
     pub(crate) fn handle_tick(&mut self) {
-        let motion_reduced = self.appearance.motion_reduced();
+        let animate_progress = self.appearance.should_animate_progress_status();
         self.step_drag_auto_scroll();
         let mut animation_updated = false;
-        if !motion_reduced && self.thinking_spinner.is_active && self.thinking_spinner.update() {
+        if animate_progress && self.thinking_spinner.is_active && self.thinking_spinner.update() {
             animation_updated = true;
             // Refresh collapsed thinking summaries so the live spinner frame and
             // line count stay current during streaming instead of freezing until
@@ -335,11 +335,7 @@ impl Session {
             // requested below via `animation_updated`.
             self.mark_thinking_run_starts_dirty();
         }
-        let shimmer_active = if self.appearance.should_animate_progress_status() {
-            self.is_shimmer_active() || self.background_status_shimmer_active()
-        } else {
-            false
-        };
+        let shimmer_active = animate_progress && (self.is_shimmer_active() || self.background_status_shimmer_active());
         if shimmer_active && self.shimmer_state.update() {
             animation_updated = true;
         }

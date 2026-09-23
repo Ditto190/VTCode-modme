@@ -428,12 +428,13 @@ pub struct UiConfig {
     #[serde(default = "default_screen_reader_mode")]
     pub screen_reader_mode: bool,
 
-    /// Reduce motion mode: minimizes shimmer/flashing animations.
-    /// Can also be enabled via VTCODE_REDUCE_MOTION=1 environment variable.
+    /// Reduce motion mode: keeps progress labels visible without animated effects.
+    /// Defaults from VTCODE_REDUCE_MOTION when the setting is omitted.
     #[serde(default = "default_reduce_motion_mode")]
     pub reduce_motion_mode: bool,
 
     /// Keep animated progress indicators while reduce_motion_mode is enabled.
+    /// Screen reader mode still disables progress animation.
     #[serde(default = "default_reduce_motion_keep_progress_animation")]
     pub reduce_motion_keep_progress_animation: bool,
 
@@ -727,6 +728,25 @@ mod tests {
     fn thinking_display_defaults_to_collapsed() {
         let ui = UiConfig::default();
         assert_eq!(ui.thinking_display, ThinkingBlockState::Collapsed);
+    }
+
+    #[test]
+    #[serial]
+    fn reduce_motion_uses_environment_default_and_preserves_animation_override() {
+        with_env_var("VTCODE_REDUCE_MOTION", Some("1"), || {
+            let ui = UiConfig::default();
+            assert!(ui.reduce_motion_mode);
+            assert!(!ui.reduce_motion_keep_progress_animation);
+
+            let explicit_false: UiConfig = toml::from_str("reduce_motion_mode = false")
+                .expect("explicit false should parse while the environment default is enabled");
+            assert!(!explicit_false.reduce_motion_mode);
+        });
+
+        let ui: UiConfig = toml::from_str("reduce_motion_mode = true\nreduce_motion_keep_progress_animation = true")
+            .expect("explicit reduce-motion settings should parse");
+        assert!(ui.reduce_motion_mode);
+        assert!(ui.reduce_motion_keep_progress_animation);
     }
 
     #[test]
