@@ -173,6 +173,12 @@ brew install vinhnx/tap/vtcode
 # or, if you have Rust: cargo install vtcode
 ```
 
+> [!NOTE]
+> The installer targets macOS and Linux. Windows release artifacts are
+> best-effort and may lag behind; see the
+> [installation guide](./docs/installation/README.md) for the current state
+> of Windows support.
+
 ### 2. Configure
 
 In your project, initialize workspace instructions and add a provider key:
@@ -289,7 +295,7 @@ The guides below cover specific workflows and integrations.
 
 | Layer   | Guides                                                                                                                                                                                                                                                                                   |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                                                                                  |
+| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [FAQ](./docs/FAQ.md) · [Compatibility](./docs/COMPATIBILITY.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                  |
 | Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [Exec mode](./docs/user-guide/exec-mode.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [WebMCP](./docs/user-guide/webmcp.md) · [Automation](./docs/guides/full-automation.md) · [Hooks](./docs/guides/hooks-guide.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
 | Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md)                                                                                                                |
 | Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Evals](./docs/guides/eval.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                                                     |
@@ -327,6 +333,11 @@ CI runs with `RUSTFLAGS="-D warnings"` and `--locked`; match locally with
 [development overview](./docs/development/README.md) and
 [testing guide](./docs/development/testing.md) for details.
 
+Release binaries and per-release notes live on the
+[GitHub releases page](https://github.com/vinhnx/vtcode/releases); Windows
+artifacts may lag behind macOS and Linux while the packaging pipeline
+catches up.
+
 ## Contributing
 
 Contributions are welcome:
@@ -346,7 +357,9 @@ and keep the diff focused.
 
 ### Contributors
 
-Thank you to everyone who shaped VT Code.
+VT Code is what it is because of the people who build, test, and improve it
+alongside me. Thank you to every one of you. This section exists because of
+you.
 
 <details open>
 <summary><strong>Show all contributors</strong></summary>
@@ -398,6 +411,19 @@ Thank you to everyone who shaped VT Code.
 
 </details>
 
+<div align="center">
+
+**Want to see your avatar here?** There's always room for one more. Whether
+it's a one-line fix, a bug report, or just sharing what you think, every bit
+counts, and every bit is welcome.
+
+[Report a bug](https://github.com/vinhnx/vtcode/issues/new?template=bug_report.md) ·
+[Request a feature](https://github.com/vinhnx/vtcode/issues/new?template=feature_request.md) ·
+[Share feedback](https://github.com/vinhnx/vtcode/discussions) ·
+[Contribute](./docs/CONTRIBUTING.md)
+
+</div>
+
 ## Support
 
 ### Contact
@@ -407,6 +433,22 @@ For partnership and collaboration inquiries:
 
 For bugs and feature requests, prefer
 [GitHub Issues](https://github.com/vinhnx/vtcode/issues).
+
+For security vulnerabilities, do not open a public issue: report privately
+via [GitHub private vulnerability reporting](https://github.com/vinhnx/vtcode/security/advisories/new)
+as described in the [security policy](./docs/SECURITY.md).
+
+<div align="center">
+
+Found VT Code useful? Tell a friend or share it with your network:
+
+[Share on X](https://twitter.com/intent/tweet?text=VT%20Code%20is%20an%20open-source%20coding%20agent%20for%20your%20terminal&url=https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode) ·
+[Share on Hacker News](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode&t=VT%20Code%20%E2%80%93%20Open-source%20coding%20agent%20for%20your%20terminal) ·
+[Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode) ·
+[Share via Email](mailto:?subject=VT%20Code%3A%20open-source%20coding%20agent%20for%20your%20terminal&body=Check%20out%20VT%20Code%2C%20an%20open-source%20coding%20agent%20for%20your%20terminal%3A%20https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode) ·
+[Share via SMS](sms:?&body=Check%20out%20VT%20Code%2C%20an%20open-source%20coding%20agent%20for%20your%20terminal%3A%20https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode)
+
+</div>
 
 ### Sponsorship
 
