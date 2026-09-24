@@ -1102,6 +1102,56 @@ mod request_builder_tests {
         assert_eq!(system_text.matches(summary).count(), 1, "summary folded exactly once: {system_text}");
     }
 
+    fn long_context_payload(model: &str) -> serde_json::Value {
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![
+                Message::user("short opener".to_string()),
+                Message::assistant("Acknowledged.".to_string()),
+                Message::user(format!("large pasted document: {}", "x".repeat(512))),
+            ]
+            .into(),
+            coding_agent_settings: Some(Box::new(crate::provider::CodingAgentSettings {
+                long_context_optimization: true,
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let cache_settings = AnthropicPromptCacheSettings::default();
+        let anthropic_config = AnthropicConfig::default();
+        let ctx = RequestBuilderContext {
+            prompt_cache_enabled: false,
+            prompt_cache_settings: &cache_settings,
+            anthropic_config: &anthropic_config,
+            model: models::anthropic::DEFAULT_MODEL,
+        };
+        convert_to_anthropic_format(&request, &ctx).expect("payload conversion")
+    }
+
+    #[test]
+    fn test_long_context_hoisting_is_skipped_for_preserved_thinking_models() {
+        for model in [models::anthropic::CLAUDE_OPUS_5_5, models::anthropic::CLAUDE_FABLE_5_1] {
+            let payload = long_context_payload(model);
+            let messages = payload["messages"].as_array().expect("messages");
+            assert_eq!(messages.len(), 3, "{model}: {payload}");
+            assert_eq!(messages[0]["content"][0]["text"], "short opener", "{model}: history must stay in order");
+            assert_eq!(messages[1]["role"], "assistant");
+            assert!(
+                messages[2]["content"][0]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("large pasted document")),
+                "{model}: {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_long_context_hoisting_still_applies_without_preserved_thinking() {
+        let payload = long_context_payload(models::anthropic::CLAUDE_OPUS_5);
+        let first_text = payload["messages"][0]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(first_text.starts_with("large pasted document"), "largest user message hoisted: {payload}");
+    }
+
     #[test]
     fn test_convert_to_anthropic_format_includes_native_web_search_tool() {
         let request = LLMRequest {

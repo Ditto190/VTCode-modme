@@ -21,9 +21,9 @@ use vtcode_config::core::{AdvisorConfig, AnthropicConfig, AnthropicPromptCacheSe
 use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
-    default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, rejects_forced_tool_choice,
-    rejects_sampling, resolve_model_name, supports_effort, supports_mid_conversation_system_messages,
-    supports_task_budget, thinking_is_on,
+    default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, preserves_thinking_across_turns,
+    rejects_forced_tool_choice, rejects_sampling, resolve_model_name, supports_effort,
+    supports_mid_conversation_system_messages, supports_task_budget, thinking_is_on,
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
@@ -165,11 +165,16 @@ pub(crate) fn convert_to_anthropic_format(
     // message is rendered exactly once.
     let conversation_messages = &request.messages[history_system_placement.leading_folded_count(&request.messages)..];
 
+    // Hoisting moves the largest user message to the front, which reorders
+    // earlier turns. On preserved-thinking models that invalidates every
+    // replayed thinking block (their signatures bind the exact prior prefix),
+    // so the optimization is skipped there and history stays append-only.
     let needs_hoisting = request
         .coding_agent_settings
         .as_ref()
         .is_some_and(|s| s.long_context_optimization)
-        && conversation_messages.len() > 1;
+        && conversation_messages.len() > 1
+        && !preserves_thinking_across_turns(resolved_model, ctx.model);
 
     // Only clone the message vector when hoisting will actually mutate it.
     // In the common case (no long-context optimization or single message),

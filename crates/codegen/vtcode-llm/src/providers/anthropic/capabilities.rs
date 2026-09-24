@@ -264,6 +264,18 @@ pub(crate) fn thinking_is_on(thinking: Option<&ThinkingConfig>, model: &str, def
     }
 }
 
+/// Whether the model enforces "preserved thinking": each replayed thinking
+/// block's signature binds the exact prefix that produced it (top-level
+/// `system`, the `tools` set, and every earlier message). Any reorder or edit
+/// of earlier turns invalidates every later thinking block (a 400 on
+/// enforced accounts, a silent drop otherwise), so request builders must keep
+/// history append-only for these models.
+pub(crate) fn preserves_thinking_across_turns(model: &str, default_model: &str) -> bool {
+    let requested = resolve_model_name(model, default_model);
+    matches_model(requested, models::anthropic::CLAUDE_OPUS_5_5)
+        || matches_model(requested, models::anthropic::CLAUDE_FABLE_5_1)
+}
+
 pub(crate) fn default_effort_for_model(model: &str, default_model: &str) -> Option<&'static str> {
     claude_thinking_profile(model, default_model)
         .filter(|profile| profile.supports_effort)
@@ -473,5 +485,15 @@ mod tests {
     #[test]
     fn empty_model_uses_the_default_model_max_tokens() {
         assert_eq!(default_max_tokens_for_model("", models::anthropic::CLAUDE_SONNET_5, false), 64_000);
+    }
+
+    #[test]
+    fn preserved_thinking_is_limited_to_prefix_bound_models() {
+        assert!(preserves_thinking_across_turns(models::anthropic::CLAUDE_OPUS_5_5, ""));
+        assert!(preserves_thinking_across_turns(models::anthropic::CLAUDE_FABLE_5_1, ""));
+        assert!(preserves_thinking_across_turns("", models::anthropic::CLAUDE_OPUS_5_5));
+        assert!(!preserves_thinking_across_turns(models::anthropic::CLAUDE_OPUS_5, ""));
+        assert!(!preserves_thinking_across_turns(models::anthropic::CLAUDE_FABLE_5, ""));
+        assert!(!preserves_thinking_across_turns(models::anthropic::CLAUDE_SONNET_5, ""));
     }
 }
