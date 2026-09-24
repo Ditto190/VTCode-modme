@@ -830,6 +830,63 @@ mod tests {
         assert_eq!(totals.completion_tokens, 7);
     }
 
+    #[tokio::test]
+    async fn stream_carries_refusal_stop_details_from_message_delta() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5\",\"stop_reason\":null,\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_sequence\":null,\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"declined\",\"fallback_credit_token\":\"credit-1\",\"fallback_has_prefill_claim\":true}},\"usage\":{\"output_tokens\":0}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(body_partial_json(json!({"stream": true})))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::CLAUDE_SONNET_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let mut stream = LLMProvider::stream(
+            &provider,
+            LLMRequest {
+                model: models::CLAUDE_SONNET_5.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("stream request should succeed");
+
+        let mut completed = None;
+        while let Some(event) = stream.next().await {
+            if let LLMStreamEvent::Completed { response } = event.expect("stream event") {
+                completed = Some(*response);
+            }
+        }
+
+        let response = completed.expect("completed stream response");
+        assert!(matches!(response.finish_reason, crate::provider::FinishReason::Refusal));
+        let details = response.reasoning_details.expect("stop_details detail");
+        assert_eq!(details.len(), 1);
+        let detail: serde_json::Value = serde_json::from_str(&details[0]).expect("serialized stop_details");
+        assert_eq!(detail["type"], "stop_details");
+        assert_eq!(detail["category"], "cyber");
+        assert_eq!(detail["explanation"], "declined");
+        assert_eq!(detail["fallback_credit_token"], "credit-1");
+        assert_eq!(detail["fallback_has_prefill_claim"], true);
+    }
+
     #[test]
     fn non_streaming_capability_is_pinned_for_stream_timeout_fallback() {
         // Pinned true in the provider impl; MinimaxProvider's delegation and

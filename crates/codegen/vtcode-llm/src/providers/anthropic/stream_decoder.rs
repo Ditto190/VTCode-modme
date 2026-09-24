@@ -16,7 +16,7 @@ use futures::StreamExt;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
-use super::response_parser::{parse_finish_reason, parse_usage};
+use super::response_parser::{parse_finish_reason, parse_usage, stop_details_reasoning_detail};
 
 enum ReasoningBlockState {
     Thinking {
@@ -49,6 +49,7 @@ pub fn create_stream(
         let mut reasoning_blocks = BTreeMap::new();
         let mut finalized_reasoning_details = Vec::new();
         let mut advisor_blocks: Vec<Value> = Vec::new();
+        let mut stop_details_detail: Option<String> = None;
 
         while let Some(chunk_result) = body_stream.next().await {
             let chunk = chunk_result.map_err(|err| {
@@ -288,6 +289,9 @@ pub fn create_stream(
                             if let Some(reason) = delta.stop_reason {
                                 aggregator.set_finish_reason(parse_finish_reason(&reason));
                             }
+                            if let Some(detail) = delta.stop_details.as_ref().and_then(stop_details_reasoning_detail) {
+                                stop_details_detail = Some(detail);
+                            }
                         }
                         AnthropicStreamEvent::Error { error } => {
                             Err(LLMError::Provider {
@@ -311,6 +315,10 @@ pub fn create_stream(
         for (_, reasoning_block) in reasoning_blocks {
             finalized_reasoning_details.push(serialize_reasoning_block_detail(reasoning_block));
         }
+
+        // Same order as the non-streaming parser: reasoning blocks, then
+        // stop_details, then advisor blocks.
+        finalized_reasoning_details.extend(stop_details_detail);
 
         let mut response = aggregator.finalize();
         if !finalized_reasoning_details.is_empty() {

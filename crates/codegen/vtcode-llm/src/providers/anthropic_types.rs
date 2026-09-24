@@ -467,6 +467,10 @@ pub enum AnthropicStreamDelta {
 pub struct AnthropicMessageDelta {
     pub(crate) stop_reason: Option<String>,
     stop_sequence: Option<String>,
+    /// Refusal category, explanation and fallback-credit fields. Streaming
+    /// responses deliver `stop_details` here rather than on `message_start`.
+    #[serde(default)]
+    pub(crate) stop_details: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

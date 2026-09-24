@@ -148,26 +148,8 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
         .unwrap_or("end_turn");
     let finish_reason = parse_finish_reason(stop_reason);
 
-    // Parse stop_details for refusal/fallback credit information
-    if let Some(sd) = response_json.get("stop_details") {
-        let category = sd.get("category").and_then(|c| c.as_str()).unwrap_or("");
-        let explanation = sd.get("explanation").and_then(|e| e.as_str()).unwrap_or("");
-        let credit_token = sd.get("fallback_credit_token").and_then(|t| t.as_str()).unwrap_or("");
-        let has_prefill = sd.get("fallback_has_prefill_claim").and_then(|v| v.as_bool());
-        let mut detail = json!({
-            "type": "stop_details",
-            "category": category,
-        });
-        if !explanation.is_empty() {
-            detail["explanation"] = Value::String(explanation.to_string());
-        }
-        if !credit_token.is_empty() {
-            detail["fallback_credit_token"] = Value::String(credit_token.to_string());
-        }
-        if let Some(prefill) = has_prefill {
-            detail["fallback_has_prefill_claim"] = Value::Bool(prefill);
-        }
-        reasoning_details_vec.push(detail.to_string());
+    if let Some(detail) = response_json.get("stop_details").and_then(stop_details_reasoning_detail) {
+        reasoning_details_vec.push(detail);
     }
 
     let usage = response_json.get("usage").map(parse_usage);
@@ -201,6 +183,32 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
         organization_id: None,
         compaction,
     })
+}
+
+/// Serializes a response's `stop_details` (refusal category, explanation and
+/// fallback-credit fields) into a `reasoning_details` entry. Shared by the
+/// non-streaming parser and the stream decoder, which receives the same object
+/// on `message_delta`. Returns `None` for an absent or `null` value.
+pub(crate) fn stop_details_reasoning_detail(stop_details: &Value) -> Option<String> {
+    let sd = stop_details.as_object()?;
+    let category = sd.get("category").and_then(Value::as_str).unwrap_or("");
+    let explanation = sd.get("explanation").and_then(Value::as_str).unwrap_or("");
+    let credit_token = sd.get("fallback_credit_token").and_then(Value::as_str).unwrap_or("");
+    let has_prefill = sd.get("fallback_has_prefill_claim").and_then(Value::as_bool);
+    let mut detail = json!({
+        "type": "stop_details",
+        "category": category,
+    });
+    if !explanation.is_empty() {
+        detail["explanation"] = Value::String(explanation.to_string());
+    }
+    if !credit_token.is_empty() {
+        detail["fallback_credit_token"] = Value::String(credit_token.to_string());
+    }
+    if let Some(prefill) = has_prefill {
+        detail["fallback_has_prefill_claim"] = Value::Bool(prefill);
+    }
+    Some(detail.to_string())
 }
 
 pub fn parse_finish_reason(stop_reason: &str) -> FinishReason {

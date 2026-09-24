@@ -344,6 +344,44 @@ mod response_parser_tests {
     }
 
     #[test]
+    fn test_parse_response_carries_refusal_stop_details() {
+        let response_json = json!({
+            "content": [],
+            "stop_reason": "refusal",
+            "stop_details": {
+                "type": "refusal",
+                "category": "cyber",
+                "explanation": "declined",
+                "fallback_credit_token": "credit-1",
+                "fallback_has_prefill_claim": false
+            }
+        });
+
+        let response = parse_response(response_json, "claude-sonnet-5".to_string()).expect("parse response");
+        assert!(matches!(response.finish_reason, FinishReason::Refusal));
+        let details = response.reasoning_details.expect("stop_details detail");
+        assert_eq!(details.len(), 1);
+        let detail: serde_json::Value = serde_json::from_str(&details[0]).expect("serialized stop_details");
+        assert_eq!(detail["type"], "stop_details");
+        assert_eq!(detail["category"], "cyber");
+        assert_eq!(detail["explanation"], "declined");
+        assert_eq!(detail["fallback_credit_token"], "credit-1");
+        assert_eq!(detail["fallback_has_prefill_claim"], false);
+    }
+
+    #[test]
+    fn test_parse_response_ignores_null_stop_details() {
+        let response_json = json!({
+            "content": [{"type": "text", "text": "done"}],
+            "stop_reason": "end_turn",
+            "stop_details": null
+        });
+
+        let response = parse_response(response_json, "claude-sonnet-5".to_string()).expect("parse response");
+        assert!(response.reasoning_details.is_none(), "details: {:?}", response.reasoning_details);
+    }
+
+    #[test]
     fn test_parse_response_with_compaction() {
         let response_json = json!({
             "content": [
