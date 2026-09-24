@@ -396,6 +396,7 @@ impl AnthropicProvider {
         include_advanced_tool_use: bool,
         request_betas: Option<&[String]>,
     ) -> Option<String> {
+        let server_side_fallback = headers::ServerSideFallbackForm::of_request(anthropic_request);
         let beta_config = headers::BetaHeaderConfig {
             config: &self.anthropic_config,
             model: self.resolved_request_model(request),
@@ -410,8 +411,13 @@ impl AnthropicProvider {
                 .get("output_config")
                 .and_then(|value| value.get("task_budget"))
                 .is_some(),
-            server_side_fallback: headers::ServerSideFallbackForm::of_request(anthropic_request),
-            include_fallback_credit: request.fallback_credit_token.is_some(),
+            server_side_fallback,
+            // The credit beta must accompany the original request for a
+            // refusal to carry `fallback_credit_token`. The default-form
+            // fallback beta already grants those fields; the list form does
+            // not, so it needs the credit beta alongside it.
+            include_fallback_credit: request.fallback_credit_token.is_some()
+                || server_side_fallback == Some(headers::ServerSideFallbackForm::List),
             include_mid_conversation_tool_changes: false,
             include_mid_conversation_system_clear_at: capabilities::supports_turn_scoped_system_messages(
                 self.resolved_request_model(request),
@@ -1668,10 +1674,12 @@ mod tests {
         let betas = split_betas(provider.beta_header_for_request(&request, &payload, false, None));
         assert!(betas.iter().any(|beta| beta == "server-side-fallback-2026-07-01"), "{betas:?}");
         assert!(!betas.iter().any(|beta| beta == "server-side-fallback-2026-06-01"), "{betas:?}");
+        // The default-form beta already grants the fallback-credit fields.
+        assert!(!betas.iter().any(|beta| beta == "fallback-credit-2026-07-01"), "{betas:?}");
     }
 
     #[test]
-    fn configured_fallback_list_uses_list_form_beta() {
+    fn configured_fallback_list_uses_list_form_and_credit_betas() {
         let model = models::anthropic::CLAUDE_OPUS_5;
         let mut provider = first_party_provider(model);
         provider.anthropic_config.fallbacks =
@@ -1690,6 +1698,9 @@ mod tests {
         let betas = split_betas(provider.beta_header_for_request(&request, &payload, false, None));
         assert!(betas.iter().any(|beta| beta == "server-side-fallback-2026-06-01"), "{betas:?}");
         assert!(!betas.iter().any(|beta| beta == "server-side-fallback-2026-07-01"), "{betas:?}");
+        // The list form does not grant the credit fields, so the original
+        // request carries the credit beta for a refusal to return a token.
+        assert!(betas.iter().any(|beta| beta == "fallback-credit-2026-07-01"), "{betas:?}");
     }
 
     #[test]
