@@ -71,9 +71,7 @@ impl ToolPack for HitlPack {
                 false,
                 ToolRegistry::memory_executor,
             )
-            .with_description(
-                "Access VT Code persistent memory files under /memories. Use action=view to list available notes before reading or updating; writes are limited to preferences.md, repository-facts.md, and notes/**. Returns file listing or file content.",
-            )
+            .with_description(native_memory::MEMORY_TOOL_DESCRIPTION)
             .with_parameter_schema(native_memory::parameter_schema())
             .with_permission(ToolPolicy::Allow),
             ToolRegistration::new(
