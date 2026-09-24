@@ -49,6 +49,7 @@ use vtcode_core::{
 use crate::startup::take_search_tools_bundle_notice;
 use crate::updater::{Updater, append_notice_highlight};
 use vtcode_config::MiMoAuthMethod;
+use vtcode_config::core::AnthropicConfig;
 use vtcode_config::models::detect_mimo_auth_method;
 
 #[cfg(test)]
@@ -779,12 +780,22 @@ pub(crate) fn create_provider_client(
             prompt_cache: Some(config.prompt_cache.clone()),
             timeouts: None,
             openai: vt_cfg.map(|cfg| cfg.provider.openai.clone()),
-            anthropic: vt_cfg.map(|cfg| cfg.provider.anthropic.clone()),
+            anthropic: configured_anthropic_config(vt_cfg),
             model_behavior: vt_cfg.map(|cfg| cfg.model.clone()),
             workspace_root: Some(config.workspace.clone()),
         },
     )
     .context("Failed to initialize provider client")
+}
+
+/// `[provider.anthropic]` settings for a runtime provider client.
+///
+/// The startup client and every client rebuilt mid-session (model switch, API
+/// key update, OAuth sync) read the Anthropic section through this helper, so a
+/// rebuilt client keeps the thinking, advisor, fallback, and budget settings
+/// the startup client had instead of silently reverting to defaults.
+pub(crate) fn configured_anthropic_config(vt_cfg: Option<&VTCodeConfig>) -> Option<AnthropicConfig> {
+    vt_cfg.map(|cfg| cfg.provider.anthropic.clone())
 }
 
 pub(crate) fn active_deferred_tool_policy(
