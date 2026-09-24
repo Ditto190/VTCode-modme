@@ -15,7 +15,6 @@ pub(crate) const RUNTIME_GUIDANCE_SECTION: &str = r#"## Runtime Guidance
 - Failed tools need bounded diagnosis/action; never bypass safeguards; background completion notices are authoritative, not polled.
 - On preview exhaustion, page a known spool path in small ranges; do not claim all tools are disabled.
 - Fix root causes, not symptoms.
-- Verify every edit (build/test/lint) before the next one; never stack unverified changes; after a fix, rerun a related test.
 - Keep output concise; report checks; test observable behavior; cite retrieved evidence.
 - Never use emojis, incl. verification recaps: write plain text like `pass (6/6)`, not checkmarks/crosses.
 - Test risk-first: name risks + likely mistakes; check asymmetric/boundary both sides; re-derive high-risk results without reusing helpers; avoid panic-only tests.
@@ -72,11 +71,11 @@ mod tests {
         assert!(RUNTIME_GUIDANCE_SECTION.contains("status-only recaps"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("next step on resume"));
         // Verification-first autonomy (docs/harness/ARCHITECTURAL_INVARIANTS.md
-        // §14/§16): the no-stacking and regression-check rules are universal
-        // shipped guidance, not repo convention.
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("Verify every edit"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("never stack unverified changes"));
-        assert!(RUNTIME_GUIDANCE_SECTION.contains("rerun a related test"));
+        // §14/§16) ships as the outcome rule in the base contract ("never claim
+        // a check passed unless you ran it"), not a per-edit cadence: telling
+        // current models to verify every edit causes over-verification.
+        assert!(!RUNTIME_GUIDANCE_SECTION.contains("Verify every edit"));
+        assert!(!RUNTIME_GUIDANCE_SECTION.contains("never stack unverified changes"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Fix root causes, not symptoms"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("Never use emojis"));
         assert!(RUNTIME_GUIDANCE_SECTION.contains("incl. verification recaps"));

@@ -1972,7 +1972,6 @@ Senior engineer in this codebase: read, plan, implement, verify, report. Scale e
 - Never write unsafe code.
 - Failed tools need bounded diagnosis/action; never bypass safeguards; background completion notices are authoritative, not polled.
 - Fix root causes, not symptoms.
-- Verify every edit (build/test/lint) before the next one; never stack unverified changes; after a fix, rerun a related test.
 - Keep output concise; report checks; test observable behavior; cite retrieved evidence.
 - Never use emojis, incl. verification recaps: write plain text like `pass (6/6)`, not checkmarks/crosses.
 - Test risk-first: name risks + likely mistakes; check asymmetric/boundary both sides; re-derive high-risk results without reusing helpers; avoid panic-only tests.
@@ -2048,7 +2047,6 @@ VT Code (Build mode). Be concise and safe.
 - Never write unsafe code.
 - Failed tools need bounded diagnosis/action; never bypass safeguards; background completion notices are authoritative, not polled.
 - Fix root causes, not symptoms.
-- Verify every edit (build/test/lint) before the next one; never stack unverified changes; after a fix, rerun a related test.
 - Keep output concise; report checks; test observable behavior; cite retrieved evidence.
 - Never use emojis, incl. verification recaps: write plain text like `pass (6/6)`, not checkmarks/crosses.
 - Test risk-first: name risks + likely mistakes; check asymmetric/boundary both sides; re-derive high-risk results without reusing helpers; avoid panic-only tests.
