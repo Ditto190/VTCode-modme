@@ -8,7 +8,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 
 - Orient: read `.vtcode/memory/` (`gotchas.md`, `issues.md`, `library.md`, `decisions.md`) before acting; for self-bugs also read `.vtcode/logs/trajectory.jsonl` + `.vtcode/checkpoints`.
 - Reference `openai/codex` first for every task: query DeepWiki MCP (`deepwiki` in `.mcp.json` / `vtcode.toml [mcp.providers]`, e.g. "How does openai/codex implement <feature> in `codex-rs/`?"); if unavailable, fallback to `gh api repos/openai/codex/...` or `git fetch https://github.com/openai/codex`.
-- Implement surgically in the existing small crate; when adapting a Codex pattern cite the source path (`codex-rs/...`) and keep VT Code invariants (`ThreadEvent`, harness config split, sandbox boundary).
+- Implement surgically in the existing small crate; when adapting a Codex pattern cite source + commit (`codex-rs/...`, Apache-2.0 © 2025 OpenAI, https://github.com/openai/codex), preserve notices/state changes per Apache-2.0 §4, extend `scripts/templates/third-party-header.txt` + regen notices if substantive, and keep VT Code invariants (`ThreadEvent`, harness split, sandbox boundary).
 - Verify with `./scripts/check-dev.sh` + `cargo nextest run`; record durable learnings in `.vtcode/memory/` (local-only, gitignored).
 
 ## Rules
