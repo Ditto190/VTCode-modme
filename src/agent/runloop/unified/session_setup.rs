@@ -21,7 +21,7 @@ pub(crate) use init::create_provider_client;
 pub(crate) use init::refresh_tool_snapshot;
 pub(crate) use init::resolve_provider_label;
 pub(crate) use init::session_mcp_config;
-pub(crate) use init::{hydrate_session_runtime, initialize_session_critical};
+pub(crate) use init::{complete_session_registry, hydrate_session_runtime, initialize_session_critical};
 pub(crate) use session_mode::active_primary_agent_from_specs_for_mode;
 pub(crate) use shell::initialize_session_shell;
 pub(crate) use signal::spawn_signal_handler;

@@ -215,6 +215,11 @@ early startup work is observable without adding work to normal launches.
   (`cleanup_old_temp_spools`) runs in `spawn_blocking` so a cold user-cache
   `large-output/` directory
   never blocks first user I/O.
+- **Registry-light critical path.** `initialize_session_critical` no longer
+  constructs `ToolRegistry` or runs `discover_controller_subagents`. Those run
+  in `complete_session_registry` after first paint (trace phase
+  `session_setup_registry`) and re-drive the ready UI before hydration. Ratchet:
+  `critical_path_avoids_registry_and_discovery`.
 - **Static-first typeable shell.** `initialize_session_shell` paints a typeable
   TUI (bootstrap placeholder + built-in slash commands) *before*
   `initialize_session_critical` builds `ToolRegistry`, discovers subagents, or

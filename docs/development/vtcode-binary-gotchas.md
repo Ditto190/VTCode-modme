@@ -115,6 +115,11 @@ full agent runtime:
 
 Hydration and post-hydration hook execution are awaited before the interaction
 loop dispatches the first model turn. Setup failures still abort the session.
+Registry-light critical path: `initialize_session_critical` must not construct
+`ToolRegistry` or call `discover_controller_subagents` (see
+`critical_path_avoids_registry_and_discovery`). Those run in
+`complete_session_registry` after first paint.
+
 Static-first typeable shell: `initialize_session_shell` spawns a typeable TUI
 before ToolRegistry/discovery/provider construction. Do not move heavy init
 back before `spawn_session_with_options` (see shell ratchet test).

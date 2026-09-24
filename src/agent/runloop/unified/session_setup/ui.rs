@@ -140,10 +140,13 @@ pub(crate) async fn initialize_session_ui(
             .map(|(action, key)| (action, vec![key]))
             .collect();
     }
-    // Wire the registry-backed exec manager into the shell callback now that
-    // critical init has produced a ToolRegistry.
-    let _ = exec_sessions.set(session_state.tool_registry.exec_session_manager());
-    session_state.tool_registry.set_active_pty_sessions(pty_counter.clone());
+    // Registry is late-filled (`complete_session_registry` runs after this
+    // function). Bind exec sessions / pty counter when it already exists;
+    // otherwise `apply_post_hydration_ui` re-drives after the completer.
+    if let Some(tool_registry) = session_state.tool_registry.as_ref() {
+        let _ = exec_sessions.set(tool_registry.exec_session_manager());
+        tool_registry.set_active_pty_sessions(pty_counter.clone());
+    }
 
     let lifecycle_hooks = if let Some(vt) = vt_cfg {
         let hooks = build_primary_agent_hook_config(&vt.hooks, session_state.active_primary_agent.active());
@@ -289,10 +292,11 @@ pub(crate) async fn initialize_session_ui(
             }
         }
     }));
-    let controller = session_state.tool_registry.subagent_controller();
-    let exec_sessions = session_state.tool_registry.exec_session_manager();
-    let background_subprocess_task_guard =
-        Some(spawn_agent_palette_and_background_refresh(&handle, controller, exec_sessions, vt_cfg));
+    let tool_registry = session_state.tool_registry.as_ref();
+    let controller = tool_registry.and_then(|r| r.subagent_controller());
+    let exec_manager = tool_registry.map(|r| r.exec_session_manager());
+    let background_subprocess_task_guard = exec_manager
+        .map(|exec_manager| spawn_agent_palette_and_background_refresh(&handle, controller, exec_manager, vt_cfg));
 
     transcript::clear();
     render_resume_state_if_present(&mut renderer, resume_state, supports_reasoning)?;
@@ -484,6 +488,8 @@ pub(crate) async fn initialize_session_ui(
         editor_open_sender,
         editor_open_dispatcher,
         editor_open_coordinator_task_guard,
+        exec_sessions: Some(exec_sessions),
+        pty_counter: Some(pty_counter),
     })
 }
 
@@ -621,12 +627,24 @@ pub(crate) fn apply_post_hydration_ui(
     render_full_auto_allowlist_banner(&mut ui_setup.renderer, full_auto, session_state.full_auto_allowlist.as_ref())?;
     maybe_render_system_prompt_budget_warning(&mut ui_setup.renderer, vt_cfg, &session_state.session_bootstrap)?;
 
-    let background_subprocess_task_guard = Some(spawn_agent_palette_and_background_refresh(
-        &handle,
-        session_state.tool_registry.subagent_controller(),
-        session_state.tool_registry.exec_session_manager(),
-        vt_cfg,
-    ));
+    // Re-drive shell bindings that were skipped when the registry was still
+    // late-filled at `initialize_session_ui` time.
+    if let Some(tool_registry) = session_state.tool_registry.as_ref() {
+        if let Some(exec_sessions) = ui_setup.exec_sessions.as_ref() {
+            let _ = exec_sessions.set(tool_registry.exec_session_manager());
+        }
+        if let Some(pty_counter) = ui_setup.pty_counter.as_ref() {
+            tool_registry.set_active_pty_sessions(pty_counter.clone());
+        }
+    }
+    let background_subprocess_task_guard = session_state.tool_registry.as_ref().map(|tool_registry| {
+        spawn_agent_palette_and_background_refresh(
+            &handle,
+            tool_registry.subagent_controller(),
+            tool_registry.exec_session_manager(),
+            vt_cfg,
+        )
+    });
 
     Ok(background_subprocess_task_guard)
 }
