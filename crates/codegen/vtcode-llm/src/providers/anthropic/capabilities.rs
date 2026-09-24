@@ -257,7 +257,7 @@ pub(crate) fn supports_assistant_prefill(model: &str, default_model: &str) -> bo
 /// date snapshots are not version segments.
 fn claude_version(id: &str) -> Option<(u32, u32)> {
     let mut segments = id
-        .split(|c: char| matches!(c, '-' | '.' | '@' | ':' | '_'))
+        .split(['-', '.', '@', ':', '_'])
         .skip_while(|segment| !is_version_segment(segment));
     let major = segments.next()?.parse().ok()?;
     let minor = segments
