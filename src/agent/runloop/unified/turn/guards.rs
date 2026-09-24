@@ -645,8 +645,9 @@ mod tests {
     use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
     use crate::agent::runloop::unified::turn::context::{TurnHandlerOutcome, TurnLoopResult};
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        BLIND_EDITING_THRESHOLD, EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD, LoopTracker, NAVIGATION_LOOP_THRESHOLD,
-        PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD, update_repetition_tracker,
+        ANTI_BLIND_EDITING_DIRECTIVE, BLIND_EDITING_THRESHOLD, EXECUTION_TOTAL_LOW_SIGNAL_THRESHOLD, LoopTracker,
+        NAVIGATION_LOOP_THRESHOLD, PLANNING_CONSECUTIVE_LOW_SIGNAL_THRESHOLD, PLANNING_TOTAL_LOW_SIGNAL_THRESHOLD,
+        update_repetition_tracker,
     };
     use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
 
@@ -789,7 +790,7 @@ mod tests {
         assert!(
             ctx.working_history
                 .iter()
-                .any(|message| { message.content.as_text().contains("run one verifier with `exec_command`") })
+                .any(|message| { message.content.as_text().contains(ANTI_BLIND_EDITING_DIRECTIVE) })
         );
     }
 

@@ -847,7 +847,9 @@ mod tests {
         };
 
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
-        assert!(backing.last_history_message_contains("verification"));
+        assert!(backing.last_history_message_contains(
+            crate::agent::runloop::unified::turn::tool_outcomes::helpers::ANTI_BLIND_EDITING_DIRECTIVE
+        ));
     }
 
     #[tokio::test]

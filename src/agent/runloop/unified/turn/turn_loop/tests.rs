@@ -1114,7 +1114,10 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
     assert!(outcome.final_response_was_fallback);
     assert!(history.iter().any(|message| {
         message.role == uni::MessageRole::System
-            && message.content.as_text().contains("run one verifier with `exec_command`")
+            && message
+                .content
+                .as_text()
+                .contains(crate::agent::runloop::unified::turn::tool_outcomes::helpers::ANTI_BLIND_EDITING_DIRECTIVE)
     }));
     assert!(history.iter().any(|message| {
         message.role == uni::MessageRole::System
