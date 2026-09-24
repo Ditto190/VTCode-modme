@@ -1596,7 +1596,7 @@ mod tests {
 
     #[test]
     fn display_updates_beta_covers_fallback_entries() {
-        let model = models::anthropic::CLAUDE_SONNET_5;
+        let model = models::anthropic::CLAUDE_OPUS_5;
         let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
         let request = LLMRequest {
             model: model.to_string(),

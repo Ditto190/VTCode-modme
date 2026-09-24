@@ -571,22 +571,37 @@ impl AnthropicFallbacks {
         let Self::Models(models) = self else {
             return None;
         };
-        if models.is_empty() || models.len() > Self::MAX_MODELS {
+        Self::entries_validation_error(
+            field_path,
+            models.iter().map(|target| (target.model.as_str(), target.max_tokens)),
+        )
+    }
+
+    /// Validates explicit fallback entries given as `(model, max_tokens)`
+    /// pairs, applying the same rules as the list form of
+    /// `provider.anthropic.fallbacks`. Shared with request-level fallback
+    /// lists so both paths reject the same payloads.
+    pub fn entries_validation_error<'a>(
+        field_path: &str,
+        entries: impl ExactSizeIterator<Item = (&'a str, Option<u32>)>,
+    ) -> Option<String> {
+        let len = entries.len();
+        if len == 0 || len > Self::MAX_MODELS {
             return Some(format!(
                 "`{field_path}` must list between 1 and {} fallback models, or be \"default\" or \"off\".",
                 Self::MAX_MODELS
             ));
         }
-        let mut seen = std::collections::HashSet::with_capacity(models.len());
-        for target in models {
-            let model = target.model.trim();
+        let mut seen = std::collections::HashSet::with_capacity(len);
+        for (model, max_tokens) in entries {
+            let model = model.trim();
             if model.is_empty() {
                 return Some(format!("`{field_path}` entries must set a non-empty `model`."));
             }
             if !seen.insert(model) {
                 return Some(format!("`{field_path}` lists `{model}` more than once; entries must be distinct."));
             }
-            if target.max_tokens == Some(0) {
+            if max_tokens == Some(0) {
                 return Some(format!("`{field_path}` entry `{model}` must use a positive `max_tokens`."));
             }
         }

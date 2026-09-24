@@ -357,11 +357,13 @@ pub(crate) fn convert_to_anthropic_format(
 
 /// Builds the server-side `fallbacks` parameter.
 ///
-/// Request-level `fallbacks` win. Otherwise `provider.anthropic.fallbacks`
-/// applies, but only on the first-party API and for models whose profile
-/// supports server-side fallbacks: `"default"` sends the keyword form, an
-/// explicit list sends entries, and `"off"` (or an invalid list, which config
-/// validation reports) sends nothing.
+/// Fallbacks are only sent on the first-party API, for models whose profile
+/// supports server-side fallbacks, and never on a credit-token retry. Within
+/// those gates, request-level `fallbacks` win over `provider.anthropic.fallbacks`:
+/// an empty request list sends nothing, and an invalid one (too long, blank or
+/// repeated models, zero `max_tokens`) is dropped with a warning. Otherwise
+/// `"default"` sends the keyword form, an explicit list sends entries, and
+/// `"off"` (or an invalid list, which config validation reports) sends nothing.
 fn build_fallbacks(
     request: &LLMRequest,
     ctx: &RequestBuilderContext<'_>,
@@ -369,18 +371,6 @@ fn build_fallbacks(
     primary_thinking: Option<&ThinkingConfig>,
     effort: Option<&str>,
 ) -> Option<AnthropicFallbacksParam> {
-    if let Some(fallbacks) = request.fallbacks.as_ref() {
-        let entries = fallbacks
-            .iter()
-            .map(|fb| (fb.model.as_str(), fb.max_tokens, fb.thinking.as_ref().map(fallback_thinking_config)));
-        return Some(AnthropicFallbacksParam::Models(sanitize_fallback_entries(
-            entries,
-            primary_thinking,
-            effort,
-            ctx.model,
-        )));
-    }
-
     // A credit-token retry already targets the fallback model; asking for
     // further fallbacks would change the prompt-shaping fields the token was
     // issued for.
@@ -389,6 +379,28 @@ fn build_fallbacks(
         || !supports_server_side_fallback(resolved_model, ctx.model)
     {
         return None;
+    }
+
+    if let Some(fallbacks) = request.fallbacks.as_ref() {
+        if fallbacks.is_empty() {
+            return None;
+        }
+        if let Some(reason) = AnthropicFallbacks::entries_validation_error(
+            "fallbacks",
+            fallbacks.iter().map(|fb| (fb.model.as_str(), fb.max_tokens)),
+        ) {
+            tracing::warn!(%reason, "request-level fallbacks dropped: invalid entries");
+            return None;
+        }
+        let entries = fallbacks
+            .iter()
+            .map(|fb| (fb.model.trim(), fb.max_tokens, fb.thinking.as_ref().map(fallback_thinking_config)));
+        return Some(AnthropicFallbacksParam::Models(sanitize_fallback_entries(
+            entries,
+            primary_thinking,
+            effort,
+            ctx.model,
+        )));
     }
 
     match &ctx.anthropic_config.fallbacks {
@@ -545,6 +557,11 @@ mod tests {
         convert_with(request, &AnthropicConfig::default(), false)
     }
 
+    /// Converts against the first-party API, where server-side fallbacks apply.
+    fn convert_first_party(request: &LLMRequest) -> Value {
+        convert_with(request, &AnthropicConfig::default(), true)
+    }
+
     fn convert_with(request: &LLMRequest, anthropic_config: &AnthropicConfig, first_party: bool) -> Value {
         let prompt_cache_settings = AnthropicPromptCacheSettings::default();
         let ctx = RequestBuilderContext {
@@ -683,7 +700,7 @@ mod tests {
                 fallback(anthropic::CLAUDE_FABLE_5, None),
             ],
         );
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(payload["thinking"], json!({ "type": "adaptive", "display": "updates" }));
         assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive" }));
@@ -693,7 +710,7 @@ mod tests {
     #[test]
     fn explicit_updates_display_is_parsed_for_fallbacks() {
         let request = request_with_fallbacks(
-            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
             vec![
                 fallback(
                     anthropic::CLAUDE_OPUS_5_5,
@@ -705,7 +722,7 @@ mod tests {
                 ),
             ],
         );
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive", "display": "updates" }));
         assert_eq!(fallback_thinking(&payload, 1), &json!({ "type": "adaptive" }));
@@ -714,7 +731,7 @@ mod tests {
     #[test]
     fn fallback_manual_budget_becomes_adaptive_for_models_without_budget_support() {
         let request = request_with_fallbacks(
-            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
             vec![fallback(
                 anthropic::CLAUDE_OPUS_5_5,
                 Some(AnthropicThinkingConfig::Enabled {
@@ -723,7 +740,7 @@ mod tests {
                 }),
             )],
         );
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive", "display": "summarized" }));
     }
@@ -731,14 +748,14 @@ mod tests {
     #[test]
     fn fallback_disabled_thinking_becomes_adaptive_for_adaptive_only_models() {
         let request = request_with_fallbacks(
-            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
             vec![
                 fallback(anthropic::CLAUDE_OPUS_5_5, Some(AnthropicThinkingConfig::Disabled)),
                 fallback(anthropic::CLAUDE_FABLE_5_1, Some(AnthropicThinkingConfig::Disabled)),
                 fallback(anthropic::CLAUDE_SONNET_5, Some(AnthropicThinkingConfig::Disabled)),
             ],
         );
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive" }));
         assert_eq!(fallback_thinking(&payload, 1), &json!({ "type": "adaptive" }));
@@ -749,7 +766,7 @@ mod tests {
     #[test]
     fn fallback_inheriting_rejected_disabled_thinking_gets_explicit_adaptive() {
         let mut request = request_with_fallbacks(
-            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
             vec![
                 fallback(anthropic::CLAUDE_OPUS_5_5, None),
                 fallback(anthropic::CLAUDE_OPUS_5, None),
@@ -759,7 +776,7 @@ mod tests {
             thinking_mode: AnthropicThinkingModeOverride::Disabled,
             ..Default::default()
         });
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(payload["thinking"], json!({ "type": "disabled" }));
         // Opus 5.5 would inherit the rejected `disabled` config.
@@ -771,8 +788,8 @@ mod tests {
     #[test]
     fn fallback_without_override_inherits_valid_primary_thinking() {
         let request =
-            request_with_fallbacks(anthropic::CLAUDE_SONNET_5, vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
-        let payload = convert(&request);
+            request_with_fallbacks(anthropic::CLAUDE_OPUS_5, vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
+        let payload = convert_first_party(&request);
 
         assert_eq!(payload["thinking"]["type"], "adaptive");
         assert!(payload["fallbacks"][0].get("thinking").is_none());
@@ -781,26 +798,77 @@ mod tests {
     #[test]
     fn fallback_thinking_is_kept_for_unprofiled_models() {
         let request = request_with_fallbacks(
-            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
             vec![fallback(
                 "claude-unlisted-model",
                 Some(AnthropicThinkingConfig::Enabled { budget_tokens: 4096, display: None }),
             )],
         );
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "enabled", "budget_tokens": 4096 }));
     }
 
     #[test]
-    fn temperature_is_dropped_when_a_fallback_model_rejects_sampling() {
-        let mut request =
-            request_with_fallbacks("claude-unlisted-model", vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
-        request.temperature = Some(0.2);
-        let payload = convert(&request);
+    fn request_fallbacks_are_gated_like_config_fallbacks() {
+        let fallbacks = || vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)];
 
-        assert!(payload.get("thinking").is_none());
-        assert!(payload.get("temperature").is_none(), "payload: {payload}");
+        // Models without server-side fallback support never send them, so a
+        // fallback that rejects sampling cannot strip the primary temperature.
+        for model in ["claude-unlisted-model", anthropic::CLAUDE_SONNET_5] {
+            let mut request = request_with_fallbacks(model, fallbacks());
+            request.temperature = Some(0.2);
+            let payload = convert_first_party(&request);
+            assert!(payload.get("fallbacks").is_none(), "{model}: {payload}");
+        }
+        let mut request = request_with_fallbacks("claude-unlisted-model", fallbacks());
+        request.temperature = Some(0.2);
+        let payload = convert_first_party(&request);
+        assert!(payload["temperature"].as_f64().is_some_and(|t| (t - 0.2).abs() < 1e-6), "payload: {payload}");
+
+        let request = request_with_fallbacks(anthropic::CLAUDE_OPUS_5, fallbacks());
+        assert!(convert(&request).get("fallbacks").is_none(), "non-first-party endpoints send nothing");
+
+        let mut request = request_with_fallbacks(anthropic::CLAUDE_OPUS_5, fallbacks());
+        request.fallback_credit_token = Some("tok".to_string());
+        assert!(convert_first_party(&request).get("fallbacks").is_none(), "credit-token retries send nothing");
+    }
+
+    #[test]
+    fn empty_request_fallbacks_send_nothing() {
+        let request = request_with_fallbacks(anthropic::CLAUDE_OPUS_5, Vec::new());
+        let payload = convert_first_party(&request);
+
+        assert!(payload.get("fallbacks").is_none(), "payload: {payload}");
+    }
+
+    #[test]
+    fn invalid_request_fallbacks_send_nothing() {
+        let too_many = vec![
+            fallback("claude-opus-4-8", None),
+            fallback(anthropic::CLAUDE_OPUS_5_5, None),
+            fallback(anthropic::CLAUDE_FABLE_5, None),
+            fallback(anthropic::CLAUDE_FABLE_5_1, None),
+        ];
+        let duplicated = vec![fallback("claude-opus-4-8", None), fallback(" claude-opus-4-8 ", None)];
+        let blank = vec![fallback("  ", None)];
+        let zero_max_tokens = vec![FallbackModel {
+            max_tokens: Some(0),
+            ..fallback("claude-opus-4-8", None)
+        }];
+        for fallbacks in [too_many, duplicated, blank, zero_max_tokens] {
+            let request = request_with_fallbacks(anthropic::CLAUDE_OPUS_5, fallbacks);
+            let payload = convert_first_party(&request);
+            assert!(payload.get("fallbacks").is_none(), "payload: {payload}");
+        }
+    }
+
+    #[test]
+    fn request_fallback_models_are_trimmed() {
+        let request = request_with_fallbacks(anthropic::CLAUDE_OPUS_5, vec![fallback(" claude-opus-4-8 ", None)]);
+        let payload = convert_first_party(&request);
+
+        assert_eq!(payload["fallbacks"][0]["model"], "claude-opus-4-8");
     }
 
     #[test]
@@ -941,21 +1009,24 @@ mod tests {
 
     #[test]
     fn forced_tool_choice_is_downgraded_when_a_fallback_model_rejects_it() {
-        let mut request = forced_tool_request(anthropic::CLAUDE_SONNET_5, true);
+        let mut request = forced_tool_request(anthropic::CLAUDE_OPUS_5, true);
+        let payload = convert_first_party(&request);
+        assert_eq!(payload["tool_choice"], json!({"type": "any"}), "baseline payload: {payload}");
+
         request.fallbacks = Some(vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(payload["tool_choice"], json!({"type": "auto"}), "payload: {payload}");
     }
 
     #[test]
     fn forced_tool_choice_is_downgraded_when_a_fallback_thinks() {
-        let mut request = forced_tool_request(anthropic::CLAUDE_SONNET_5, true);
+        let mut request = forced_tool_request(anthropic::CLAUDE_OPUS_5, true);
         request.fallbacks = Some(vec![fallback(
-            anthropic::CLAUDE_OPUS_5,
+            "claude-opus-4-8",
             Some(AnthropicThinkingConfig::Adaptive { display: None }),
         )]);
-        let payload = convert(&request);
+        let payload = convert_first_party(&request);
 
         assert_eq!(payload["tool_choice"], json!({"type": "auto"}), "payload: {payload}");
     }

@@ -190,7 +190,10 @@ pub struct LLMRequest {
 
     /// Optional explicit fallback models for Anthropic server-side fallback.
     /// Overrides `provider.anthropic.fallbacks`; sent with the
-    /// `server-side-fallback-2026-06-01` beta header.
+    /// `server-side-fallback-2026-06-01` beta header. Subject to the same
+    /// gates as the config list (first-party endpoint, a model that supports
+    /// server-side fallbacks, no credit-token retry) and the same entry
+    /// validation; an empty list sends nothing.
     pub fallbacks: Option<Vec<FallbackModel>>,
 
     /// Optional opaque credit token from a refused request's `stop_details.fallback_credit_token`.
