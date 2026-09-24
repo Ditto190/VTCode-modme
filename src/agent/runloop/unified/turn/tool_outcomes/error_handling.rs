@@ -138,6 +138,14 @@ fn failure_guidance(error_msg: &str, failure_kind: &'static str) -> (&'static st
         );
     }
 
+    if failure_kind == "repeated_read_path" {
+        return (
+            "repeated_read_path",
+            false,
+            "Further reads of this path are blocked for the rest of this turn. Reads of other paths, edits, and other useful actions remain available; continue from the evidence already gathered.",
+        );
+    }
+
     // Preview-budget exhaustion is budget-based, not scope-based: a narrower
     // retry returns another contentless stub, so the generic "narrower scope"
     // default only invites wasted retries that feed the blocked-call fuse

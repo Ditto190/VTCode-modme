@@ -260,8 +260,8 @@ fn normalised_code_search_path(effective_args: &Value) -> Option<String> {
 /// `<proposed_plan>` from evidence already gathered instead of starting more
 /// research, otherwise the tool-free recovery synthesis emits prose and the
 /// turn blocks with no approval-ready draft.
-/// Planning-mode next step shared by the family-cap and per-file-path-cap
-/// rejections: once a read cap trips, more reads add no evidence.
+/// Planning-mode next step for family-cap rejections: once the same read
+/// family repeats, more reads add no evidence.
 const PLANNING_READ_CAP_NEXT_STEP: &str = "Synthesize the `<proposed_plan>` from the output already gathered; \
 re-reading files already read this turn adds no new evidence.";
 
@@ -539,16 +539,16 @@ pub(crate) fn enforce_repeated_read_only_call_guard(
     if let Some(path) = repeated_read_path(canonical_tool_name, effective_args) {
         let path_count = ctx.harness_state.record_file_read_path_call(path.clone());
         if path_count > path_cap {
-            let next_step = if planning_active {
-                PLANNING_READ_CAP_NEXT_STEP
-            } else {
-                "Reuse the output already gathered."
-            };
             let block_reason = format!(
-                "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}), so further reads of it are blocked this turn. {next_step}"
+                "Repeated reads of '{path}' hit the per-file-path cap ({path_cap}), so further reads of this path are blocked for the rest of this turn. Reads of other paths, edits, and other useful actions remain available; continue from the evidence already gathered."
             );
-            let error_content = build_repeated_file_read_family_error_content_for_mode(&path, planning_active);
-            ctx.activate_recovery(block_reason.clone());
+            let error_content = super::super::super::execution_result::build_error_content(
+                block_reason.clone(),
+                None,
+                None,
+                "repeated_read_path",
+            )
+            .to_string();
             push_guard_failure_messages(ctx, tool_call_id, canonical_tool_name, error_content, &block_reason);
             return Some(ValidationResult::Blocked);
         }

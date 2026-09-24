@@ -25,7 +25,9 @@ pub use artifacts::{
     generate_tracker_markdown_from_plan, merge_plan_content, plan_file_for_tracker_file, split_bracket_items,
     tracker_file_for_plan_file, validate_plan_content,
 };
-pub use persistence::{PersistedPlanDraft, persist_plan_draft, sync_tracker_into_plan_file};
+pub use persistence::{
+    PersistedPlanDraft, allocate_plan_file_if_missing, persist_plan_draft, sync_tracker_into_plan_file,
+};
 pub use start::StartPlanningTool;
 pub use state::PlanningWorkflowState;
 

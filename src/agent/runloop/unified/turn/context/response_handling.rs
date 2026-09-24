@@ -1,9 +1,9 @@
 use super::*;
 use crate::agent::runloop::unified::plan_blocks::strip_plan_persistence_policy_line;
 use crate::agent::runloop::unified::planning_workflow::{
-    PlanApprovalRoute, PlanArtifactError, ValidatedPlanArtifact, build_plan_repair_directive, emit_plan_ready_events,
-    persist_plan_draft, persisted_plan_is_ready, plan_approval_route, plan_repair_directive_for_error,
-    validate_plan_content,
+    PlanApprovalRoute, PlanArtifactError, ValidatedPlanArtifact, allocate_plan_file_if_missing,
+    build_plan_repair_directive, emit_plan_ready_events, persist_plan_draft, persisted_plan_is_ready,
+    plan_approval_route, plan_repair_directive_for_error, validate_plan_content,
 };
 use crate::agent::runloop::unified::turn::turn_processing::resolve_effective_request_model;
 use crate::agent::runloop::unified::ui_interaction_stream_helpers::render_compact_reasoning_block;
@@ -246,10 +246,32 @@ impl<'a> TurnProcessingContext<'a> {
     ) -> anyhow::Result<TurnHandlerOutcome> {
         use vtcode_core::utils::ansi::MessageStyle;
 
-        // Execution-mode replans have no planning workflow behind them, so
-        // bounded planning-repair directives would be misleading. Surface the
-        // rejection and end the turn without scheduling a continuation.
+        // An unapproved execution turn can still propose a plan for review.
+        // Give an invalid first draft one tool-free repair pass so it can
+        // reach the same approval gate as a valid draft, without allowing
+        // edits while the plan is being repaired. Approved-plan revisions
+        // retain their terminal rejection behavior.
         if !self.is_planning_active() {
+            if allow_repair
+                && !self.is_approved_plan_execution()
+                && self.plan_session.plan_validation_repair_allowed()
+                && self.activate_recovery("invalid execution-mode plan awaiting validation repair")
+            {
+                self.plan_session.mark_plan_validation_repair_used();
+                tracing::warn!(
+                    target: "vtcode.planning_workflow",
+                    error = %error,
+                    repair_scheduled = true,
+                    tool_free = true,
+                    "execution-mode plan rejected before approval; scheduling bounded repair"
+                );
+                append_rejected_plan_draft_to_last_assistant(self.working_history, plan_text);
+                self.push_system_message(format!(
+                    "The agent proposed a plan during execution. Repair it for approval before making edits. {}",
+                    plan_repair_directive_for_error(&error)
+                ));
+                return Ok(TurnHandlerOutcome::Continue);
+            }
             tracing::warn!(
                 target: "vtcode.planning_workflow",
                 error = %error,
@@ -961,6 +983,22 @@ impl<'a> TurnProcessingContext<'a> {
             self.handle
                 .set_input_status(Some("Persisting plan...".to_string()), self.input_status_state.right.clone());
             self.handle.force_redraw();
+
+            // Execution-mode first drafts have no planning workflow behind
+            // them, so `persist_plan_draft` would bail with "No active plan
+            // file" even for a valid draft. Allocate the workspace-local plan
+            // location via the shared helper so a valid Build-mode draft can
+            // reach the same approval gate as a planning-mode draft. Planning
+            // stays inactive; only the file pointer is set.
+            if !planning_active && !approved_execution_revision {
+                let plan_state = self.tool_registry.planning_workflow_state();
+                if plan_state.get_plan_file().await.is_none()
+                    && let Err(error) = allocate_plan_file_if_missing(&plan_state).await
+                {
+                    let error = PlanArtifactError::Persistence { reason: error.to_string() };
+                    return self.reject_plan_artifact(error, &plan_text, false);
+                }
+            }
 
             let persisted = match persist_plan_draft(&self.tool_registry.planning_workflow_state(), &plan_text).await {
                 Ok(persisted) => {
@@ -1812,6 +1850,85 @@ Repairs the approved plan after the referenced paths moved.
             ),
             "a policy-automatic replan must schedule the continuation turn"
         );
+    }
+
+    #[tokio::test]
+    async fn execution_mode_invalid_unapproved_plan_gets_tool_free_repair_and_reaches_approval() {
+        // session-vtcode-20260924T133543Z_155288-07964: Build mode produced
+        // a useful README plan with bold labels instead of required headings.
+        const INVALID_README_PLAN: &str = "**Goal:** Improve README density.\n\n1. Fix the broken link in `README.md`.\n\n**Verification:** Check links.\n";
+        const REPAIRED_README_PLAN: &str = "## Summary\nImprove README density.\n\n## Implementation Steps\n1. Fix the broken link -> files: [README.md] -> verify: [rg -n 'Loop engineering' README.md]\n\n## Test Cases and Validation\n- Confirm the link with rg -n 'Loop engineering' README.md.\n\n## Assumptions and Defaults\n- Keep unrelated README sections as they are.\n";
+
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+
+        let first = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some(INVALID_README_PLAN.to_string()), false)
+            .await
+            .expect("invalid unapproved plan should schedule repair");
+        assert!(matches!(first, TurnHandlerOutcome::Continue));
+        assert!(ctx.recovery_is_tool_free(), "repair must not expose edit tools before approval");
+        assert!(ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::System
+                && message.content.as_text().contains("missing required section(s)")
+                && message.content.as_text().contains("## Summary")
+        }));
+        assert!(ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant && message.content.as_text().contains(INVALID_README_PLAN)
+        }));
+
+        let validation = validate_plan_content(REPAIRED_README_PLAN);
+        assert!(validation.is_ready(), "corrected fixture must validate: {:?}", validation.reasons());
+        assert!(ctx.consume_recovery_pass());
+        let repaired = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some(REPAIRED_README_PLAN.to_string()), false)
+            .await
+            .expect("corrected plan should reach approval");
+        let outcome_kind = match &repaired {
+            TurnHandlerOutcome::Continue => "continue".to_string(),
+            TurnHandlerOutcome::Break(result) => format!("break: {result:?}"),
+            TurnHandlerOutcome::BreakWithPolicy { result, .. } => format!("break with policy: {result:?}"),
+            TurnHandlerOutcome::SwitchPrimaryAgent(_) => "switch primary agent".to_string(),
+            TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { .. } => "switch primary agent with policy".to_string(),
+        };
+        assert!(
+            matches!(
+                repaired,
+                TurnHandlerOutcome::BreakWithPolicy {
+                    result: TurnLoopResult::Completed { plan_approved_execution_pending: true },
+                    ..
+                }
+            ),
+            "a corrected Build-mode plan should reach the approval handoff, got {outcome_kind}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_mode_invalid_unapproved_plan_repair_is_bounded() {
+        const INVALID_PLAN: &str = "**Goal:** Improve README.md.\n\n1. Fix a link in README.md.\n";
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+
+        let first = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some(INVALID_PLAN.to_string()), false)
+            .await
+            .expect("first invalid plan should schedule repair");
+        assert!(matches!(first, TurnHandlerOutcome::Continue));
+
+        assert!(ctx.consume_recovery_pass());
+        let second = ctx
+            .handle_text_response(String::new(), Vec::new(), None, Some(INVALID_PLAN.to_string()), false)
+            .await
+            .expect("a failed repair should end with feedback");
+        assert!(matches!(
+            second,
+            TurnHandlerOutcome::Break(TurnLoopResult::Completed { plan_approved_execution_pending: false })
+        ));
+        assert!(ctx.working_history.iter().any(|message| {
+            message.role == uni::MessageRole::Assistant
+                && message.phase == Some(uni::AssistantPhase::FinalAnswer)
+                && message.content.as_text().contains(EXECUTION_PLAN_REJECTION_NOTICE)
+        }));
     }
 
     #[tokio::test]
