@@ -158,8 +158,11 @@ complete field reference and precedence rules.
 ## Collapsed tool-result disclosure
 
 When compact transcript review or bounded tool-output mode hides most of a
-tool result, VT Code adds one exact disclosure to canonical conversation
-history for every provider and model:
+tool result, VT Code adds one exact disclosure per user turn to canonical
+conversation history, after the first bounded tool result of that turn, for
+every provider and model. Copies already sent are never moved or removed, so
+each request only appends to the previous one (required by models that bind
+replayed thinking to the exact prior prefix, and by prompt caches):
 
 ```text
 Only you see that command's output — the user's terminal shows at most a few lines of it. If the user needs to read any of it, put it in your reply.
@@ -170,7 +173,8 @@ system, history, instructions, or transcript representation. Anthropic wire
 routes whose selected provider/model capability supports it use
 `clear_at: "next_user_message"` with the required beta; unsupported Anthropic
 models and gateways use a top-level system directive. Routes without that
-capability never receive the Anthropic-only `clear_at` field. Complete tool
+capability never receive the Anthropic-only `clear_at` field, and receive only
+the latest copy, so a folded system prompt stays constant. Complete tool
 output remains available in Transcript Review, so this disclosure does not
 replace the retained evidence or expose provider chain-of-thought.
 

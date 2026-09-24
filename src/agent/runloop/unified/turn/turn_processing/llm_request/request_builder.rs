@@ -56,6 +56,10 @@ pub(super) fn interrupted_provider_error(provider_name: &str) -> anyhow::Error {
 
 pub(super) const COLLAPSED_TOOL_OUTPUT_NOTICE: &str = "Only you see that command's output — the user's terminal shows at most a few lines of it. If the user needs to read any of it, put it in your reply.";
 
+fn is_collapsed_tool_output_notice(message: &uni::Message) -> bool {
+    message.role == uni::MessageRole::System && message.content.as_text().as_ref() == COLLAPSED_TOOL_OUTPUT_NOTICE
+}
+
 fn should_add_collapsed_tool_output_notice(
     supports_inline_ui: bool,
     tool_display_mode: ToolDisplayMode,
@@ -66,20 +70,20 @@ fn should_add_collapsed_tool_output_notice(
     // the tool response. Those directives do not change which result the next
     // request is continuing, so inspect the last non-system message instead of
     // requiring the tool response to be the literal final history entry.
-    let Some((last_non_system_index, last_non_system_message)) = history
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, message)| message.role != uni::MessageRole::System)
+    let Some(last_non_system_message) = history.iter().rev().find(|message| message.role != uni::MessageRole::System)
     else {
         return false;
     };
     if last_non_system_message.role != uni::MessageRole::Tool {
         return false;
     }
-    if history.iter().skip(last_non_system_index.saturating_add(1)).any(|message| {
-        message.role == uni::MessageRole::System && message.content.as_text().as_ref() == COLLAPSED_TOOL_OUTPUT_NOTICE
-    }) {
+    // One copy per user turn: the marker is turn-scoped, so a copy placed
+    // after an earlier tool round of this turn still applies.
+    let turn_start = history
+        .iter()
+        .rposition(|message| message.role == uni::MessageRole::User)
+        .map_or(0, |index| index + 1);
+    if history[turn_start..].iter().any(is_collapsed_tool_output_notice) {
         return false;
     }
 
@@ -98,26 +102,42 @@ fn should_add_collapsed_tool_output_notice(
     compact_output || compact_display || command_output_is_bounded
 }
 
+/// Routes without turn-scoped system messages receive the notice as an
+/// ordinary directive that never expires, and their adapters typically fold
+/// history system messages into the top-level system prompt. The latest copy
+/// carries the same instruction, so sending only that one keeps the folded
+/// prompt constant instead of growing by one copy per user turn. Request-only;
+/// canonical history keeps every copy for turn-scoped routes.
+fn keep_latest_collapsed_tool_output_notice(messages: &mut Vec<uni::Message>) {
+    let Some(latest) = messages.iter().rposition(is_collapsed_tool_output_notice) else {
+        return;
+    };
+    let mut index = 0;
+    messages.retain(|message| {
+        let keep = index == latest || !is_collapsed_tool_output_notice(message);
+        index += 1;
+        keep
+    });
+}
+
 fn append_collapsed_tool_output_notice(ctx: &mut TurnProcessingContext<'_>) {
     let output_mode = ctx.vt_cfg.map(|config| config.ui.tool_output_mode);
-    // Old checkpoints may contain one copy per tool round. Remove every stale
-    // copy before deciding whether the current tail still needs the marker, so
-    // resumed sessions are repaired even when a marker already follows the
-    // latest tool response.
-    ctx.working_history.retain(|message| {
-        !(message.role == uni::MessageRole::System
-            && message.content.as_text().as_ref() == COLLAPSED_TOOL_OUTPUT_NOTICE)
-    });
+    // Copies already sent are never removed or moved: on models that bind
+    // replayed thinking to the exact prior prefix (Claude Opus 5.5, Claude
+    // Fable 5.1) and for every prompt cache, deleting an earlier copy edits a
+    // prefix that later turns were produced against. Earlier turns' copies are
+    // cleared by the provider (`clear_at`) or collapsed to one copy per
+    // request on other routes; see `keep_latest_collapsed_tool_output_notice`.
     if should_add_collapsed_tool_output_notice(
         ctx.renderer.supports_inline_ui(),
         ctx.renderer.tool_display_mode(),
         output_mode,
         ctx.working_history,
     ) {
-        // Keep one typed marker in canonical history. Provider/model routes
-        // that advertise native support serialize it with `clear_at`; all
-        // other routes receive the same text as an ordinary system/history
-        // directive after request-only sanitization.
+        // One typed marker per user turn in canonical history. Provider/model
+        // routes that advertise native support serialize it with `clear_at`;
+        // all other routes receive the same text as an ordinary
+        // system/history directive after request-only sanitization.
         ctx.working_history
             .push(uni::Message::turn_scoped_system(COLLAPSED_TOOL_OUTPUT_NOTICE.to_owned()));
     }
@@ -338,6 +358,15 @@ pub(super) async fn build_turn_request(
     // Anthropic-only `clear_at` field, and few-shot context as a user-role
     // message so it is never folded into the top-level system prompt.
     let turn_scoped_system_messages = turn_snapshot.capabilities.turn_scoped_system_messages;
+    if !turn_scoped_system_messages
+        && request_messages
+            .iter()
+            .filter(|message| is_collapsed_tool_output_notice(message))
+            .nth(1)
+            .is_some()
+    {
+        keep_latest_collapsed_tool_output_notice(Arc::make_mut(&mut request_messages));
+    }
     if request_context_needs_wire_translation(&request_messages, turn_scoped_system_messages) {
         translate_request_context_for_wire(
             Arc::make_mut(&mut request_messages).as_mut_slice(),
@@ -1742,8 +1771,31 @@ mod tests {
         assert_eq!(ctx.working_history.iter().filter(|message| is_few_shot_block(message)).count(), 1);
     }
 
+    fn exec_round(ctx: &mut crate::agent::runloop::unified::turn::context::TurnProcessingContext<'_>, id: &str) {
+        ctx.working_history.push(uni::Message::assistant_with_tools(
+            String::new(),
+            vec![uni::ToolCall::function(
+                id.to_string(),
+                "exec_command".to_string(),
+                "{}".to_string(),
+            )],
+        ));
+        ctx.working_history
+            .push(uni::Message::tool_response(id.to_string(), "exit 0".to_string()));
+    }
+
+    fn collapsed_notice_count(messages: &[uni::Message]) -> usize {
+        messages
+            .iter()
+            .filter(|message| {
+                message.role == uni::MessageRole::System
+                    && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
+            })
+            .count()
+    }
+
     #[tokio::test]
-    async fn anthropic_request_build_persists_one_collapsed_output_notice() {
+    async fn collapsed_output_notice_is_append_only_across_tool_rounds() {
         let mut backing = TestTurnProcessingBacking::new(4).await;
         let mut config = VTCodeConfig::default();
         config.agent.provider = "anthropic".to_string();
@@ -1751,97 +1803,69 @@ mod tests {
 
         let mut ctx = backing.turn_processing_context();
         ctx.vt_cfg = Some(config);
-        ctx.working_history
-            .push(uni::Message::turn_scoped_system(super::COLLAPSED_TOOL_OUTPUT_NOTICE.to_owned()));
-        ctx.working_history
-            .push(uni::Message::turn_scoped_system(super::COLLAPSED_TOOL_OUTPUT_NOTICE.to_owned()));
-        ctx.working_history.push(uni::Message::assistant_with_tools(
-            String::new(),
-            vec![uni::ToolCall::function(
-                "toolu_1".to_string(),
-                "exec_command".to_string(),
-                "{}".to_string(),
-            )],
-        ));
-        ctx.working_history
-            .push(uni::Message::tool_response("toolu_1".to_string(), "exit 1".to_string()));
+        ctx.working_history.push(uni::Message::user("run the checks".to_string()));
+        exec_round(&mut ctx, "toolu_1");
 
-        let mut snapshot = capture_turn_request_snapshot(&mut ctx, "claude-fable-5", false);
+        let mut snapshot = capture_turn_request_snapshot(&mut ctx, "claude-opus-5-5", false);
         snapshot.provider_name = "anthropic".to_string();
         snapshot.capabilities.turn_scoped_system_messages = true;
 
-        let first = build_turn_request(&mut ctx, 1, "claude-fable-5", &snapshot, Some(320), None, false)
+        let first = build_turn_request(&mut ctx, 1, "claude-opus-5-5", &snapshot, Some(320), None, false)
             .await
-            .expect("Anthropic request should build");
-        assert_eq!(
-            first
-                .continuation_messages
-                .iter()
-                .filter(|message| message.clear_at == Some(uni::MessageClearAt::NextUserMessage))
-                .count(),
-            1
-        );
-        assert!(first.request.messages.iter().any(|message| {
+            .expect("first request should build");
+        let first_messages = non_runtime_request_messages(&first.request);
+        assert_eq!(collapsed_notice_count(&first_messages), 1);
+        assert!(first_messages.iter().any(|message| {
             message.clear_at == Some(uni::MessageClearAt::NextUserMessage)
                 && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
         }));
 
-        let second = build_turn_request(&mut ctx, 2, "claude-fable-5", &snapshot, Some(320), None, false)
+        let repeated = build_turn_request(&mut ctx, 2, "claude-opus-5-5", &snapshot, Some(320), None, false)
             .await
-            .expect("Repeated request should build");
-        assert_eq!(
-            second
-                .continuation_messages
-                .iter()
-                .filter(|message| message.clear_at == Some(uni::MessageClearAt::NextUserMessage))
-                .count(),
-            1
-        );
+            .expect("repeated request should build");
+        assert_eq!(non_runtime_request_messages(&repeated.request), first_messages);
 
-        ctx.working_history.push(uni::Message::assistant_with_tools(
-            String::new(),
-            vec![uni::ToolCall::function(
-                "toolu_2".to_string(),
-                "exec_command".to_string(),
-                "{}".to_string(),
-            )],
-        ));
-        ctx.working_history
-            .push(uni::Message::tool_response("toolu_2".to_string(), "exit 0".to_string()));
-        build_turn_request(&mut ctx, 3, "claude-fable-5", &snapshot, Some(320), None, false)
+        exec_round(&mut ctx, "toolu_2");
+        let second = build_turn_request(&mut ctx, 3, "claude-opus-5-5", &snapshot, Some(320), None, false)
             .await
-            .expect("Next tool request should build");
+            .expect("next tool round should build");
+        let second_messages = non_runtime_request_messages(&second.request);
         assert_eq!(
-            ctx.working_history
-                .iter()
-                .filter(|message| {
-                    message.role == uni::MessageRole::System
-                        && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
-                })
-                .count(),
-            1,
-            "the generic disclosure must not accumulate once per tool round"
+            &second_messages[..first_messages.len()],
+            first_messages.as_slice(),
+            "a later tool round must not move or delete the notice already sent"
         );
+        assert_eq!(collapsed_notice_count(&second_messages), 1, "one notice per user turn");
+
+        ctx.working_history.push(uni::Message::assistant("checks pass".to_string()));
+        ctx.working_history.push(uni::Message::user("run them again".to_string()));
+        exec_round(&mut ctx, "toolu_3");
+        let next_turn = build_turn_request(&mut ctx, 4, "claude-opus-5-5", &snapshot, Some(320), None, false)
+            .await
+            .expect("next user turn should build");
+        let next_turn_messages = non_runtime_request_messages(&next_turn.request);
+        assert!(next_turn_messages.starts_with(&second_messages));
+        assert_eq!(collapsed_notice_count(&next_turn_messages), 2, "each user turn gets its own turn-scoped copy");
 
         let mut non_anthropic_snapshot = snapshot.clone();
         non_anthropic_snapshot.provider_name = "openai".to_string();
         non_anthropic_snapshot.capabilities.turn_scoped_system_messages = false;
-        let switched = build_turn_request(&mut ctx, 4, "gpt-5", &non_anthropic_snapshot, Some(320), None, false)
+        let switched = build_turn_request(&mut ctx, 5, "gpt-5", &non_anthropic_snapshot, Some(320), None, false)
             .await
-            .expect("Provider-switched request should build");
+            .expect("provider-switched request should build");
         assert!(switched.request.messages.iter().all(|message| message.clear_at.is_none()));
         assert_eq!(
-            switched
-                .request
-                .messages
-                .iter()
-                .filter(|message| {
-                    message.role == uni::MessageRole::System
-                        && message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE
-                })
-                .count(),
-            1
+            collapsed_notice_count(switched.request.messages.as_slice()),
+            1,
+            "routes without turn-scoped messages receive only the latest copy"
         );
-        assert!(switched.continuation_messages.iter().any(|message| message.clear_at.is_some()));
+        let latest_notice = switched
+            .request
+            .messages
+            .iter()
+            .rposition(|message| message.content.as_text().as_ref() == super::COLLAPSED_TOOL_OUTPUT_NOTICE)
+            .expect("notice");
+        assert_eq!(switched.request.messages[latest_notice - 1].tool_call_id.as_deref(), Some("toolu_3"));
+        assert_eq!(collapsed_notice_count(switched.continuation_messages.as_slice()), 2);
     }
 }

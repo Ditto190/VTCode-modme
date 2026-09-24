@@ -51,8 +51,10 @@ the native `clear_at: "next_user_message"` field and the required
 without that capability promote the same text to their top-level system
 prompt. All remaining provider routes receive it through their native system,
 history, instructions, or transcript mapping, without the Anthropic-only
-`clear_at` field. VT Code keeps one typed marker in canonical session history
-so provider switching and replay preserve the disclosure. This tells the model
+`clear_at` field; those routes receive only the latest copy. VT Code keeps one
+typed marker per user turn in canonical session history and never moves or
+deletes a copy that was already sent, so provider switching and replay
+preserve the disclosure and every request stays append-only. This tells the model
 when it must quote or summarize output for the user; it does not expose raw
 provider reasoning or replace the complete output retained by Transcript
 Review.
