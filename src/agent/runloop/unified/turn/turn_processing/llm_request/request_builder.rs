@@ -32,9 +32,10 @@ use super::metrics::{
 };
 use super::prompt_assembly::{PromptAssemblyInput, assemble_prompt, render_primary_agent_runtime_context};
 use super::request_context::{
-    persist_turn_few_shot_context, request_context_needs_wire_translation, translate_request_context_for_wire,
+    persist_turn_editor_context, persist_turn_few_shot_context, request_context_needs_wire_translation,
+    translate_request_context_for_wire,
 };
-use super::response_chain::{prepare_responses_request_history, prepend_request_context_message};
+use super::response_chain::prepare_responses_request_history;
 use super::snapshot::TurnRequestSnapshot;
 use super::tool_shaping::{client_local_wire_tools, uses_out_of_band_copilot_tools};
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
@@ -308,9 +309,11 @@ pub(super) async fn build_turn_request(
     );
     let context_management = resolve_context_management(ctx, turn_snapshot, request_model);
     append_collapsed_tool_output_notice(ctx);
-    // Few-shot examples are persisted once per user turn so every request of
-    // the turn (and every later turn) replays the same prefix.
+    // Few-shot examples (once per user turn) and the editor snapshot (only
+    // when it changed) are persisted at the start of a user turn so every
+    // request of the turn, and every later turn, replays the same prefix.
     persist_turn_few_shot_context(ctx.working_history, few_shot_context);
+    persist_turn_editor_context(ctx.working_history, ctx.context_manager.request_editor_context_block());
     let continuation_messages = Arc::new(
         ctx.context_manager
             .normalize_history_for_request(ctx.working_history)
@@ -329,22 +332,17 @@ pub(super) async fn build_turn_request(
     };
 
     // Typed turn-scoped markers (the collapsed-output notice, few-shot
-    // context) are persisted once in canonical history. Routes without native
-    // support receive them without the Anthropic-only `clear_at` field, and
-    // few-shot context as a user-role message so it is never folded into the
-    // top-level system prompt.
+    // context) and editor context are persisted once in canonical history.
+    // Editor context is always sent as user-role context. Routes without
+    // native turn-scoped support receive the markers without the
+    // Anthropic-only `clear_at` field, and few-shot context as a user-role
+    // message so it is never folded into the top-level system prompt.
     let turn_scoped_system_messages = turn_snapshot.capabilities.turn_scoped_system_messages;
     if request_context_needs_wire_translation(&request_messages, turn_scoped_system_messages) {
         translate_request_context_for_wire(
             Arc::make_mut(&mut request_messages).as_mut_slice(),
             turn_scoped_system_messages,
         );
-    }
-
-    let request_context_message = ctx.context_manager.request_editor_context_message();
-    if request_context_message.is_some() {
-        let messages = Arc::unwrap_or_clone(request_messages);
-        request_messages = Arc::new(prepend_request_context_message(messages, request_context_message));
     }
     let request_plan = build_harness_request_plan(HarnessRequestPlanInput {
         messages: request_messages,
@@ -922,7 +920,99 @@ mod tests {
         assert!(non_runtime_messages[0].content.as_text().contains("- Active file: src/main.rs"));
         assert!(non_runtime_messages[0].content.as_text().contains("- Language: Rust"));
         assert_eq!(non_runtime_messages[1], uni::Message::user("hello".to_string()));
-        assert_eq!(built.continuation_messages.as_slice(), [uni::Message::user("hello".to_string())]);
+        // Canonical history keeps the block as a system-role context message so
+        // user-turn logic never treats it as user input.
+        assert_eq!(built.continuation_messages.len(), 2);
+        assert_eq!(built.continuation_messages[0].role, uni::MessageRole::System);
+        assert_eq!(built.continuation_messages[0].content, non_runtime_messages[0].content);
+        assert_eq!(built.continuation_messages[1], uni::Message::user("hello".to_string()));
+    }
+
+    fn editor_snapshot_for(workspace: &std::path::Path, file: &str) -> EditorContextSnapshot {
+        EditorContextSnapshot {
+            workspace_root: Some(PathBuf::from(workspace)),
+            active_file: Some(EditorFileContext {
+                path: workspace.join(file).display().to_string(),
+                language_id: Some("rust".to_string()),
+                line_range: None,
+                dirty: false,
+                truncated: false,
+                selection: None,
+            }),
+            ..EditorContextSnapshot::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn editor_context_changes_are_appended_at_user_turn_boundaries() {
+        let workspace = tempfile::TempDir::new().expect("workspace");
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.context_manager.set_workspace_root(workspace.path());
+        let ide_config = vtcode_config::IdeContextConfig::default();
+        ctx.context_manager
+            .set_editor_context_snapshot(Some(editor_snapshot_for(workspace.path(), "src/main.rs")), Some(&ide_config));
+        ctx.working_history.push(uni::Message::user("hello".to_string()));
+
+        let snapshot = capture_turn_request_snapshot(&mut ctx, "noop-model", false);
+        let first = build_turn_request(&mut ctx, 1, "noop-model", &snapshot, Some(320), None, false)
+            .await
+            .expect("first request should build");
+        let first_messages = non_runtime_request_messages(&first.request);
+        assert!(first_messages[0].content.as_text().contains("- Active file: src/main.rs"));
+
+        // The user switches files while the agent is mid-turn: the request
+        // prefix already sent must not change.
+        ctx.working_history.push(uni::Message::assistant_with_tools(
+            String::new(),
+            vec![uni::ToolCall::function(
+                "call_1".to_string(),
+                "read_file".to_string(),
+                "{}".to_string(),
+            )],
+        ));
+        ctx.working_history
+            .push(uni::Message::tool_response("call_1".to_string(), "contents".to_string()));
+        ctx.context_manager
+            .set_editor_context_snapshot(Some(editor_snapshot_for(workspace.path(), "src/lib.rs")), Some(&ide_config));
+        let second = build_turn_request(&mut ctx, 2, "noop-model", &snapshot, Some(320), None, false)
+            .await
+            .expect("mid-turn request should build");
+        let second_messages = non_runtime_request_messages(&second.request);
+        assert_eq!(&second_messages[..first_messages.len()], first_messages.as_slice());
+        assert!(
+            !second_messages
+                .iter()
+                .any(|message| message.content.as_text().contains("- Active file: src/lib.rs")),
+            "a mid-turn snapshot change waits for the next user turn"
+        );
+
+        ctx.working_history.push(uni::Message::assistant("done".to_string()));
+        ctx.working_history.push(uni::Message::user("next".to_string()));
+        let third = build_turn_request(&mut ctx, 3, "noop-model", &snapshot, Some(320), None, false)
+            .await
+            .expect("next-turn request should build");
+        let third_messages = non_runtime_request_messages(&third.request);
+        let prior_len = third_messages.len() - 2;
+        assert!(third_messages[..prior_len].starts_with(&second_messages[..second_messages.len() - 1]));
+        assert_eq!(third_messages[prior_len].role, uni::MessageRole::User);
+        assert!(
+            third_messages[prior_len]
+                .content
+                .as_text()
+                .contains("- Active file: src/lib.rs")
+        );
+        assert_eq!(third_messages[prior_len + 1], uni::Message::user("next".to_string()));
+
+        // An unchanged snapshot adds nothing on the following turn.
+        ctx.working_history.push(uni::Message::assistant("ok".to_string()));
+        ctx.working_history.push(uni::Message::user("again".to_string()));
+        let fourth = build_turn_request(&mut ctx, 4, "noop-model", &snapshot, Some(320), None, false)
+            .await
+            .expect("unchanged-snapshot request should build");
+        let fourth_messages = non_runtime_request_messages(&fourth.request);
+        assert_eq!(fourth_messages.len(), third_messages.len() + 2);
+        assert_eq!(fourth_messages.last(), Some(&uni::Message::user("again".to_string())));
     }
 
     #[tokio::test]
@@ -1382,14 +1472,26 @@ mod tests {
 
         assert_eq!(second.request.previous_response_id, None);
         let non_runtime_messages = non_runtime_request_messages(&second.request);
-        assert_eq!(non_runtime_messages.len(), 3);
+        // The first request's prefix is replayed unchanged; the new snapshot is
+        // attached to the new user turn instead of rewriting messages[0].
+        let first_messages = non_runtime_request_messages(&first.request);
+        assert_eq!(non_runtime_messages.len(), 4);
+        assert_eq!(&non_runtime_messages[..2], first_messages.as_slice());
         assert_eq!(non_runtime_messages[0].role, uni::MessageRole::User);
-        assert!(non_runtime_messages[0].content.as_text().contains("## Active Editor Context"));
-        assert!(non_runtime_messages[0].content.as_text().contains("- Active file: src/lib.rs"));
+        assert!(non_runtime_messages[0].content.as_text().contains("- Active file: src/main.rs"));
         assert_eq!(non_runtime_messages[1], uni::Message::user("hello".to_string()));
-        assert_eq!(non_runtime_messages[2], uni::Message::user("continue".to_string()));
+        assert_eq!(non_runtime_messages[2].role, uni::MessageRole::User);
+        assert!(non_runtime_messages[2].content.as_text().contains("## Active Editor Context"));
+        assert!(non_runtime_messages[2].content.as_text().contains("- Active file: src/lib.rs"));
+        assert_eq!(non_runtime_messages[3], uni::Message::user("continue".to_string()));
+        let user_turns: Vec<_> = second
+            .continuation_messages
+            .iter()
+            .filter(|message| message.role == uni::MessageRole::User)
+            .cloned()
+            .collect();
         assert_eq!(
-            second.continuation_messages.as_slice(),
+            user_turns,
             [
                 uni::Message::user("hello".to_string()),
                 uni::Message::user("continue".to_string()),

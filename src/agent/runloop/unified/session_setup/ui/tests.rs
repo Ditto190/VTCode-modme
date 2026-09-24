@@ -131,19 +131,19 @@ fn structured_resume_lines_fallback_to_reasoning_details() {
 }
 
 #[test]
-fn structured_resume_lines_omit_persisted_few_shot_context() {
+fn structured_resume_lines_omit_persisted_request_context() {
     let few_shot = format!("{}\n### patch-edit\nexample body", vtcode_core::prompts::FEW_SHOT_SECTION_HEADER);
+    let editor = format!("{}\n- Active file: src/parser.rs", vtcode_core::EDITOR_CONTEXT_PROMPT_HEADER);
     let history = vec![
+        uni::Message::system(editor),
         uni::Message::user("edit the parser".to_string()),
         uni::Message::turn_scoped_system(few_shot),
         uni::Message::assistant("done".to_string()),
     ];
     let lines = build_structured_resume_lines(&history, true);
-    assert!(
-        !lines
-            .iter()
-            .any(|line| line.text.contains("example body") || line.text == "System:")
-    );
+    assert!(!lines.iter().any(|line| line.text.contains("example body")
+        || line.text.contains("src/parser.rs")
+        || line.text == "System:"));
     assert!(lines.iter().any(|line| line.text.contains("edit the parser")));
     assert!(lines.iter().any(|line| line.text.contains("done")));
 }

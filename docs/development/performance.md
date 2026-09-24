@@ -43,8 +43,8 @@ caches reject inserts. Keep these accounting rules intact when changing cache
 entry representations.
 
 Clean request histories are borrowed and shared with continuation state through
-`Arc<Vec<Message>>`. Copy only when editor/few-shot context must be injected or
-the provider requires compaction. This keeps the common no-injection path from
+`Arc<Vec<Message>>`. Copy only when persisted editor/few-shot context must be
+shaped for the route or the provider requires compaction. This keeps the common no-injection path from
 allocating multiple equivalent histories while preserving the existing
 normalization and continuation boundaries.
 
