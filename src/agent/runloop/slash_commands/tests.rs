@@ -76,12 +76,18 @@ async fn checkpoint_navigation_commands_dispatch_locally() {
     let workspace = tempfile::tempdir().expect("workspace");
     let mut renderer = renderer_for_tests();
 
-    for command in ["redo", "rewind-recover"] {
-        let outcome = handle_slash_command(command, &mut renderer, workspace.path())
-            .await
-            .expect("checkpoint command should parse");
-        assert!(matches!(outcome, SlashCommandOutcome::Redo), "{command} must dispatch locally");
-    }
+    let outcome = handle_slash_command("redo", &mut renderer, workspace.path())
+        .await
+        .expect("checkpoint command should parse");
+    assert!(matches!(outcome, SlashCommandOutcome::Redo), "redo must dispatch locally");
+
+    let outcome = handle_slash_command("rewind-recover", &mut renderer, workspace.path())
+        .await
+        .expect("checkpoint command should parse");
+    assert!(
+        matches!(outcome, SlashCommandOutcome::RewindRecover),
+        "rewind-recover must use a pending-only outcome, not Redo"
+    );
 
     let outcome = handle_slash_command("rewind", &mut renderer, workspace.path())
         .await

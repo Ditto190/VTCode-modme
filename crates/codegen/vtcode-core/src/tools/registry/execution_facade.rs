@@ -735,12 +735,19 @@ impl ToolRegistry {
         prevalidated: bool,
         exec_settlement_mode: ExecSettlementMode,
     ) -> Result<Value> {
-        crate::core::agent::snapshots::declare_prompt_edit(
+        if let Err(error) = crate::core::agent::snapshots::declare_prompt_edit(
             self.harness_context_snapshot().session_id,
             name.to_owned(),
             args.clone(),
         )
-        .await?;
+        .await
+        {
+            tracing::warn!(
+                tool = %name,
+                error = %error,
+                "Checkpoint pre-image capture failed; rewind may not restore this edit"
+            );
+        }
         // PERFORMANCE OPTIMIZATION: Use memory pool for string allocations if enabled
         let _pool_guard = if self.optimization_config.memory_pool.enabled {
             Some(self.memory_pool.get_string())

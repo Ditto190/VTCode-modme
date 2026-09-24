@@ -1233,11 +1233,37 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         .min(working_history.len());
                     let conversation: Vec<_> = working_history[..prefix].iter().map(SessionMessage::from).collect();
                     let session_id = tool_registry.harness_context_snapshot().session_id;
-                    let lease = harness_try!(
-                        manager
-                            .begin_prompt(next_checkpoint_turn, &session_id, &next_turn_input, &conversation)
-                            .await
-                    );
+                    let lease = match manager
+                        .begin_prompt(next_checkpoint_turn, &session_id, &next_turn_input, &conversation)
+                        .await
+                    {
+                        Ok(lease) => lease,
+                        Err(err) => {
+                            tracing::warn!(error = %err, "Checkpoint unavailable; prompt retained in input");
+                            let _ = renderer.line(
+                                MessageStyle::Error,
+                                &format!("Prompt not sent; checkpoint unavailable: {err:#}"),
+                            );
+                            // The prompt message was already appended to history by the
+                            // interaction loop (or the approved-plan handoff). Remove it
+                            // so a retry does not duplicate, and restore the text.
+                            if let Some(index) = completed_turn_prompt_message_index {
+                                if index < working_history.len() {
+                                    working_history.truncate(index);
+                                }
+                                handle.set_input(next_turn_input.clone());
+                                handle.force_redraw();
+                            } else if working_history.last().is_some_and(|message| {
+                                message.role == MessageRole::User
+                                    && message.content.as_text().trim() == next_turn_input.trim()
+                            }) {
+                                working_history.pop();
+                                handle.set_input(next_turn_input.clone());
+                                handle.force_redraw();
+                            }
+                            continue;
+                        }
+                    };
                     if let Some(emitter) = harness_emitter.as_ref() {
                         let _ = emitter.emit(harness_event(
                             vtcode_core::exec::events::HarnessEventKind::SnapshotCreated,

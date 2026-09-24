@@ -11,16 +11,22 @@ A new prompt clears redo. Esc cancels the selector. The action picker also
 offers conversation-only and code-only restoration.
 
 Wait for the agent to finish before restoring. If a restore is interrupted, run
-`/rewind-recover` before continuing. Recovery is journaled before file writes;
+`/rewind-recover` before continuing. `/rewind-recover` is pending-only: it
+resumes the interrupted restore and fails closed when nothing is pending,
+never touching the redo stack. Recovery is journaled before file writes;
 conversation changes follow successful file restoration. New combined history
 starts with prompts captured by this build, not legacy file-only checkpoints.
 
 Capture is bounded. Ignored, remote, or uncaptured files are not protected.
 Known local write/edit paths are declared before mutation, including absent files;
-binary files are restored as bytes. On Unix, literal output redirects in simple
+binary files are restored as bytes. Capture failures never block the tool call:
+unresolvable paths are skipped with a warning and the edit still runs, so rewind
+may not restore that edit. On Unix, literal output redirects in simple
 POSIX shell commands (including `printf > file`, `cat > file` with a here-document,
 and `>> file`) also declare their targets before execution, relative to the tool's
-working directory. Repeated writes preserve the first pre-image in the prompt.
+working directory. Absolute targets are canonicalized (macOS `/var` vs
+`/private/var`, symlinked workspaces, nearest existing ancestor for not-yet-created
+files) and anything still outside the workspace is skipped. Repeated writes preserve the first pre-image in the prompt.
 Dynamic destinations, scripts that change directory, nested shell scripts,
 interpreter file writes and other opaque shell/MCP writes still need pre-existing
 capture coverage. These commands do not call a model.
@@ -30,9 +36,11 @@ records for shell-created files. They cannot safely infer which files to delete;
 use a new prompt checkpoint to validate this behavior.
 
 The interactive runtime captures the conversation prefix before the user prompt
-and records file pre-images after tool argument normalization. Native list modals
-show only the current branch. Redo records and interrupted operations persist in
-the checkpoint directory. A workspace lease excludes concurrent turns/restores.
+and records file pre-images after tool argument normalization. If checkpointing
+itself fails, the prompt is not sent: the message is removed from history and
+restored into the input field so nothing is lost. Native list modals
+show only the current branch. Consumed or discarded redo records are retired
+and their storage reclaimed instead of leaking. A workspace lease excludes concurrent turns/restores.
 Ignore rules are pinned across each combined restoration.
 
 Legacy CLI revert APIs retain their selected-file checkpoint semantics. New

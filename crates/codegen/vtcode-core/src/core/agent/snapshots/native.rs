@@ -78,6 +78,34 @@ fn file_records(manifest: &filesnap::Manifest, workspace: &Path, engine: &str) -
 
 // Only literal POSIX-shell redirects whose cwd stays unchanged can provide
 // reliable preimages. Never execute or expand shell text to discover a path.
+fn canonicalize_for_strip(path: &Path) -> PathBuf {
+    if let Ok(canonical) = canonicalize(path) {
+        return canonical;
+    }
+    // The target may not exist yet (creation). Walk up to the nearest
+    // existing ancestor so symlinked workspaces (`/var` vs `/private/var`)
+    // still resolve inside the workspace instead of being skipped.
+    let mut ancestor = path.parent();
+    while let Some(dir) = ancestor {
+        if dir.as_os_str().is_empty() {
+            break;
+        }
+        if let Ok(canonical_parent) = canonicalize(dir)
+            && let Ok(stripped) = path.strip_prefix(dir)
+        {
+            let mut joined = canonical_parent;
+            joined.push(stripped);
+            return joined;
+        }
+        ancestor = dir.parent();
+    }
+    path.to_path_buf()
+}
+
+fn recovery_path(storage: &Path, snapshot: &str) -> PathBuf {
+    storage.join(format!("turn_recovery_{snapshot}.json"))
+}
+
 fn shell_redirect_paths(args: &serde_json::Value) -> BTreeSet<PathBuf> {
     use crate::command_safety::shell_parser::contains_dynamic_shell_syntax;
 
@@ -214,7 +242,9 @@ pub async fn declare_prompt_edit(session: String, name: String, args: serde_json
             }
             let cwd = crate::tools::command_args::working_dir_text(&args)
                 .map_or_else(|| active.workspace.clone(), |path| active.workspace.join(path));
-            let cwd = canonicalize(&cwd)?;
+            // A missing workdir must not abort capture; fall back so the tool
+            // still runs and other paths are still tracked.
+            let cwd = canonicalize(&cwd).unwrap_or(cwd);
             paths.extend(redirects.into_iter().map(|path| cwd.join(path)));
         } else {
             for key in [
@@ -254,26 +284,41 @@ pub async fn declare_prompt_edit(session: String, name: String, args: serde_json
         let before = store.manifest(target.manifest_id())?;
         let ignore = filesnap::load_ignore(&active.workspace);
         for path in paths {
-            // Shells may also redirect to devices or outside this workspace.
-            // Those paths are outside this checkpoint's restore authority.
-            if is_shell
-                && (path.is_absolute() && !path.starts_with(&active.workspace)
-                    || path.components().any(|part| part == Component::ParentDir))
-            {
+            if path.components().any(|part| part == Component::ParentDir) {
                 continue;
             }
+            // Canonicalize absolute targets the same way `normalize_path` does
+            // so macOS `/var` vs `/private/var` and symlinked workspaces do not
+            // fail checkpointing. Fall back to the raw path for not-yet-created
+            // files. Anything still outside the workspace is skipped, never fatal.
             let relative = if path.is_absolute() {
-                path.strip_prefix(&active.workspace)
-                    .context("Edit outside checkpoint workspace")?
-                    .to_path_buf()
+                let canonical = canonicalize_for_strip(&path);
+                if let Ok(relative) = canonical.strip_prefix(&active.workspace) {
+                    relative.to_path_buf()
+                } else if let Ok(relative) = path.strip_prefix(&active.workspace) {
+                    relative.to_path_buf()
+                } else {
+                    continue;
+                }
             } else {
                 path
             };
-            let path = SnapshotManager::checked_file_path(&active.workspace, &active.storage, &relative)?;
+            let path = match SnapshotManager::checked_file_path(&active.workspace, &active.storage, &relative) {
+                Ok(path) => path,
+                Err(error) => {
+                    tracing::debug!(%error, "Skipping checkpoint pre-image outside restore authority");
+                    continue;
+                }
+            };
             if filesnap::is_ignored(&ignore, &path) {
                 continue;
             }
-            store.declare_paths(&active.watch, &active.engine, std::slice::from_ref(&path))?;
+            if let Err(error) =
+                store.declare_paths(&active.watch, &active.engine, std::slice::from_ref(&path))
+            {
+                tracing::debug!(%error, "Skipping checkpoint watch declaration");
+                continue;
+            }
             let key = path.to_string_lossy();
             // The first preimage owns the turn boundary. A second write must
             // never replace a recorded absence with the newly created bytes.
@@ -283,15 +328,23 @@ pub async fn declare_prompt_edit(session: String, name: String, args: serde_json
             let image = match fs::read(&path) {
                 Ok(bytes) => filesnap::PreEditImage::Existed(bytes),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => filesnap::PreEditImage::DidNotExist,
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    // Directories and other non-file targets have no pre-image;
+                    // skip them rather than failing the turn.
+                    tracing::debug!(%error, path = %path.display(), "Skipping checkpoint pre-image for non-file target");
+                    continue;
+                }
             };
-            filesnap::declare_edits(
+            if let Err(error) = filesnap::declare_edits(
                 &store,
                 &active.engine,
                 &active.engine,
                 &filesnap::TurnScope::at(&active.workspace),
                 vec![(path, image)],
-            )?;
+            ) {
+                tracing::debug!(%error, "Skipping checkpoint pre-image declaration");
+                continue;
+            }
         }
         let target = store.target_for_turn(&active.engine)?.context("Missing active checkpoint")?;
         let manifest = store.manifest(target.manifest_id())?;
@@ -304,6 +357,24 @@ pub async fn declare_prompt_edit(session: String, name: String, args: serde_json
 }
 
 impl SnapshotManager {
+    async fn retire_recovery_record(&self, snapshot: &str) {
+        if uuid::Uuid::parse_str(snapshot).is_err() {
+            return;
+        }
+        let record = recovery_path(&self.storage_dir, snapshot);
+        match self.retire_snapshot(&record).await {
+            Ok(()) => {}
+            Err(error) => {
+                let is_missing = error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound);
+                if !is_missing {
+                    tracing::warn!(%error, "Failed to retire consumed recovery record");
+                }
+            }
+        }
+    }
+
     fn navigation_path(&self, session: &str) -> Result<PathBuf> {
         anyhow::ensure!(session.len() <= 80 && !session.is_empty(), "Invalid session ID");
         let key: String = session.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
@@ -315,6 +386,15 @@ impl SnapshotManager {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Navigation::default()),
             Err(error) => Err(error.into()),
         }
+    }
+
+    fn build_ignore(&self, policy: &str) -> Result<filesnap::Gitignore> {
+        anyhow::ensure!(policy.len() <= 1024 * 1024, "Ignore policy is too large");
+        let mut builder = filesnap::GitignoreBuilder::new(&self.canonical_workspace);
+        for line in policy.lines() {
+            builder.add_line(None, line)?;
+        }
+        Ok(builder.build()?)
     }
     /// Save the exact conversation prefix and workspace before sending a prompt.
     pub async fn begin_prompt(
@@ -386,7 +466,9 @@ impl SnapshotManager {
             },
         )?;
         state.active.push(turn);
-        state.redo.clear();
+        for entry in std::mem::take(&mut state.redo) {
+            self.retire_recovery_record(&entry.snapshot).await;
+        }
         atomic_json(&self.navigation_path(session)?, &state)?;
         active_map()
             .lock()
@@ -425,21 +507,11 @@ impl SnapshotManager {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(error.into()),
         };
-        let build_ignore = |policy: &str| -> Result<filesnap::Gitignore> {
-            anyhow::ensure!(policy.len() <= 1024 * 1024, "Ignore policy is too large");
-            let mut builder = filesnap::GitignoreBuilder::new(&self.canonical_workspace);
-            for line in policy.lines() {
-                builder.add_line(None, line)?;
-            }
-            Ok(builder.build()?)
-        };
-        let ignore = build_ignore(&policy)?;
+        let ignore = self.build_ignore(&policy)?;
         let mut state = self.navigation(session)?;
         let load_recovery = |saved: &Recovery| -> Result<StoredSnapshot> {
             uuid::Uuid::parse_str(&saved.snapshot)?;
-            Ok(serde_json::from_slice(&fs::read(
-                self.storage_dir.join(format!("turn_recovery_{}.json", saved.snapshot)),
-            )?)?)
+            Ok(serde_json::from_slice(&fs::read(recovery_path(&self.storage_dir, &saved.snapshot))?)?)
         };
         if let Some(pending) = state.pending.clone() {
             anyhow::ensure!(turn.is_none(), "Interrupted rewind; run /rewind-recover");
@@ -447,11 +519,12 @@ impl SnapshotManager {
                 .restore_stored_snapshot_with_ignore(
                     load_recovery(&pending)?,
                     RevertScope::Both,
-                    &build_ignore(&pending.policy)?,
+                    &self.build_ignore(&pending.policy)?,
                 )
                 .await?;
             state.pending = None;
             atomic_json(&self.navigation_path(session)?, &state)?;
+            self.retire_recovery_record(&pending.snapshot).await;
             return Ok(restored);
         }
         let (targets, next_active) = if let Some(turn) = turn {
@@ -498,7 +571,7 @@ impl SnapshotManager {
             snapshot: uuid::Uuid::new_v4().to_string(),
             active: state.active.clone(),
         };
-        atomic_json(&self.storage_dir.join(format!("turn_recovery_{}.json", saved.snapshot)), &rescue)?;
+        atomic_json(&recovery_path(&self.storage_dir, &saved.snapshot), &rescue)?;
         state.pending = Some(saved.clone());
         atomic_json(&self.navigation_path(session)?, &state)?;
         let destination = CheckpointRestore {
@@ -510,8 +583,10 @@ impl SnapshotManager {
                 self.restore_stored_snapshot_with_ignore(rescue, RevertScope::Both, &ignore)
                     .await
                     .context(format!("Rewind failed ({error}); recovery failed; run /rewind-recover"))?;
+                let failed = saved.snapshot.clone();
                 state.pending = None;
                 atomic_json(&self.navigation_path(session)?, &state)?;
+                self.retire_recovery_record(&failed).await;
                 return Err(error.context("Rewind failed; original files recovered"));
             }
         }
@@ -520,10 +595,53 @@ impl SnapshotManager {
         if turn.is_some() {
             state.redo.push(saved);
         } else {
-            state.redo.pop();
+            // Redo writes a fresh rescue record for crash recovery before
+            // restoring. On success neither the consumed redo entry nor the
+            // transient rescue is needed, so retire both instead of leaking.
+            self.retire_recovery_record(&saved.snapshot).await;
+            if let Some(used) = state.redo.pop() {
+                self.retire_recovery_record(&used.snapshot).await;
+            }
         }
         atomic_json(&self.navigation_path(session)?, &state)?;
         Ok(destination)
+    }
+
+    /// Complete an interrupted rewind only. Unlike [`Self::navigate_prompt`],
+    /// this never touches the redo stack, so `/rewind-recover` cannot overwrite
+    /// edits made after a completed rewind when there is nothing to recover.
+    pub async fn recover_pending_rewind(&self, session: &str) -> Result<CheckpointRestore> {
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.storage_dir.join("rewind.lock"))?;
+        lock.try_lock().context("Wait for the current turn to finish")?;
+        // Fail closed when no recovery is pending; never fall back to redo.
+        let state = self.navigation(session)?;
+        let pending = state.pending.clone().context("No interrupted rewind to recover")?;
+        let stored: StoredSnapshot = {
+            uuid::Uuid::parse_str(&pending.snapshot)?;
+            serde_json::from_slice(&fs::read(recovery_path(&self.storage_dir, &pending.snapshot))?)?
+        };
+        let policy = self.build_ignore(&pending.policy)?;
+        let restored = self
+            .restore_stored_snapshot_with_ignore(stored, RevertScope::Both, &policy)
+            .await?;
+        let mut state = self.navigation(session)?;
+        // Only clear if the same pending is still present; a concurrent rewind
+        // must not lose its recovery record.
+        if state
+            .pending
+            .as_ref()
+            .is_some_and(|current| current.snapshot == pending.snapshot)
+        {
+            state.pending = None;
+            atomic_json(&self.navigation_path(session)?, &state)?;
+            self.retire_recovery_record(&pending.snapshot).await;
+        }
+        Ok(restored)
     }
 }
 
@@ -728,6 +846,75 @@ mod tests {
         let resumed = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
         let restored = resumed.navigate_prompt(None, RevertScope::Both, &session, &original).await?;
         assert_eq!(restored.conversation, current);
+        Ok(())
+    }
+
+    fn live_recovery_files(workspace: &Path) -> Vec<PathBuf> {
+        let storage = workspace.join(".vtcode").join("checkpoints");
+        fs::read_dir(&storage)
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                    .filter(|path| {
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.starts_with("turn_recovery_") && name.ends_with(".json"))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn consumed_recovery_records_are_retired_not_leaked() -> Result<()> {
+        let dir = TempDir::new()?;
+        let manager = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
+        let session = uuid::Uuid::new_v4().to_string();
+        let original = vec![SessionMessage::new(MessageRole::User, "original")];
+        let lease = manager.begin_prompt(1, &session, "first", &original).await?;
+        drop(lease);
+        let second = vec![SessionMessage::new(MessageRole::User, "second")];
+        let lease = manager.begin_prompt(2, &session, "second", &second).await?;
+        drop(lease);
+        let current = vec![SessionMessage::new(MessageRole::User, "current")];
+
+        assert!(live_recovery_files(dir.path()).is_empty());
+        let restored = manager.navigate_prompt(Some(2), RevertScope::Both, &session, &current).await?;
+        assert_eq!(live_recovery_files(dir.path()).len(), 1);
+
+        let restored = manager
+            .navigate_prompt(None, RevertScope::Both, &session, &restored.conversation)
+            .await?;
+        assert_eq!(restored.conversation, current);
+        assert!(live_recovery_files(dir.path()).is_empty(), "consumed redo must retire its recovery record");
+
+        // A new rewind followed by a new prompt must also retire the discarded redo.
+        let restored = manager.navigate_prompt(Some(2), RevertScope::Both, &session, &current).await?;
+        assert_eq!(live_recovery_files(dir.path()).len(), 1);
+        let _lease = manager.begin_prompt(3, &session, "third", &restored.conversation).await?;
+        assert!(live_recovery_files(dir.path()).is_empty(), "begin_prompt must retire discarded redo records");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn recover_pending_fails_closed_without_touching_redo() -> Result<()> {
+        let dir = TempDir::new()?;
+        let manager = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
+        let session = uuid::Uuid::new_v4().to_string();
+        let original = vec![SessionMessage::new(MessageRole::User, "original")];
+        let lease = manager.begin_prompt(1, &session, "first", &original).await?;
+        drop(lease);
+        let current = vec![SessionMessage::new(MessageRole::User, "current")];
+
+        // No interrupted rewind: recovery must fail and must not consume redo.
+        assert!(manager.recover_pending_rewind(&session).await.is_err());
+        let restored = manager.navigate_prompt(Some(1), RevertScope::Both, &session, &current).await?;
+        assert!(manager.recover_pending_rewind(&session).await.is_err());
+        // Redo is still intact for the completed rewind.
+        let redone = manager
+            .navigate_prompt(None, RevertScope::Both, &session, &restored.conversation)
+            .await?;
+        assert_eq!(redone.conversation, current);
         Ok(())
     }
 }
