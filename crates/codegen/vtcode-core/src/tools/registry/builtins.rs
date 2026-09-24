@@ -495,17 +495,12 @@ fn register_get_errors(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegis
 
 #[distributed_slice(BUILTIN_TOOLS)]
 fn register_apply_patch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
-    ToolRegistration::new(
-        tools::APPLY_PATCH,
-        CapabilityLevel::Editing,
-        false,
-        ToolRegistry::apply_patch_executor,
-    )
-    .with_description(crate::tools::apply_patch::with_semantic_anchor_guidance(
-        "Apply patches to files after permission checks. IMPORTANT: Use VT Code patch format (*** Begin Patch, *** Update File: path, @@ hunks with -/+ lines, *** End Patch), NOT standard unified diff (---/+++ format). Every patch path must be workspace-relative; never use absolute paths, `..`, or traversal-like forms."
-    ))
-    .with_parameter_schema(apply_patch_parameters())
-    .with_permission(ToolPolicy::Prompt)
+    ToolRegistration::new(tools::APPLY_PATCH, CapabilityLevel::Editing, false, ToolRegistry::apply_patch_executor)
+        .with_description(crate::tools::apply_patch::with_semantic_anchor_guidance(
+            crate::tools::apply_patch::APPLY_PATCH_TOOL_DESCRIPTION,
+        ))
+        .with_parameter_schema(apply_patch_parameters())
+        .with_permission(ToolPolicy::Prompt)
 }
 
 // ---------------------------------------------------------------------------

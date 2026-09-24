@@ -37,8 +37,14 @@ pub const SEMANTIC_ANCHOR_GUIDANCE: &str =
 /// rejects. This mirrors the `input` description so both alias fields carry
 /// identical, complete format guidance (see checkpoint turn_615 for the
 /// failure this prevents).
-pub const APPLY_PATCH_ALIAS_DESCRIPTION: &str = "Patch in VT Code format (*** Begin Patch, *** Update File: path, @@ hunk, -/+ lines, *** End Patch). Same envelope as 'input'; do NOT use unified diff (--- /+++ format). Every patch path must be workspace-relative; never use absolute paths, `..`, or traversal-like forms.";
-pub const DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION: &str = "Patch in VT Code format: *** Begin Patch, *** Update File: path, @@ hunk, -/+ lines, *** End Patch. Every patch path must be workspace-relative; never use absolute paths, `..`, or traversal-like forms.";
+pub const APPLY_PATCH_ALIAS_DESCRIPTION: &str = "Patch in VT Code format (*** Begin Patch, *** Update File: path, @@ hunk, -/+ lines, *** End Patch). Same envelope as 'input'; standard unified diffs (--- /+++ format) are rejected. Every patch path must be workspace-relative; absolute paths, `..`, and traversal-like forms are rejected.";
+pub const DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION: &str = "Patch in VT Code format: *** Begin Patch, *** Update File: path, @@ hunk, -/+ lines, *** End Patch. Every patch path must be workspace-relative; absolute paths, `..`, and traversal-like forms are rejected.";
+/// Model-visible description of the `apply_patch` tool. It leads with the
+/// accepted envelope so the model writes the right format on the first try,
+/// and states the unified-diff rejection and path rules as plain facts
+/// instead of shouted warnings. Registration sites append
+/// [`SEMANTIC_ANCHOR_GUIDANCE`] via [`with_semantic_anchor_guidance`].
+pub const APPLY_PATCH_TOOL_DESCRIPTION: &str = "Apply a patch in VT Code format (*** Begin Patch / *** Update File: path / @@ hunks with -/+ lines / *** End Patch); standard unified diffs (---/+++ format) are rejected. *** Add File: path, *** Delete File: path, and *** Move to: path (after *** Update File) are also supported. Every patch path must be workspace-relative; absolute paths, `..`, and traversal-like forms are rejected. Changes are applied after permission checks.";
 
 /// Default model-visible preview budget for function-tool results.
 pub const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
@@ -384,6 +390,23 @@ mod tests {
             .as_str()
             .expect("input description");
         assert!(input_description.contains(SEMANTIC_ANCHOR_GUIDANCE));
+    }
+
+    #[test]
+    fn apply_patch_tool_description_leads_with_format_and_stays_calm() {
+        assert!(APPLY_PATCH_TOOL_DESCRIPTION.starts_with("Apply a patch in VT Code format (*** Begin Patch"));
+        assert!(APPLY_PATCH_TOOL_DESCRIPTION.contains("unified diffs"));
+        assert!(APPLY_PATCH_TOOL_DESCRIPTION.contains("workspace-relative"));
+        assert!(APPLY_PATCH_TOOL_DESCRIPTION.contains("permission checks"));
+        for description in [
+            APPLY_PATCH_TOOL_DESCRIPTION,
+            APPLY_PATCH_ALIAS_DESCRIPTION,
+            DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION,
+        ] {
+            assert!(!description.contains("IMPORTANT"), "{description}");
+            assert!(!description.contains("NOT"), "{description}");
+            assert!(!description.contains("never"), "{description}");
+        }
     }
 
     #[test]
