@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use serde_json::Value;
 use vtcode_core::config::constants::tools;
+use vtcode_core::tools::error_messages::agent_execution::LOOP_DETECTION_PREFIX;
 use vtcode_core::tools::registry::{ToolErrorType, ToolExecutionError};
 use vtcode_core::tools::tool_intent;
 
@@ -15,7 +16,7 @@ pub(super) fn is_loop_detection_status(status: &ToolExecutionStatus) -> bool {
         ToolExecutionStatus::Success { output, .. } => {
             output.get("loop_detected").and_then(|value| value.as_bool()).unwrap_or(false)
         }
-        ToolExecutionStatus::Failure { error } => error.message.contains("LOOP DETECTION"),
+        ToolExecutionStatus::Failure { error } => error.message.contains(LOOP_DETECTION_PREFIX),
         _ => false,
     }
 }

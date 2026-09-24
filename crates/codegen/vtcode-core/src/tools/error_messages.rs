@@ -8,18 +8,19 @@
 pub mod agent_execution {
     /// Marker used when planning workflow blocks a mutating tool call.
     pub const PLANNING_DENIED_CONTEXT: &str = "tool denied by planning workflow";
-    /// Prefix for loop detection failures.
-    pub const LOOP_DETECTION_PREFIX: &str = "LOOP DETECTION";
-    /// Canonical action-required line for loop detection blocks.
+    /// Prefix for loop detection failures. The runloop classifies a failed
+    /// tool status as a loop block by this prefix, so match on the constant.
+    pub const LOOP_DETECTION_PREFIX: &str = "Loop detection";
+    /// Canonical line stating the consequence of a loop detection block.
     pub const LOOP_RETRY_BLOCKED_LINE: &str =
-        "ACTION REQUIRED: DO NOT retry this tool call. The tool execution has been prevented to avoid infinite loops.";
+        "The call was not executed, and repeating it with the same parameters will be blocked again.";
 
     /// Build the canonical Planning workflow denial message.
     pub fn planning_workflow_denial_message(tool_name: &str) -> String {
         format!(
             "Tool '{tool_name}' execution failed: tool denied by planning workflow\n\n\
-             This tool is MUTATING and blocked during planning.\n\n\
-             What you CAN do during planning:\n\
+             This tool can modify the workspace, so it is blocked during planning.\n\n\
+             Available during planning:\n\
              - Read files: exec_command with readonly shell inspection commands such as sed, rg, ls, find, and git show\n\
              - Run readonly commands: cargo check, cargo test, git status, ls, grep, find, diff\n\
              - Search code: exec_command with rg or other readonly search commands\n\
@@ -81,7 +82,7 @@ mod tests {
     fn test_agent_execution_message_helpers() {
         let planning_msg = agent_execution::planning_workflow_denial_message("write_file");
         assert!(agent_execution::is_planning_active_denial(&planning_msg));
-        assert!(planning_msg.contains("MUTATING"));
+        assert!(planning_msg.contains("blocked during planning"));
         assert!(planning_msg.contains("cargo check"));
         assert!(planning_msg.contains("exec_command"));
         assert!(planning_msg.contains("apply_patch"));
@@ -92,8 +93,8 @@ mod tests {
         assert!(!planning_msg.contains("DO NOT retry this tool or use /plan off"));
 
         let loop_msg = agent_execution::loop_detection_block_message("read_file", 3, Some("base error"));
-        assert!(loop_msg.contains("LOOP DETECTION"));
-        assert!(loop_msg.contains("DO NOT retry"));
+        assert!(loop_msg.starts_with(agent_execution::LOOP_DETECTION_PREFIX));
+        assert!(loop_msg.contains(agent_execution::LOOP_RETRY_BLOCKED_LINE));
         assert!(loop_msg.contains("Original error: base error"));
     }
 }
