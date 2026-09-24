@@ -72,6 +72,7 @@ pub(crate) struct SessionState {
 }
 
 pub(crate) struct SessionUISetup {
+    pub settings_task_guard: BackgroundTaskGuard,
     pub renderer: AnsiRenderer,
     pub session: InlineSession,
     pub handle: InlineHandle,

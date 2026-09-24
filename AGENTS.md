@@ -7,7 +7,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 ## Core Workflow (repo-only)
 
 - Orient: read `.vtcode/memory/` (`gotchas.md`, `issues.md`, `library.md`, `decisions.md`) before acting; for self-bugs also read `.vtcode/logs/trajectory.jsonl` + `.vtcode/checkpoints`.
-- Reference `openai/codex` first for every task: query DeepWiki MCP (`deepwiki` in `.mcp.json` / `vtcode.toml [mcp.providers]`, e.g. "How does openai/codex implement <feature> in `codex-rs/`?"); if unavailable, fallback to `gh api repos/openai/codex/...` or `git fetch https://github.com/openai/codex`.
+- Only when the request touches core agent harness/agent logic (`src/agent/runloop/`, `vtcode-core` agent loop/tools/prompts, `agent.harness`/`automation.full_auto`), you may consult `openai/codex` via DeepWiki MCP (`deepwiki` in `.mcp.json` / `vtcode.toml [mcp.providers]`); otherwise skip. Fallback to `gh api repos/openai/codex/...` or `git fetch https://github.com/openai/codex` only if needed.
 - Implement surgically in the existing small crate; when adapting a Codex pattern cite source + commit (`codex-rs/...`, Apache-2.0 © 2025 OpenAI, https://github.com/openai/codex), preserve notices/state changes per Apache-2.0 §4, extend `scripts/templates/third-party-header.txt` + regen notices if substantive, and keep VT Code invariants (`ThreadEvent`, harness split, sandbox boundary).
 - Verify with `./scripts/check-dev.sh` + `cargo nextest run`; record durable learnings in `.vtcode/memory/` (local-only, gitignored).
 
@@ -109,7 +109,7 @@ After significant changes (new modules, convention shifts, discovered gotchas, p
 
 ## Project Memory
 
-Session-independent knowledge lives in `.vtcode/memory/` (gitignored, repo-local only): `gotchas.md`, `issues.md`, `library.md`, `decisions.md`, and `scratch.md`. Read these files when context is needed. Write durable learnings there. DeepWiki-first `openai/codex` pattern lives in `library.md` (2026-09-24). See `.vtcode/memory/README.md` for format rules.
+Session-independent knowledge lives in `.vtcode/memory/` (gitignored, repo-local only): `gotchas.md`, `issues.md`, `library.md`, `decisions.md`, and `scratch.md`. Read these files when context is needed. Write durable learnings there. Harness/agent-logic-only `openai/codex` pattern lives in `library.md` (2026-09-24). See `.vtcode/memory/README.md` for format rules.
 
 ## Build & Verification
 
@@ -145,5 +145,5 @@ Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profil
 
 - LLM providers: use the `adding-llm-providers` skill. The `/model` picker uses `ModelId::all_models()`; `builtin_model_presets()` is used by `ModelsManager`. Both may need updates.
 - New workspace crates: use the `adding-workspace-crate` skill. This affects more than `Cargo.toml`; all workspace path dependencies need `version` fields.
-- Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters. GitHub refs: prefer `gh` CLI over `webfetch`; for `openai/codex` reference prefer DeepWiki MCP first, `gh`/git-fetch fallback (see Core Workflow).
+- Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters. GitHub refs: prefer `gh` CLI over `webfetch`; for harness/agent-logic tasks, optional `openai/codex` via DeepWiki MCP or `gh`/git-fetch (see Core Workflow).
 - Cap large command output: `COMMAND 2>&1 | head -c 4000` — but never pipe verifier commands (`cargo check --locked`, `cargo fmt --all -- --check`, `cargo nextest run`); pass `max_output_tokens` instead, since a pipe masks the verifier's exit status and never clears the verification gate.

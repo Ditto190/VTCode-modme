@@ -8,6 +8,7 @@
 //! - Constraints: TD-005 is active for this surface; keep this file as an orchestration root and prefer responsibility-named support modules for new helper clusters.
 //! - Verify: `cargo check -p vtcode && cargo test -p vtcode --bin vtcode inline_events::tests`
 
+mod active_settings;
 mod header_context;
 mod local_agents;
 mod persistent_memory;
@@ -89,6 +90,7 @@ pub(crate) struct SessionUiLaunchOptions {
     pub full_auto: bool,
     pub skip_confirmations: bool,
     pub steering_sender: Option<UnboundedSender<SteeringMessage>>,
+    pub settings_sender: UnboundedSender<crate::agent::runloop::unified::session_settings::SessionSettingsControl>,
 }
 
 /// Whether transcript file links may open while an agent turn is active.
@@ -113,6 +115,7 @@ fn build_session_event_callback(
     state: Arc<state::CtrlCState>,
     notify: Arc<Notify>,
     steering_sender: Option<UnboundedSender<SteeringMessage>>,
+    settings_events: UnboundedSender<InlineEvent>,
     editor_open: Arc<EditorOpenDispatcher>,
     editor_workspace: PathBuf,
     exec_sessions: ExecSessionManager,
@@ -151,11 +154,20 @@ fn build_session_event_callback(
             }
         }
         InlineEvent::Steer(input) => {
+            if matches!(input.text.split_whitespace().next(), Some("/model" | "/effort")) {
+                let _ = settings_events.send(event.clone());
+                return;
+            }
             if !input.has_attachments()
                 && let Some(sender) = steering_sender.as_ref()
             {
                 let _ = sender.send(SteeringMessage::FollowUpInput(input.text.clone()));
             }
+        }
+        InlineEvent::Transient(
+            vtcode_ui::tui::app::TransientEvent::Submitted(_) | vtcode_ui::tui::app::TransientEvent::Cancelled,
+        ) => {
+            let _ = settings_events.send(event.clone());
         }
         _ => {}
     })
@@ -175,6 +187,7 @@ pub(crate) async fn initialize_session_ui(
         full_auto,
         skip_confirmations,
         steering_sender,
+        settings_sender,
     } = options;
 
     let lifecycle_hooks = if let Some(vt) = vt_cfg {
@@ -233,10 +246,12 @@ pub(crate) async fn initialize_session_ui(
     let ctrl_c_notify = Arc::new(Notify::new());
     let input_activity_counter = Arc::new(AtomicU64::new(0));
     let editor_open_dispatcher = Arc::new(EditorOpenDispatcher::new(immediate_file_open_allowed(vt_cfg)));
+    let (settings_event_sender, settings_event_receiver) = tokio::sync::mpsc::unbounded_channel();
     let interrupt_callback = build_session_event_callback(
         ctrl_c_state.clone(),
         ctrl_c_notify.clone(),
         steering_sender,
+        settings_event_sender,
         editor_open_dispatcher.clone(),
         config.workspace.clone(),
         session_state.tool_registry.exec_session_manager(),
@@ -331,6 +346,15 @@ pub(crate) async fn initialize_session_ui(
     }
 
     let handle = session.clone_inline_handle();
+    let settings_task_guard = BackgroundTaskGuard::new(tokio::spawn(active_settings::run(
+        settings_event_receiver,
+        settings_sender,
+        handle.clone(),
+        config.clone(),
+        vt_cfg.cloned(),
+        ctrl_c_state.clone(),
+        ctrl_c_notify.clone(),
+    )));
     // Merge prompt-template slash commands without blocking first paint.
     // The session spawns with built-ins; this one-shot task appends workspace
     // templates via `SetSlashCommands` before the user can open the palette.
@@ -583,6 +607,7 @@ pub(crate) async fn initialize_session_ui(
         .unwrap_or(1);
 
     Ok(SessionUISetup {
+        settings_task_guard,
         renderer,
         session,
         handle,

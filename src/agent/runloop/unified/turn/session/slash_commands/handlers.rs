@@ -16,6 +16,7 @@ mod control;
 mod diagnostics;
 #[path = "effort.rs"]
 mod effort;
+pub(crate) use effort::{effort_description, persist_effort_preference};
 #[path = "interactive.rs"]
 mod interactive;
 #[path = "local_server.rs"]

@@ -32,6 +32,7 @@ use crate::agent::runloop::welcome::SessionBootstrap;
 use vtcode_core::utils::ansi::AnsiRenderer;
 
 mod handlers;
+pub(crate) use handlers::{effort_description, persist_effort_preference};
 mod outcome_router;
 pub mod secrets;
 

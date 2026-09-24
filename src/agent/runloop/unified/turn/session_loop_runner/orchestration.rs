@@ -306,6 +306,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         } else {
             None
         };
+        let (settings_sender, mut settings_receiver) = mpsc::unbounded_channel();
         let session_ui_phase = vtcode_commons::startup_trace::phase_started();
         let ui_setup = initialize_session_ui(
             &config,
@@ -319,6 +320,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 full_auto,
                 skip_confirmations,
                 steering_sender,
+                settings_sender,
             },
         )
         .await;
@@ -392,6 +394,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let _background_subprocess_task_guard = ui_setup.background_subprocess_task_guard;
         let _startup_update_task_guard = ui_setup.startup_update_task_guard;
         let _editor_open_coordinator_task_guard = ui_setup.editor_open_coordinator_task_guard;
+        let _settings_task_guard = ui_setup.settings_task_guard;
         let editor_open_sender = ui_setup.editor_open_sender;
         let editor_open_dispatcher = ui_setup.editor_open_dispatcher;
         let startup_update_cached_notice = ui_setup.startup_update_cached_notice;
@@ -1338,7 +1341,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         harness_config.max_tool_retries,
                     );
                     harness_state.set_approved_plan_execution(executing_approved_plan);
-                    let turn_loop_ctx = crate::agent::runloop::unified::turn::TurnLoopContext::new(
+                    let mut turn_loop_ctx = crate::agent::runloop::unified::turn::TurnLoopContext::new(
                         &mut renderer,
                         &handle,
                         &mut session,
@@ -1371,7 +1374,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         &mut harness_state,
                         harness_emitter.as_ref(),
                         &mut config,
-                        vt_cfg.as_ref(),
+                        None,
                         &mut turn_metadata_cache,
                         &mut provider_client,
                         &traj,
@@ -1380,6 +1383,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         full_auto,
                         runtime_steering,
                     );
+                    turn_loop_ctx.live_vt_cfg = Some(&mut vt_cfg);
+                    let thread_id_owned = thread_handle.thread_id().to_string();
+                    turn_loop_ctx.settings =
+                        Some(crate::agent::runloop::unified::turn::turn_loop::ActiveSettingsContext {
+                            receiver: &mut settings_receiver,
+                            header_context: &mut header_context,
+                            session_bootstrap: &session_bootstrap,
+                            thread_id: thread_id_owned.as_str(),
+                            thread_handle: &thread_handle,
+                        });
 
                     let primary_agent_snapshot = active_primary_agent.active().clone();
                     let result =

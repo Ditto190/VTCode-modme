@@ -749,9 +749,7 @@ pub(in crate::agent::runloop::slash_commands) fn parse_update_args(
     Ok((check_only, install, force))
 }
 
-pub(in crate::agent::runloop::slash_commands) fn parse_effort_args(
-    args: &str,
-) -> std::result::Result<(Option<ReasoningEffortLevel>, bool), String> {
+pub(crate) fn parse_effort_args(args: &str) -> std::result::Result<(Option<ReasoningEffortLevel>, bool), String> {
     let mut persist = false;
     let mut level = None;
 

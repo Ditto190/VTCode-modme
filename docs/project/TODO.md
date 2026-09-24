@@ -1,7 +1,3 @@
-support this https://github.com/openai/codex/issues/42294
-
-==
-
 check and cleanup TUI's user facing diagnostic messages and verbose error/info output. Keep it clean, short and concise. As most of the time users only need the essential information, avoid overwhelming them with too much detail. The information is targeted for the coding agent's consumption only.
 
 check current status for more context here: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.16.19.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.03.48.png'
@@ -22,7 +18,7 @@ screenshot: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09
 
 ===
 
-check /review comman doesn't work
+check /review command doesn't work
 
 input: "
 Running /review...
@@ -46,3 +42,9 @@ current status:
 
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.38.38.png'
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.40.47.png'
+
+===
+
+allow changing /model and /effort mid-session without having to restart the session or wait for turns end.
+Ensure that the changes take effect immediately and that the system correctly reflects the updated settings.
+research how openai/codex implement it (use deepwiki mcp)

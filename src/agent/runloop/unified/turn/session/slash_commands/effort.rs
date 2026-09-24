@@ -192,7 +192,7 @@ fn sync_thread_reasoning_effort(ctx: &mut SlashCommandContext<'_>, effort: Reaso
     }
 }
 
-fn persist_effort_preference(
+pub(crate) fn persist_effort_preference(
     workspace: &std::path::Path,
     vt_cfg: &mut Option<VTCodeConfig>,
     effort: ReasoningEffortLevel,
@@ -238,7 +238,7 @@ fn provider_label_for_header(ctx: &SlashCommandContext<'_>) -> String {
         .unwrap_or_else(|| key.to_string())
 }
 
-fn effort_description(level: ReasoningEffortLevel, model: &str) -> &'static str {
+pub(crate) fn effort_description(level: ReasoningEffortLevel, model: &str) -> &'static str {
     match level {
         ReasoningEffortLevel::None | ReasoningEffortLevel::Unknown => {
             "No additional reasoning overhead for the fastest responses"

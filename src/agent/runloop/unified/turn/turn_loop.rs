@@ -11,8 +11,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::agent::runloop::unified::session_settings::SessionSettingsControl;
+use crate::agent::runloop::welcome::SessionBootstrap;
 use anyhow::Result;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::UnboundedReceiver;
 use vtcode_core::acp::ToolPermissionCache;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::core::agent::events::{tool_invocation_completed_event, tool_output_completed_event};
@@ -24,6 +27,7 @@ use vtcode_core::hooks::LifecycleHookEngine;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::{ApprovalRecorder, ToolRegistry, ToolResultCache};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
+use vtcode_ui::tui::app::InlineHeaderContext;
 use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
 use crate::agent::runloop::unified::inline_events::harness::{
@@ -47,6 +51,8 @@ mod notifications;
 mod post_tool_recovery;
 #[path = "turn_loop/recovery_compaction.rs"]
 mod recovery_compaction;
+#[path = "turn_loop/settings.rs"]
+mod settings;
 #[path = "turn_loop/usage_accounting.rs"]
 mod usage_accounting;
 
@@ -67,6 +73,7 @@ use post_tool_recovery::{
 #[cfg(test)]
 use recovery_compaction::current_turn_preserve_index;
 use recovery_compaction::{RecoveryCompactionRequest, compact_before_tool_enabled_retry};
+use settings::apply_pending_session_settings;
 use usage_accounting::{accumulate_turn_usage, estimate_session_costs, has_turn_usage, stop_reason_from_finish_reason};
 use vtcode_core::config::types::AgentConfig;
 use vtcode_core::core::agent::error_recovery::ErrorType;
@@ -460,6 +467,21 @@ pub(crate) struct TurnLoopOutcome {
     pub final_response_was_fallback: bool,
 }
 
+pub(crate) fn effective_vt_cfg<'a>(
+    fallback: Option<&'a VTCodeConfig>,
+    live: &'a Option<&mut Option<VTCodeConfig>>,
+) -> Option<&'a VTCodeConfig> {
+    live.as_ref().and_then(|cfg| cfg.as_ref()).or(fallback)
+}
+
+pub(crate) struct ActiveSettingsContext<'a> {
+    pub receiver: &'a mut UnboundedReceiver<SessionSettingsControl>,
+    pub header_context: &'a mut InlineHeaderContext,
+    pub session_bootstrap: &'a SessionBootstrap,
+    pub thread_id: &'a str,
+    pub thread_handle: &'a vtcode_core::core::threads::ThreadRuntimeHandle,
+}
+
 pub(crate) struct TurnLoopContext<'a> {
     pub renderer: &'a mut AnsiRenderer,
     pub handle: &'a InlineHandle,
@@ -494,6 +516,8 @@ pub(crate) struct TurnLoopContext<'a> {
     pub harness_emitter: Option<&'a HarnessEventEmitter>,
     pub config: &'a mut AgentConfig,
     pub vt_cfg: Option<&'a VTCodeConfig>,
+    pub live_vt_cfg: Option<&'a mut Option<VTCodeConfig>>,
+    pub settings: Option<ActiveSettingsContext<'a>>,
     pub turn_metadata_cache: &'a mut Option<Option<serde_json::Value>>,
     pub provider_client: &'a mut Box<dyn uni::LLMProvider>,
     pub traj: &'a TrajectoryLogger,
@@ -584,6 +608,8 @@ impl<'a> TurnLoopContext<'a> {
             harness_emitter,
             config,
             vt_cfg,
+            live_vt_cfg: None,
+            settings: None,
             turn_metadata_cache,
             provider_client,
             traj,
@@ -597,7 +623,7 @@ impl<'a> TurnLoopContext<'a> {
     pub(crate) fn as_run_loop_context(&mut self) -> RunLoopContext<'_> {
         let auto_permission = Some(crate::agent::runloop::unified::run_loop_context::AutoPermissionRuntimeContext {
             config: self.config,
-            vt_cfg: self.vt_cfg,
+            vt_cfg: effective_vt_cfg(self.vt_cfg, &self.live_vt_cfg),
             provider_client: self.provider_client.as_mut(),
             working_history: &[],
         });
@@ -624,12 +650,12 @@ impl<'a> TurnLoopContext<'a> {
             self.skip_confirmations,
             self.full_auto,
         );
-        ctx.active_agent_permissions = self
-            .vt_cfg
+        ctx.active_agent_permissions = effective_vt_cfg(self.vt_cfg, &self.live_vt_cfg)
             .and_then(|cfg| cfg.runtime_agent_permissions.as_ref())
             .or(Some(&self.active_primary_agent.active().permissions));
         ctx.agent_name = Some(self.active_primary_agent.active().identity.name.clone());
-        ctx.default_primary_agent = self.vt_cfg.map(|cfg| cfg.default_primary_agent.clone());
+        ctx.default_primary_agent =
+            effective_vt_cfg(self.vt_cfg, &self.live_vt_cfg).map(|cfg| cfg.default_primary_agent.clone());
         // The primary agent loop is always for the primary agent, not a subagent
         ctx.is_subagent = false;
         ctx
@@ -658,7 +684,7 @@ impl<'a> TurnLoopContext<'a> {
         let llm = crate::agent::runloop::unified::turn::context::LLMContext {
             provider_client: self.provider_client,
             config: self.config,
-            vt_cfg: self.vt_cfg,
+            vt_cfg: effective_vt_cfg(self.vt_cfg, &self.live_vt_cfg),
             context_manager: self.context_manager,
             active_primary_agent: self.active_primary_agent,
             decision_ledger: self.decision_ledger,
@@ -744,7 +770,11 @@ pub(crate) async fn run_turn_loop(
     }
 
     // Optimization: Extract all frequently accessed config values once
-    let mut turn_config = extract_turn_config(ctx.vt_cfg, ctx.is_planning_active(), ctx.renderer.supports_inline_ui());
+    let mut turn_config = extract_turn_config(
+        effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
+        ctx.is_planning_active(),
+        ctx.renderer.supports_inline_ui(),
+    );
     if ctx.is_planning_active() {
         ctx.plan_session.start_turn();
     }
@@ -799,6 +829,18 @@ pub(crate) async fn run_turn_loop(
         if handle_steering_messages(&mut ctx, working_history, &mut result).await? {
             break;
         }
+        if apply_pending_session_settings(&mut ctx, working_history).await? {
+            // A model or effort switch changes provider capabilities, context
+            // budget, and prompt shaping for the request about to be built.
+            // Re-derive the cached turn config so the next request uses the
+            // effective settings; the in-flight request already finished with
+            // its original settings.
+            turn_config = extract_turn_config(
+                effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
+                ctx.is_planning_active(),
+                ctx.renderer.supports_inline_ui(),
+            );
+        }
 
         // A permanent interview denial can happen after this turn's initial
         // config snapshot (for example when the model's plan response
@@ -823,7 +865,11 @@ pub(crate) async fn run_turn_loop(
         if !planning_limits_applied && ctx.is_planning_active() {
             planning_limits_applied = true;
             ctx.plan_session.start_turn();
-            turn_config = extract_turn_config(ctx.vt_cfg, true, ctx.renderer.supports_inline_ui());
+            turn_config = extract_turn_config(
+                effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
+                true,
+                ctx.renderer.supports_inline_ui(),
+            );
             if ctx.plan_session.is_interview_denied() {
                 turn_config.request_user_input_enabled = false;
             }
@@ -846,12 +892,12 @@ pub(crate) async fn run_turn_loop(
                 session: ctx.session,
                 ctrl_c_state: ctx.ctrl_c_state,
                 ctrl_c_notify: ctx.ctrl_c_notify,
-                vt_cfg: ctx.vt_cfg,
+                vt_cfg: effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
                 skip_confirmations: ctx.skip_confirmations,
                 full_auto: ctx.full_auto,
                 context_usage_percent: ctx.context_manager.context_usage_percent(
                     vtcode_core::compaction::effective_context_budget(
-                        ctx.vt_cfg,
+                        effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
                         ctx.provider_client.as_ref(),
                         &resolve_effective_request_model(&ctx.config.model, ctx.active_primary_agent.active()),
                     ),
@@ -884,7 +930,8 @@ pub(crate) async fn run_turn_loop(
         // A configured monetary budget is an enforcement contract. Validate
         // pricing before any compaction path because native compaction can
         // itself dispatch a provider request.
-        if let Some(max_budget_usd) = ctx.vt_cfg.and_then(|cfg| cfg.agent.harness.max_budget_usd)
+        if let Some(max_budget_usd) =
+            effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg).and_then(|cfg| cfg.agent.harness.max_budget_usd)
             && let Err(error) = vtcode_core::llm::usage_cost::require_budget_pricing(
                 ctx.provider_client.name(),
                 &active_model,
@@ -918,7 +965,7 @@ pub(crate) async fn run_turn_loop(
                     &harness_snapshot.session_id,
                     &ctx.harness_state.run_id.0,
                     &ctx.config.workspace,
-                    ctx.vt_cfg,
+                    effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
                     ctx.lifecycle_hooks,
                     ctx.harness_emitter,
                 ),
@@ -972,7 +1019,7 @@ pub(crate) async fn run_turn_loop(
             tracing::info!(
                 model = %active_model,
                 context_budget = vtcode_core::compaction::effective_context_budget(
-                    ctx.vt_cfg, ctx.provider_client.as_ref(), &active_model,
+                    effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg), ctx.provider_client.as_ref(), &active_model,
                 ),
                 prompt_tokens = ctx.context_manager.current_token_usage(),
                 "Resolved per-turn context budget denominator"
@@ -982,10 +1029,11 @@ pub(crate) async fn run_turn_loop(
             // when disabled, or when suppressed; starting a spinner
             // unconditionally would flicker every turn.
             let auto_start = Instant::now();
-            let auto_compaction_allowed = ctx.vt_cfg.is_some_and(|cfg| cfg.agent.harness.auto_compaction_enabled)
+            let auto_compaction_allowed = effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg)
+                .is_some_and(|cfg| cfg.agent.harness.auto_compaction_enabled)
                 && ctx.session_stats.auto_compact_suppressed == vtcode_core::compaction::SUPPRESS_NONE;
             let auto_threshold = crate::agent::runloop::unified::turn::compaction::effective_compaction_threshold(
-                ctx.vt_cfg,
+                effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
                 ctx.provider_client.as_ref(),
                 &active_model,
             );
@@ -1005,7 +1053,7 @@ pub(crate) async fn run_turn_loop(
                     &harness_snapshot.session_id,
                     &ctx.harness_state.run_id.0,
                     &ctx.config.workspace,
-                    ctx.vt_cfg,
+                    effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
                     ctx.lifecycle_hooks,
                     ctx.harness_emitter,
                 ),
@@ -2028,7 +2076,7 @@ async fn finalize_turn(
         }
     }
     emit_turn_outcome_notification(
-        ctx.vt_cfg,
+        effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
         working_history,
         ctx.config.workspace.as_path(),
         ctx.harness_state,
