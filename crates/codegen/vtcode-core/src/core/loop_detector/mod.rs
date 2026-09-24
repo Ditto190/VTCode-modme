@@ -45,14 +45,17 @@ pub(crate) const MAX_TOTAL_READONLY_CALLS: usize = 30;
 
 /// Subagent-specific read-only budget. Subagents should do focused work and
 /// need less exploration headroom than the main agent.
-const SUBAGENT_MAX_TOTAL_READONLY_CALLS: usize = 20;
+///
+/// Also referenced by `subagents::config` to state the budget in writable
+/// child instructions -- keep both in sync.
+pub(crate) const SUBAGENT_MAX_TOTAL_READONLY_CALLS: usize = 20;
 
 /// Navigation streak thresholds -- warning and hard stop.
 /// Subagents get tighter limits to force earlier synthesis.
 const NAVIGATION_WARNING_STREAK: usize = 4;
 const NAVIGATION_HARD_STOP_STREAK: usize = 7;
 const SUBAGENT_NAVIGATION_WARNING_STREAK: usize = 3;
-const SUBAGENT_NAVIGATION_HARD_STOP_STREAK: usize = 5;
+pub(crate) const SUBAGENT_NAVIGATION_HARD_STOP_STREAK: usize = 5;
 const LEGACY_GREP_FILE: &str = tools::GREP_FILE;
 const LEGACY_LIST_FILES: &str = tools::LIST_FILES;
 const LEGACY_SEARCH_TOOLS: &str = "search_tools";

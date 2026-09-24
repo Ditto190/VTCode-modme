@@ -826,6 +826,16 @@ fn subagent_instruction_composition_uses_shared_runtime_prompt_and_skill_appendi
     assert!(instructions.contains("Preloaded skill names: rust, repo."));
     assert!(instructions.contains("Memory appendix"));
     assert!(instructions.contains("Return your final response using this exact Markdown contract"));
+    // Writable children state the loop detector's real subagent limits.
+    assert!(instructions.contains(&format!(
+        "{} read-only calls in total",
+        crate::core::loop_detector::SUBAGENT_MAX_TOTAL_READONLY_CALLS
+    )));
+    assert!(instructions.contains(&format!(
+        "{} consecutive reads/searches",
+        crate::core::loop_detector::SUBAGENT_NAVIGATION_HARD_STOP_STREAK
+    )));
+    assert!(!instructions.contains("CRITICAL"));
 }
 
 #[test]
