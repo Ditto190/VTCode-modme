@@ -28,38 +28,41 @@ fn resolve_configured_thinking_display(anthropic_config: &AnthropicConfig) -> Op
 
 /// Resolves `thinking.display` for the request.
 ///
-/// Per-request overrides (the Anthropic-compatible endpoint) are forwarded as
-/// sent: that caller named the model and the display together. The
-/// `[provider.anthropic]` setting applies to every Claude model the session
-/// switches to, so `updates` falls back to the model default on models that
-/// reject it instead of failing the request. With nothing configured, the
-/// model's VT Code default applies (`updates` on Claude Opus 5.5).
+/// Per-request overrides (the Anthropic-compatible endpoint) take precedence
+/// over the `[provider.anthropic]` setting; with neither set, the model's VT
+/// Code default applies (`updates` on Claude Opus 5.5). Either source may name
+/// `updates`, which only some models accept: the override comes from a caller
+/// that may name any model, and the setting applies to every Claude model the
+/// session switches to. On models that reject it the field is omitted, so the
+/// model default display applies instead of the request failing.
 fn resolve_thinking_display(
     request: &LLMRequest,
     anthropic_config: &AnthropicConfig,
     resolved_model: &str,
     default_model: &str,
 ) -> Option<ThinkingDisplay> {
-    if let Some(overrides) = request.anthropic_request_overrides.as_ref() {
-        return match overrides.thinking_display {
-            AnthropicThinkingDisplayOverride::Inherit => None,
-            AnthropicThinkingDisplayOverride::Summarized => Some(ThinkingDisplay::Summarized),
-            AnthropicThinkingDisplayOverride::Omitted => Some(ThinkingDisplay::Omitted),
-            AnthropicThinkingDisplayOverride::Updates => Some(ThinkingDisplay::Updates),
-        };
-    }
+    let (display, source) = match request.anthropic_request_overrides.as_ref() {
+        Some(overrides) => match overrides.thinking_display {
+            AnthropicThinkingDisplayOverride::Inherit => return None,
+            AnthropicThinkingDisplayOverride::Summarized => (ThinkingDisplay::Summarized, "request"),
+            AnthropicThinkingDisplayOverride::Omitted => (ThinkingDisplay::Omitted, "request"),
+            AnthropicThinkingDisplayOverride::Updates => (ThinkingDisplay::Updates, "request"),
+        },
+        None => match resolve_configured_thinking_display(anthropic_config) {
+            Some(display) => (display, "provider.anthropic.thinking_display"),
+            None => return default_thinking_display(resolved_model, default_model),
+        },
+    };
 
-    match resolve_configured_thinking_display(anthropic_config) {
-        Some(ThinkingDisplay::Updates) if !supports_thinking_display_updates(resolved_model, default_model) => {
-            tracing::debug!(
-                model = %resolved_model,
-                "thinking_display = \"updates\" is not supported by this model; using the model default display"
-            );
-            None
-        }
-        Some(display) => Some(display),
-        None => default_thinking_display(resolved_model, default_model),
+    if display == ThinkingDisplay::Updates && !supports_thinking_display_updates(resolved_model, default_model) {
+        tracing::debug!(
+            model = %resolved_model,
+            source,
+            "thinking display \"updates\" is not supported by this model; using the model default display"
+        );
+        return None;
     }
+    Some(display)
 }
 
 /// Builds a manual `budget_tokens` config clamped below `max_tokens`, which
@@ -472,6 +475,76 @@ mod tests {
             match thinking {
                 Some(ThinkingConfig::Adaptive { display: None }) => {}
                 other => panic!("{model}: expected Adaptive with no display, got {other:?}"),
+            }
+        }
+    }
+
+    fn display_override_request(model: &str, display: AnthropicThinkingDisplayOverride) -> LLMRequest {
+        LLMRequest {
+            model: model.to_string(),
+            anthropic_request_overrides: Some(crate::provider::AnthropicRequestOverrides {
+                thinking_mode: AnthropicThinkingModeOverride::Adaptive,
+                thinking_display: display,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn requested_updates_display_is_kept_on_supporting_models() {
+        let config = AnthropicConfig::default();
+        for model in [
+            anthropic::CLAUDE_OPUS_5_5,
+            anthropic::CLAUDE_FABLE_5,
+            anthropic::CLAUDE_FABLE_5_1,
+        ] {
+            let request = display_override_request(model, AnthropicThinkingDisplayOverride::Updates);
+            let (thinking, _) =
+                build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+
+            match thinking {
+                Some(ThinkingConfig::Adaptive { display: Some(ThinkingDisplay::Updates) }) => {}
+                other => panic!("{model}: expected Adaptive with Updates display, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn requested_updates_display_is_omitted_on_unsupported_models() {
+        let config = AnthropicConfig::default();
+        for model in [
+            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
+            "claude-opus-4-8",
+            vtcode_config::constants::models::minimax::MINIMAX_M3,
+        ] {
+            let request = display_override_request(model, AnthropicThinkingDisplayOverride::Updates);
+            let (thinking, _) =
+                build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+
+            match thinking {
+                Some(ThinkingConfig::Adaptive { display: None }) => {}
+                other => panic!("{model}: expected Adaptive with no display, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn requested_summarized_display_is_kept_on_every_model() {
+        let config = AnthropicConfig::default();
+        for model in [
+            anthropic::CLAUDE_OPUS_5_5,
+            anthropic::CLAUDE_SONNET_5,
+            "claude-opus-4-8",
+        ] {
+            let request = display_override_request(model, AnthropicThinkingDisplayOverride::Summarized);
+            let (thinking, _) =
+                build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+
+            match thinking {
+                Some(ThinkingConfig::Adaptive { display: Some(ThinkingDisplay::Summarized) }) => {}
+                other => panic!("{model}: expected Adaptive with Summarized display, got {other:?}"),
             }
         }
     }
