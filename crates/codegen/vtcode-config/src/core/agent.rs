@@ -52,10 +52,10 @@ pub struct AgentConfig {
     pub trim_system_prompt: bool,
 
     /// Tool documentation mode controlling token overhead for tool definitions
-    /// Options: minimal (~800 tokens), progressive (~1.2k), full (~3k current)
-    /// Progressive: signatures upfront, detailed docs on-demand (recommended)
-    /// Minimal: signatures only, pi-coding-agent style (power users)
-    /// Full: all documentation upfront (current behavior, default)
+    /// Options: minimal, progressive (default, ~1.8k tokens for the builtin catalog), full
+    /// Progressive: complete tool and parameter descriptions; only unusually long tails are trimmed at a sentence boundary (recommended)
+    /// Minimal: first sentence of each tool description and no parameter descriptions (power users)
+    /// Full: every tool and parameter description sent unmodified
     #[serde(default)]
     pub tool_documentation_mode: ToolDocumentationMode,
 

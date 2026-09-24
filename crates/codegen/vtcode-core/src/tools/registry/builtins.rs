@@ -723,7 +723,10 @@ mod tests {
     /// quality are caught at `cargo test` time rather than via observed
     /// agent misbehavior.
     ///
-    /// Every LLM-visible tool with a description must satisfy:
+    /// Every LLM-visible tool with a description must satisfy the rules
+    /// below. Rules 2 and 3 are checked against the description sent in the
+    /// default Progressive documentation mode, which must be the complete
+    /// source description:
     /// 1. Length is between 40 and 1500 characters.
     /// 2. Contains at least one verb cue ("Use", "Create", "List", "Fetch",
     ///    "Search", "Send", "Apply", "Read", "Edit", etc.) so the model can
@@ -740,6 +743,10 @@ mod tests {
     /// model can safely call them without explicit guard-rails.
     #[test]
     fn tool_descriptions_satisfy_documented_contract() {
+        use crate::config::ToolDocumentationMode;
+        use crate::tools::handlers::compact::compact_tool_description;
+        use crate::tools::handlers::{SessionSurface, SessionToolCatalog, SessionToolsConfig, ToolModelCapabilities};
+
         let plan_state = PlanningWorkflowState::new(PathBuf::from("/workspace"));
         let registrations = builtin_tool_registrations(Some(&plan_state));
 
@@ -818,18 +825,44 @@ mod tests {
             );
         }
 
+        // Rules 2 and 3 are checked against the text the model receives in
+        // the default Progressive documentation mode, not just the source
+        // string, so a projection that drops later sentences cannot hide a
+        // missing cue.
+        let progressive_catalog =
+            SessionToolCatalog::rebuild_from_registrations(builtin_tool_registrations(Some(&plan_state)));
+        let progressive_entries = progressive_catalog.schema_entries(SessionToolsConfig::full_public(
+            SessionSurface::Interactive,
+            CapabilityLevel::CodeSearch,
+            ToolDocumentationMode::Progressive,
+            ToolModelCapabilities::default(),
+        ));
+        assert!(!progressive_entries.is_empty(), "Progressive catalog must expose builtin tools");
+
         for registration in &registrations {
             if !registration.expose_in_llm() {
                 continue;
             }
-            let Some(description) = registration.metadata().description() else {
+            let Some(source_description) = registration.metadata().description() else {
                 continue;
             };
             let tool_name = registration.name();
 
-            // Rule 1: length.
-            let len = description.chars().count();
+            // Rule 1: length of the source description.
+            let len = source_description.chars().count();
             assert!((40..=1500).contains(&len), "{tool_name}: description length {len} outside [40, 1500]");
+
+            let projected = compact_tool_description(source_description, ToolDocumentationMode::Progressive, None);
+            let sent = progressive_entries
+                .iter()
+                .find(|entry| entry.name == tool_name)
+                .map_or(projected.as_str(), |entry| entry.description.as_str());
+            assert_eq!(
+                sent,
+                compact_tool_description(source_description, ToolDocumentationMode::Full, None),
+                "{tool_name}: Progressive mode must send the complete builtin description"
+            );
+            let description = sent;
 
             // Rule 2: verb cue (case-sensitive "Use " is the most common).
             let has_verb = verb_cues.iter().any(|cue| description.contains(cue));
@@ -945,9 +978,16 @@ mod tests {
             })
             .sum();
 
+        // Progressive mode sends complete builtin tool descriptions and keeps
+        // parameter descriptions (trimming only long tails), because models
+        // that follow tool definitions literally act on the whole text. That
+        // raised this measurement from 603 tokens (first sentence only, no
+        // parameter descriptions) to 1,844. The cap leaves ~20% headroom and
+        // the combined first-request budget below still enforces the overall
+        // 12k/15k ceilings.
         assert!(
-            total_tokens <= 1_500,
-            "emitted model tool schema tokens in Progressive mode is {total_tokens}; expected <= 1_500"
+            total_tokens <= 2_200,
+            "emitted model tool schema tokens in Progressive mode is {total_tokens}; expected <= 2_200"
         );
     }
 
