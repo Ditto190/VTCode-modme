@@ -1030,6 +1030,78 @@ mod request_builder_tests {
         assert!(payload["system"][1].get("cache_control").is_none());
     }
 
+    fn mid_conversation_payload(messages: Vec<Message>) -> serde_json::Value {
+        let request = LLMRequest {
+            model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+            system_prompt: Some(Arc::from("stable system instructions")),
+            messages: messages.into(),
+            ..Default::default()
+        };
+        let cache_settings = AnthropicPromptCacheSettings::default();
+        let anthropic_config = AnthropicConfig::default();
+        let ctx = RequestBuilderContext {
+            prompt_cache_enabled: true,
+            prompt_cache_settings: &cache_settings,
+            anthropic_config: &anthropic_config,
+            model: models::anthropic::DEFAULT_MODEL,
+        };
+        convert_to_anthropic_format(&request, &ctx).expect("payload conversion")
+    }
+
+    #[test]
+    fn test_mid_conversation_system_message_is_not_duplicated_into_system_prompt() {
+        let directive = "Reuse the latest tool outputs instead of rerunning the same exploration.";
+        let payload = mid_conversation_payload(vec![
+            Message::user("explore architecture".to_string()),
+            Message::system(directive.to_string()),
+        ]);
+
+        assert_eq!(payload["messages"][1]["role"], "system");
+        assert_eq!(payload["messages"][1]["content"][0]["text"], directive);
+        let system_text = payload["system"].to_string();
+        assert!(!system_text.contains(directive), "directive must render only in messages[]: {system_text}");
+        assert!(!system_text.contains("[History Directives]"));
+    }
+
+    #[test]
+    fn test_mid_conversation_system_messages_keep_system_prompt_stable_across_turns() {
+        let first_turn = mid_conversation_payload(vec![Message::user("explore architecture".to_string())]);
+        let second_turn = mid_conversation_payload(vec![
+            Message::user("explore architecture".to_string()),
+            Message::system("Previous turn already completed tool execution.".to_string()),
+            Message::assistant("Done exploring.".to_string()),
+            Message::user("now summarize".to_string()),
+            Message::system("Keep the summary under ten lines.".to_string()),
+        ]);
+
+        assert_eq!(first_turn["system"], second_turn["system"]);
+        assert_eq!(first_turn["messages"][0]["content"][0]["text"], second_turn["messages"][0]["content"][0]["text"]);
+        let roles: Vec<&str> = second_turn["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .filter_map(|message| message["role"].as_str())
+            .collect();
+        assert_eq!(roles, ["user", "system", "assistant", "user", "system"]);
+    }
+
+    #[test]
+    fn test_leading_history_system_message_is_folded_once_on_mid_conversation_route() {
+        let summary = "Previous conversation summary: the parser was refactored.";
+        let payload = mid_conversation_payload(vec![
+            Message::system(summary.to_string()),
+            Message::user("continue".to_string()),
+        ]);
+
+        // A system message cannot be messages[0], so the leading run is folded
+        // into the system prompt and dropped from messages[].
+        let messages = payload["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        let system_text = payload["system"].to_string();
+        assert_eq!(system_text.matches(summary).count(), 1, "summary folded exactly once: {system_text}");
+    }
+
     #[test]
     fn test_convert_to_anthropic_format_includes_native_web_search_tool() {
         let request = LLMRequest {

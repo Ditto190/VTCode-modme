@@ -27,7 +27,7 @@ use super::capabilities::{
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
-use system::{SystemPromptBuildResult, build_system_prompt};
+use system::{HistorySystemPlacement, SystemPromptBuildResult, build_system_prompt};
 use thinking::{build_thinking_config, rewrite_thinking_for_model};
 use tools::{build_tool_choice, build_tools};
 
@@ -107,12 +107,13 @@ pub(crate) fn convert_to_anthropic_format(
         };
 
     let allow_mid_conversation_system = supports_mid_conversation_system_messages(resolved_model, ctx.model);
+    let history_system_placement = HistorySystemPlacement::for_route(allow_mid_conversation_system);
 
     let SystemPromptBuildResult {
         mut system_value,
         breakpoints_used,
         has_uncached_runtime_context,
-    } = build_system_prompt(request, &system_cache_control, breakpoints_remaining, !allow_mid_conversation_system);
+    } = build_system_prompt(request, &system_cache_control, breakpoints_remaining, history_system_placement);
     breakpoints_remaining = breakpoints_remaining.saturating_sub(breakpoints_used);
 
     // When the advisor tool is active, append a system-prompt block guiding the
@@ -159,22 +160,27 @@ pub(crate) fn convert_to_anthropic_format(
         None
     };
 
+    // Leading system messages already live in the top-level system prompt
+    // (see `HistorySystemPlacement`); skip them here so each history system
+    // message is rendered exactly once.
+    let conversation_messages = &request.messages[history_system_placement.leading_folded_count(&request.messages)..];
+
     let needs_hoisting = request
         .coding_agent_settings
         .as_ref()
         .is_some_and(|s| s.long_context_optimization)
-        && request.messages.len() > 1;
+        && conversation_messages.len() > 1;
 
     // Only clone the message vector when hoisting will actually mutate it.
     // In the common case (no long-context optimization or single message),
     // borrow the original slice and skip the deep copy.
     let mut hoisted_messages: Vec<crate::provider::Message>;
     let messages_to_process: &[crate::provider::Message] = if needs_hoisting {
-        hoisted_messages = request.messages.as_ref().clone();
+        hoisted_messages = conversation_messages.to_vec();
         hoist_largest_user_message(&mut hoisted_messages);
         &hoisted_messages
     } else {
-        request.messages.as_ref().as_slice()
+        conversation_messages
     };
 
     let messages_breakpoints_before = breakpoints_remaining;
