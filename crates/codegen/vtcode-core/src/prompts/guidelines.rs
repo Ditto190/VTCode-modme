@@ -26,6 +26,13 @@ const TOOL_START_PLANNING: &str = tools::START_PLANNING;
 const CROSS_TURN_RESUME_HINT_CLAUSE: &str =
     "; a turn-start `Exec session resume:` hint carries the live ids when a prior turn ended mid-run.";
 
+/// Planning-workflow `task_tracker` index rules. While planning, the tracker
+/// routes to the plan sidecar, which rejects index 0 (`index_path components
+/// must be >= 1`); checklist-level `index: 0` completion exists only outside
+/// planning, so neither line advertises it.
+const PLANNING_TASK_TRACKER_COMPACT_LINE: &str = "- Keep blockers and verification open in `task_tracker`; updates use positive indices or index_path, and index 0 is invalid while planning.";
+const PLANNING_TASK_TRACKER_INDEX_LINE: &str = "- Use `task_tracker` action=update with positive flat indices or positive hierarchical index_path values (index 0 is invalid while planning), and use items for bulk updates.";
+
 /// Documentation density is independent of the tools a session may execute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolGuidanceProfile {
@@ -311,7 +318,8 @@ pub fn append_runtime_tool_prompt_sections_for_model(
             ));
         }
         if names.iter().any(|name| name == TOOL_TASK_TRACKER) {
-            guidance.push_str("\n- Keep blockers and verification open in `task_tracker`; updates use positive indices or index_path, with index 0 reserved for checklist completion.");
+            guidance.push('\n');
+            guidance.push_str(PLANNING_TASK_TRACKER_COMPACT_LINE);
         }
         if names.iter().any(|name| name == TOOL_REQUEST_USER_INPUT) {
             guidance.push_str(
@@ -440,7 +448,7 @@ fn generate_runtime_tool_guidelines_for_profile(
     if has_task_tracker {
         lines.push("- Keep `task_tracker` updated as you refine the plan.".to_string());
         lines.push("- Keep blockers and verification open in `task_tracker` until resolved.".to_string());
-        lines.push("- Use `task_tracker` action=update with positive flat indices or positive hierarchical index_path values; index: 0 is only for standard checklist-level completion with status=completed, and bulk updates use items.".to_string());
+        lines.push(PLANNING_TASK_TRACKER_INDEX_LINE.to_string());
     }
     if has_request_user_input {
         lines.push(
@@ -750,9 +758,17 @@ mod tests {
             ResolvedShellPromptProfile::UnixLike,
         );
 
-        assert!(guidelines.contains("positive flat indices"));
-        assert!(guidelines.contains("index: 0"));
-        assert!(guidelines.contains("items"));
+        assert!(guidelines.contains(&format!("\n{PLANNING_TASK_TRACKER_INDEX_LINE}")));
+        assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains("positive flat indices"));
+        assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains("(index 0 is invalid while planning)"));
+        assert!(PLANNING_TASK_TRACKER_INDEX_LINE.contains("use items for bulk updates"));
+        // The planning sidecar rejects index 0, so no planning line may present
+        // it as a valid checklist-completion index.
+        for line in [PLANNING_TASK_TRACKER_INDEX_LINE, PLANNING_TASK_TRACKER_COMPACT_LINE] {
+            assert!(line.contains("index 0 is invalid while planning"), "{line}");
+            assert!(!line.contains("reserved"), "{line}");
+            assert!(!line.contains("index: 0"), "{line}");
+        }
     }
 
     #[test]
