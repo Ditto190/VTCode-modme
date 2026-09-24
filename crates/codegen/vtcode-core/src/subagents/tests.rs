@@ -3262,3 +3262,27 @@ fn heuristic_verifier_approval_rejects_negated_approval() {
     assert!(!heuristic_verifier_approval("Unclear; could not inspect the files.", &[]));
     assert!(heuristic_verifier_approval("Approved, no issues found.", &[]));
 }
+
+#[test]
+fn extract_issues_reads_only_structured_issue_lines() {
+    let summary = "- ISSUE: src/lib.rs:3 missing bounds check\n\
+                   1. issue: src/a.rs:9 wrong default\n\
+                   * **ISSUE:** src/b.rs:1 stale doc\n\
+                   ISSUE: src/c.rs:2 unhandled error\n\
+                   Reasoning: no error: all tests pass\n\
+                   error: expected `;`, found `}` (quoted compiler output)\n\
+                   - the problem: none\n\
+                   Verdict mentions REJECT: only in prose\n\
+                   - ISSUE:\n\
+                   Decision: APPROVED";
+    assert_eq!(
+        extract_issues_from_summary(summary),
+        vec![
+            "ISSUE: src/lib.rs:3 missing bounds check".to_string(),
+            "ISSUE: src/a.rs:9 wrong default".to_string(),
+            "ISSUE: src/b.rs:1 stale doc".to_string(),
+            "ISSUE: src/c.rs:2 unhandled error".to_string(),
+        ]
+    );
+    assert!(extract_issues_from_summary("Reasoning: no error: all tests pass\nDecision: APPROVED").is_empty());
+}
