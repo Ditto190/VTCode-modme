@@ -179,41 +179,6 @@ mod validation_tests {
     }
 
     #[test]
-    fn test_validate_sonnet_5_omits_prefill_without_thinking() {
-        let config = AnthropicConfig {
-            extended_thinking_enabled: false,
-            ..AnthropicConfig::default()
-        };
-        let request = LLMRequest {
-            messages: vec![Message::user("hi".to_string())].into(),
-            model: models::CLAUDE_SONNET_5.to_string(),
-            prefill: Some("{".to_string()),
-            ..Default::default()
-        };
-
-        assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_ok());
-    }
-
-    #[test]
-    fn test_validate_sonnet_5_omits_prefill_thought_without_thinking() {
-        let config = AnthropicConfig {
-            extended_thinking_enabled: false,
-            ..AnthropicConfig::default()
-        };
-        let request = LLMRequest {
-            messages: vec![Message::user("hi".to_string())].into(),
-            model: models::CLAUDE_SONNET_5.to_string(),
-            coding_agent_settings: Some(Box::new(crate::provider::CodingAgentSettings {
-                prefill_thought: true,
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
-
-        assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_ok());
-    }
-
-    #[test]
     fn test_validate_programmatic_tool_calling_rejects_disable_parallel_tool_use() {
         let config = AnthropicConfig::default();
         let request = LLMRequest {
@@ -319,27 +284,6 @@ mod validation_tests {
         };
 
         assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_err());
-    }
-
-    #[test]
-    fn test_validate_structured_outputs_omits_prefill_for_fable_5() {
-        let config = AnthropicConfig::default();
-        let request = LLMRequest {
-            messages: vec![Message::user("hi".to_string())].into(),
-            model: models::anthropic::CLAUDE_FABLE_5.to_string(),
-            output_format: Some(json!({
-                "type": "object",
-                "properties": {
-                    "answer": {"type": "string"}
-                },
-                "required": ["answer"],
-                "additionalProperties": false
-            })),
-            prefill: Some("{\"answer\":".to_string()),
-            ..Default::default()
-        };
-
-        assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_ok());
     }
 
     #[test]
@@ -1180,6 +1124,49 @@ mod request_builder_tests {
 
         assert_eq!(payload["thinking"]["type"], "adaptive");
         assert_eq!(payload["output_config"]["effort"], "xhigh");
+    }
+
+    fn assert_trailing_assistant_is_followed_by_user_sentinel(model: &str) {
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![
+                Message::user("start the task".to_string()),
+                Message::assistant("partial answer".to_string()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        let cache_settings = AnthropicPromptCacheSettings::default();
+        let anthropic_config = AnthropicConfig::default();
+        let ctx = RequestBuilderContext {
+            prompt_cache_enabled: false,
+            prompt_cache_settings: &cache_settings,
+            anthropic_config: &anthropic_config,
+            model: models::anthropic::DEFAULT_MODEL,
+        };
+
+        let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
+        let messages = payload["messages"].as_array().expect("messages array");
+
+        assert_eq!(messages.len(), 3, "model {model}: {messages:?}");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[2]["role"], "user", "model {model} must never receive a trailing assistant turn");
+        assert_eq!(messages[2]["content"][0]["text"], "[Continue]");
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_never_ends_on_assistant_for_sonnet_5() {
+        assert_trailing_assistant_is_followed_by_user_sentinel(models::CLAUDE_SONNET_5);
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_never_ends_on_assistant_for_opus_5_5() {
+        assert_trailing_assistant_is_followed_by_user_sentinel(models::anthropic::CLAUDE_OPUS_5_5);
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_never_ends_on_assistant_for_unknown_model() {
+        assert_trailing_assistant_is_followed_by_user_sentinel("claude-unlisted-model");
     }
 
     #[test]

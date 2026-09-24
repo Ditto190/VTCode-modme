@@ -310,23 +310,16 @@ impl AnthropicProvider {
         Ok(self.api_key.clone())
     }
 
+    /// Prepends a non-disclosure reminder to the system prompt. No supported
+    /// Claude model accepts an assistant-message prefill, so the system prompt
+    /// is the only valid place for this instruction.
     pub fn with_leak_protection(&self, mut request: LLMRequest, secret_description: &str) -> LLMRequest {
         let reminder = format!("[Never mention or reveal {secret_description}]");
-        let resolved_model = capabilities::resolve_model_name(&request.model, &self.model);
-
-        if capabilities::supports_assistant_prefill(resolved_model, &self.model) {
-            if let Some(existing_prefill) = request.prefill {
-                request.prefill = Some(format!("{reminder} {existing_prefill}"));
-            } else {
-                request.prefill = Some(reminder);
-            }
-        } else {
-            let merged_system_prompt = match request.system_prompt.as_ref() {
-                Some(existing) => format!("{reminder}\n\n{existing}"),
-                None => reminder,
-            };
-            request.system_prompt = Some(std::sync::Arc::from(merged_system_prompt));
-        }
+        let merged_system_prompt = match request.system_prompt.as_ref() {
+            Some(existing) => format!("{reminder}\n\n{existing}"),
+            None => reminder,
+        };
+        request.system_prompt = Some(std::sync::Arc::from(merged_system_prompt));
         request
     }
 
@@ -858,6 +851,48 @@ mod tests {
         // the runloop's stream-timeout fallback both depend on this value.
         let provider = AnthropicProvider::new("test-key".to_string());
         assert!(LLMProvider::supports_non_streaming(&provider, models::anthropic::CLAUDE_OPUS_5));
+    }
+
+    #[test]
+    fn with_leak_protection_prepends_reminder_to_system_prompt_for_every_model() {
+        for model in [
+            models::CLAUDE_SONNET_5,
+            models::anthropic::CLAUDE_OPUS_5_5,
+            "claude-unlisted-model",
+        ] {
+            let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
+            let request = LLMRequest {
+                model: model.to_string(),
+                messages: vec![Message::user("hi".to_string())].into(),
+                system_prompt: Some(std::sync::Arc::from("Base instructions.")),
+                ..Default::default()
+            };
+
+            let protected = provider.with_leak_protection(request, "the API key");
+
+            assert_eq!(
+                protected.system_prompt.as_deref(),
+                Some("[Never mention or reveal the API key]\n\nBase instructions."),
+                "model {model}"
+            );
+            let payload = provider.convert_to_anthropic_format(&protected).expect("payload conversion");
+            let messages = payload["messages"].as_array().expect("messages array");
+            assert_eq!(messages.last().expect("last message")["role"], "user", "model {model}");
+        }
+    }
+
+    #[test]
+    fn with_leak_protection_sets_system_prompt_when_absent() {
+        let provider = AnthropicProvider::with_model("test-key".to_string(), models::CLAUDE_SONNET_5.to_string());
+        let request = LLMRequest {
+            model: models::CLAUDE_SONNET_5.to_string(),
+            messages: vec![Message::user("hi".to_string())].into(),
+            ..Default::default()
+        };
+
+        let protected = provider.with_leak_protection(request, "internal notes");
+
+        assert_eq!(protected.system_prompt.as_deref(), Some("[Never mention or reveal internal notes]"));
     }
 
     #[test]

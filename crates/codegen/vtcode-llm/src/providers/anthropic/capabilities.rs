@@ -191,23 +191,6 @@ pub(crate) fn supports_manual_interleaved_beta(model: &str, default_model: &str)
     claude_thinking_profile(model, default_model).is_some_and(|profile| profile.manual_interleaved_beta)
 }
 
-pub(crate) fn supports_assistant_prefill(model: &str, default_model: &str) -> bool {
-    let requested = resolve_model_name(model, default_model);
-
-    // Models with thinking profiles are newer and generally do not support prefill,
-    // except Haiku 4.5 which explicitly does. For models without a thinking profile
-    // (legacy models), prefill is supported.
-    match claude_thinking_profile(requested, default_model) {
-        Some(profile) => {
-            // Claude Sonnet 5 is the only thinking-profile model that supports
-            // prefill; adaptive-only profiles (Fable 5, Mythos 5) and Opus 5
-            // do not.
-            !profile.adaptive_only && matches_model(requested, models::anthropic::CLAUDE_SONNET_5)
-        }
-        None => true,
-    }
-}
-
 pub(crate) fn supports_mid_conversation_system_messages(model: &str, default_model: &str) -> bool {
     supports_turn_scoped_system_messages(model, default_model)
 }

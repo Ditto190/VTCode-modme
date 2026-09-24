@@ -154,16 +154,6 @@ pub struct LLMRequest {
     /// Optional provider-specific context management configuration (Anthropic compaction/editing).
     pub context_management: Option<Value>,
 
-    /// Optional prefill text for the assistant response (Anthropic prefilling)
-    /// Incompatible with extended thinking
-    pub prefill: Option<String>,
-
-    /// Whether to enable character reinforcement (system prompt/prefill tagging)
-    pub character_reinforcement: bool,
-
-    /// Optional character name for reinforcement
-    pub character_name: Option<String>,
-
     /// Optional coding agent specific settings
     pub coding_agent_settings: Option<Box<CodingAgentSettings>>,
 
@@ -273,8 +263,6 @@ pub struct ResponsesCompactionOptions {
 pub struct CodingAgentSettings {
     /// Encourage the model to use XML tags for structured responses
     pub(crate) force_xml_tags: bool,
-    /// Automatically prefill with `<thought>` to encourage reasoning
-    pub(crate) prefill_thought: bool,
     /// Explicitly allow the model to say "I don't know" or "I am unsure"
     pub(crate) allow_uncertainty: bool,
     /// Enforce strict grounding to provided documents

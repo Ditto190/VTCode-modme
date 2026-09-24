@@ -16,8 +16,8 @@ use vtcode_config::types::ReasoningEffortLevel;
 use super::capabilities::{
     adaptive_thinking_always_on, allowed_efforts_for_model, claude_thinking_profile, default_effort_for_model,
     effort_allowed_for_model, effort_is_at_most_high, matches_model, rejects_sampling, resolve_model_name,
-    supports_assistant_prefill, supports_effort, supports_manual_interleaved_beta, supports_manual_thinking_budget,
-    supports_structured_output, supports_task_budget,
+    supports_effort, supports_manual_interleaved_beta, supports_manual_thinking_budget, supports_structured_output,
+    supports_task_budget,
 };
 
 pub fn validate_request(
@@ -140,26 +140,6 @@ pub fn validate_request(
         validate_reasoning_constraints(request, default_model, anthropic_config)?;
     }
 
-    // Prefill constraints only apply to models that support prefill.
-    // For models that don't support prefill, the request builder silently omits it.
-    if supports_assistant_prefill(resolved_model, default_model) {
-        if request_uses_assistant_prefill(request) && thinking_active {
-            let formatted_error = error_display::format_llm_error(
-                provider_name,
-                "Assistant-message prefills are not supported when thinking is enabled. Use system instructions instead.",
-            );
-            return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
-        }
-
-        if request_uses_assistant_prefill(request) && request.output_format.is_some() {
-            let formatted_error = error_display::format_llm_error(
-                provider_name,
-                "Assistant-message prefills are not supported when structured outputs are enabled.",
-            );
-            return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
-        }
-    }
-
     if let Some(task_budget) = effective_task_budget_tokens(request, anthropic_config)
         && supports_task_budget(&request.model, default_model)
         && task_budget < 20_000
@@ -256,15 +236,6 @@ fn resolve_effective_thinking_mode(
             }
         }
     }
-}
-
-pub(crate) fn request_uses_assistant_prefill(request: &LLMRequest) -> bool {
-    request.prefill.is_some()
-        || request
-            .coding_agent_settings
-            .as_ref()
-            .is_some_and(|settings| settings.prefill_thought)
-        || (request.character_reinforcement && request.character_name.is_some())
 }
 
 fn effective_manual_thinking_budget_override(request: &LLMRequest) -> Option<u32> {
