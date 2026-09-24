@@ -15,8 +15,6 @@ brew install vtcode
 # Cargo
 cargo install vtcode
 
-# npm
-npm install -g @vinhnx/vtcode --registry=https://npm.pkg.github.com
 ```
 
 ## Quick Start
@@ -38,8 +36,6 @@ brew uninstall vtcode
 # Cargo
 cargo uninstall vtcode
 
-# npm
-npm uninstall -g @vinhnx/vtcode
 ```
 
 ## Verify

@@ -351,7 +351,7 @@ vtcode update
 2. It compares the remote version with your current version
 3. If a new version is available, it shows release notes and download information
 4. Interactive TUI sessions automatically check for updates on launch (short cached interval)
-5. Managed installs (Homebrew/cargo/npm) show package-manager-specific update guidance
+5. Managed installs (Homebrew/cargo) show package-manager-specific update guidance
 
 Standalone releases download the exact platform archive, verify a published SHA-256
 checksum when available, safely extract `vtcode`/`vtcode.exe`, and replace the running

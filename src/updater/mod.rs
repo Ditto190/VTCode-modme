@@ -360,10 +360,6 @@ mod tests {
             InstallSource::Cargo
         );
         assert_eq!(
-            install_source::detect_install_source_from_path(Path::new("/usr/local/lib/node_modules/vtcode/bin/vtcode")),
-            InstallSource::Npm
-        );
-        assert_eq!(
             install_source::detect_install_source_from_path(Path::new("/usr/local/bin/vtcode")),
             InstallSource::Standalone
         );
