@@ -8,19 +8,19 @@ VT Code has two distinct prompt sources:
 | Project instruction map | User/workspace `AGENTS.md`, `CLAUDE.md`, and `.vtcode/rules/` | Project conventions, local architecture, and maintainer workflows | User-controlled context, never a security boundary |
 
 The compiled section is deterministic, cached with the static profile, and
-kept below its approximate 320-token cap. It must not read, embed, or generate
+kept below its approximate 420-token cap. It must not read, embed, or generate
 content from repository instruction files. Profile-specific operating details
 remain in the prompt builder; correctness-critical behavior belongs in runtime
 policy, schemas, tests, or lints.
 
 ## User-facing progress contract
 
-For non-trivial or tool-using work, the compiled guidance allows concise
-model-authored progress updates when they materially help. The model can post
-one or two sentences when the phase or next action changes, then close with a
-standalone recap of what it found, changed, and verified, plus what comes next.
-Structured tool-call events remain the authoritative status signal. These are
-user-facing updates, not a transcript of every call or hidden chain-of-thought.
+The compiled guidance tells the model that its text between tool calls is
+what the user reads. It says in one sentence what it will do before starting,
+updates only on findings, direction changes, or blockers, and finishes with the
+outcome first, then what changed, what it checked, and anything the user must
+do. Structured tool-call events remain the authoritative status signal. These
+are user-facing updates, not a transcript of every call.
 
 Compact transcript mode may collapse successful command bodies while retaining
 complete output in Transcript Review. The model must not rerun commands merely
@@ -131,7 +131,7 @@ runtime never auto-executes the wait. Turn-end `turn.completed` (schema 0.16.0)
 and `SnapshotTurnDiagnostics` both record `in_progress_exec_sessions` (bounded
 to 4) for ATIF correlation, including retained background sessions that remain
 live for asynchronous work. This hint body stays out of `runtime_guidance.rs` so the
-320-token universal section is not taxed on turns with no live session; per-tool
+universal section is not taxed on turns with no live session; per-tool
 `guidelines.rs` `write_stdin` guidance carries only a one-line pointer that the
 hint may appear.
 

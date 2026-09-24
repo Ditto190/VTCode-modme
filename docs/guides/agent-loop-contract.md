@@ -173,11 +173,11 @@ typed marker remains in canonical history for provider switching and replay.
 ### User-facing progress updates
 
 The model-facing runtime contract is intentionally separate from provider
-native reasoning. For non-trivial tool work, the model may provide concise
-progress updates when the phase or next action changes, and ends with a
-standalone recap of findings, changes, verification, and next steps. Structured
-tool-call events are the authoritative status signal. It must not narrate every
-tool call or expose hidden chain-of-thought. When compact UI hides successful
+native reasoning. The model states in one sentence what it will do, updates
+only on findings, direction changes, or blockers, and ends with the outcome
+first, then what changed, what it checked, and anything the user must do.
+Structured tool-call events are the authoritative status signal. It must not
+narrate every tool call. When compact UI hides successful
 output, it should summarize material findings in those visible updates or the
 final reply instead of rerunning commands solely to display output; complete
 evidence remains available through Transcript Review.

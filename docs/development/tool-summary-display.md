@@ -62,8 +62,8 @@ Review.
 In compact mode, PTY commands keep their complete capture and grouped completion row without emitting a transient live PTY block. Progress remains available through the active status/spinner, while warnings, failures, diffs, stderr, and meaningful artifacts stay inline. Expanded mode preserves the bounded live tail.
 
 Model-facing progress guidance complements these UI summaries: for non-trivial
-tool work, the model may give one or two concise sentences when the phase or
-next action changes, and ends with a standalone recap. Structured tool-call
+tool work, the model updates only on findings, direction changes, or
+blockers, and ends with an outcome-first summary. Structured tool-call
 events are the authoritative status signal. The model should summarize
 material findings instead of rerunning a command whose successful body is
 available through Transcript Review.

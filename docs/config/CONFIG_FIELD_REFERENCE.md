@@ -154,7 +154,7 @@ python3 scripts/generate_config_field_reference.py
 | `agent.small_model.use_for_memory` | `boolean` | no | `true` | Enable small model for persistent memory classification and summary refresh |
 | `agent.small_model.use_for_web_summary` | `boolean` | no | `true` | Enable small model for web content summarization |
 | `agent.system_prompt_budget_warning` | `boolean` | no | `true` | Warn when the composed system prompt exceeds `max_system_prompt_tokens`. |
-| `agent.system_prompt_mode` | `string` | no | `"default"` | System prompt mode controlling prompt verbosity and token overhead. Options target lean base prompts: minimal (~150-250 tokens), lightweight/default (~250-350 tokens), specialized (~350-500 tokens) before dynamic runtime addenda. |
+| `agent.system_prompt_mode` | `string` | no | `"default"` | System prompt mode controlling prompt verbosity and token overhead. Options target lean base prompts: minimal (~500 tokens), lightweight (~750 tokens), default and specialized (~900 tokens) before dynamic runtime addenda. |
 | `agent.temperature` | `number` | no | `0.7` | Temperature for main LLM responses (0.0-1.0) Lower values = more deterministic, higher values = more creative Recommended: 0.7 for balanced creativity and consistency Range: 0.0 (deterministic) to 1.0 (maximum randomness) |
 | `agent.temporal_context_use_utc` | `boolean` | no | `false` | Use UTC instead of local time for temporal context in system prompts |
 | `agent.theme` | `string` | no | `"ciapre"` | UI theme identifier controlling ANSI styling |

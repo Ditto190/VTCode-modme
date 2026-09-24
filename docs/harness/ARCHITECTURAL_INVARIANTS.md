@@ -236,7 +236,7 @@ Agent output must be verifiable before deployment. Every agent action that produ
 **Violation**: Agent declares a task complete or moves to a next major phase without executing a verification tool (e.g., `cargo check`, `cargo test`, `npx tsc`).
 **Remediation**: Run the appropriate verification command. Analyze the output. If it fails, fix and re-verify. Never rely on internal reasoning as proof of correctness ("hallucination of verification").
 
-**Prompt surface**: The shipped system prompt carries this invariant (and §16) as the outcome rule in the contract shared by every prompt profile, Minimal included (`SHARED_CONTRACT_LINES`: "Verify changes yourself; never claim a check passed unless you ran it."). The no-blind-editing cadence is enforced by the harness gate (`BLIND_EDITING_THRESHOLD` in `src/agent/runloop/unified/turn/tool_outcomes/helpers.rs`), not by a per-edit prompt instruction: telling current models to verify every edit makes them over-verify.
+**Prompt surface**: The shipped system prompt carries this invariant (and §16) as the outcome rule in the runtime guidance shared by every prompt profile, Minimal included, and re-added when a workspace `system.md` replaces the base (`RUNTIME_GUIDANCE_SECTION`: "Never claim a check passed unless you ran it, and report failures with their output."). The no-blind-editing cadence is enforced by the harness gate (`BLIND_EDITING_THRESHOLD` in `src/agent/runloop/unified/turn/tool_outcomes/helpers.rs`), not by a per-edit prompt instruction: telling current models to verify every edit makes them over-verify.
 
 ---
 

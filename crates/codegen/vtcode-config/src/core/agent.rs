@@ -31,8 +31,8 @@ pub struct AgentConfig {
     pub theme: String,
 
     /// System prompt mode controlling prompt verbosity and token overhead.
-    /// Options target lean base prompts: minimal (~150-250 tokens), lightweight/default
-    /// (~250-350 tokens), specialized (~350-500 tokens) before dynamic runtime addenda.
+    /// Options target lean base prompts: minimal (~500 tokens), lightweight (~750 tokens),
+    /// default and specialized (~900 tokens) before dynamic runtime addenda.
     #[serde(default)]
     pub system_prompt_mode: SystemPromptMode,
 

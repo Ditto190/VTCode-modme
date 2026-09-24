@@ -17,17 +17,17 @@ pub use vtcode_commons::reasoning::ReasoningEffortLevel;
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum SystemPromptMode {
-    /// Minimal prompt (~500-800 tokens) - Pi-inspired, modern models need less guidance
+    /// Minimal prompt (~500 tokens base) - Pi-inspired, modern models need less guidance
     /// Best for: Power users, token-constrained contexts, fast responses
     Minimal,
-    /// Lightweight prompt (~1-2k tokens) - Essential guidance only
+    /// Lightweight prompt (~750 tokens base) - Essential guidance only
     /// Best for: Resource-constrained operations, simple tasks
     Lightweight,
-    /// Default prompt (~6-7k tokens) - Full guidance with all features
+    /// Default prompt (~900 tokens base) - Full guidance with all features
     /// Best for: General usage, comprehensive error handling
     #[default]
     Default,
-    /// Specialized prompt (~7-8k tokens) - Complex refactoring and analysis
+    /// Specialized prompt (~900 tokens base) - Complex refactoring and analysis
     /// Best for: Multi-file changes, sophisticated code analysis
     Specialized,
 }

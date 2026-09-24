@@ -60,6 +60,32 @@ immutable `system_prompt` in this order:
     relevant and budget allows, the block is persisted in history once per
     user turn, directly after the user message (see below).
 
+## Prompt style
+
+The compiled base prompt (`prompts/system.rs`, `prompts/runtime_guidance.rs`,
+`prompts/guidelines.rs`) is written to work unchanged on every provider,
+including small local models.
+
+- **Plain prose with reasons.** State each rule as a full sentence and give
+  the reason when it is not obvious ("confirm destructive actions ... since
+  lost work may be unrecoverable"). Do not use capitalized emphasis such as
+  MUST, NEVER, or CRITICAL; the runtime-guidance test rejects it.
+- **One home per rule.** Universal rules (scope, grounding, verification
+  honesty, delegation, safety, progress updates) live only in
+  `RUNTIME_GUIDANCE_SECTION`, which every profile includes and which is
+  re-added when a workspace `system.md` replaces the base. Extended style
+  for the Default and Specialized profiles lives in `DEFAULT_SPECIFIC_LINES`.
+  Operating deltas describe only mode mechanics (tools, planning, tracker).
+  Tests assert that shared sentences appear exactly once per profile.
+- **Provider-agnostic.** No model or provider names, no references to
+  provider-specific features such as thinking blocks or context-clearing
+  parameters, and no formatting that depends on one vendor's renderer.
+- **Budgets with justification.** Each profile and section has a token or
+  character bound in its tests. When a bound is raised, the constant or
+  assertion carries a one-line comment saying why and what it measured.
+  Current base sizes (cl100k estimate): Minimal about 480, Lightweight about
+  730, Default and Specialized about 870, Runtime Guidance about 390.
+
 ## Few-shot management (Section 18.3.3)
 
 ### Authoring examples
