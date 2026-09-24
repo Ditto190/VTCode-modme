@@ -38,23 +38,30 @@ pub fn compact_tool_description(original: &str, mode: ToolDocumentationMode, per
     // MCP tool descriptions arrive wrapped in host policy framing plus an
     // `<untrusted_mcp_description>` fence. Summarizing the raw text would
     // yield only the framing ("Host tool and permission policy remains
-    // authoritative.") for every MCP tool, making deferred search results
-    // indistinguishable. Strip the framing so the summary describes the tool;
-    // full definitions keep the wrapper intact.
-    let unframed = strip_mcp_policy_framing(original);
-    let normalized = unframed.split_whitespace().collect::<Vec<_>>().join(" ");
+    // authoritative.") for every MCP tool, making them indistinguishable. So
+    // the server-provided text is summarized on its own and then re-fenced:
+    // Progressive and Full send up to `per_tool_max` characters of it, which
+    // must stay marked as untrusted. Minimal sends only a short first sentence
+    // and stays unfenced, since the fence would outweigh the summary.
+    let framing = split_mcp_policy_framing(original);
+    let text = framing.as_ref().map_or(original, |framing| framing.inner.as_str());
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let limit = |mode_max: usize| per_tool_max.map_or(mode_max, |per_tool| per_tool.min(mode_max));
 
-    match mode {
+    let summary = match mode {
         ToolDocumentationMode::Minimal => {
             let first = first_sentence(&normalized);
             let first = first.strip_suffix('.').unwrap_or(first);
-            truncate_chars_with_ellipsis(first, limit(MINIMAL_DESCRIPTION_MAX_CHARS))
+            return truncate_chars_with_ellipsis(first, limit(MINIMAL_DESCRIPTION_MAX_CHARS));
         }
         ToolDocumentationMode::Progressive => {
             trim_to_leading_sentences(&normalized, limit(PROGRESSIVE_DESCRIPTION_MAX_CHARS))
         }
         ToolDocumentationMode::Full => trim_to_leading_sentences(&normalized, limit(usize::MAX)),
+    };
+    match framing {
+        Some(framing) => format!("{}\n{summary}\n{MCP_FENCE_CLOSE}", framing.open_tag),
+        None => summary,
     }
 }
 
@@ -115,30 +122,50 @@ fn truncate_chars_with_ellipsis(text: &str, max_chars: usize) -> String {
     format!("{}…", text[..end].trim_end())
 }
 
-/// Remove MCP host-policy framing and fence markup for summary purposes.
+const MCP_FENCE_OPEN_PREFIX: &str = "<untrusted_mcp_description";
+const MCP_FENCE_CLOSE: &str = "</untrusted_mcp_description>";
+
+/// An MCP description split into its host-rendered opening fence tag and the
+/// server-provided text inside it.
+struct McpFraming {
+    open_tag: String,
+    inner: String,
+}
+
+/// Split MCP host-policy framing from the server-provided text.
 ///
-/// Returns the input unchanged when the framing is absent, so non-MCP
-/// descriptions are never altered by this path.
-fn strip_mcp_policy_framing(original: &str) -> String {
+/// Returns `None` when the framing is absent, so non-MCP descriptions are
+/// never altered by this path. The opening tag (with its already-escaped
+/// provider and tool attributes) is kept so callers can re-fence a summary;
+/// the policy sentences, fence lines, and fence comment are dropped.
+fn split_mcp_policy_framing(original: &str) -> Option<McpFraming> {
     use crate::tools::mcp::{MCP_POLICY_SENTENCE, MCP_UNTRUSTED_NOTE_SENTENCE};
 
     if !original.contains(MCP_POLICY_SENTENCE) {
-        return original.to_string();
+        return None;
     }
     let without_policy = original
         .replace(MCP_POLICY_SENTENCE, "")
         .replace(MCP_UNTRUSTED_NOTE_SENTENCE, "");
+    let mut open_tag = None;
     let mut lines: Vec<&str> = Vec::new();
     for line in without_policy.lines() {
         let trimmed = line.trim();
-        // Drop the `<untrusted_mcp_description>` fence and its HTML comment;
-        // the inner server-provided text is what the summary must convey.
+        // The fence tags and comment are host markup; the server text is
+        // XML-escaped by `render_untrusted_mcp_description`, so no inner line
+        // starts with `<`.
         if trimmed.starts_with('<') {
+            if open_tag.is_none() && trimmed.starts_with(MCP_FENCE_OPEN_PREFIX) {
+                open_tag = Some(trimmed.to_string());
+            }
             continue;
         }
         lines.push(line);
     }
-    lines.join("\n")
+    Some(McpFraming {
+        open_tag: open_tag.unwrap_or_else(|| format!("{MCP_FENCE_OPEN_PREFIX}>")),
+        inner: lines.join("\n"),
+    })
 }
 
 /// Project a parameter schema for the given documentation mode.
@@ -225,17 +252,47 @@ mod tests {
 
     #[test]
     fn compact_mcp_description_summarizes_inner_text_not_framing() {
-        let summary = compact_tool_description(
-            &wrapped_mcp_description("Ask a question about a repository. Returns an answer with citations."),
+        let wrapped = wrapped_mcp_description("Ask a question about a repository. Returns an answer with citations.");
+        for mode in [
+            ToolDocumentationMode::Minimal,
             ToolDocumentationMode::Progressive,
-            None,
-        );
-        assert!(
-            summary.starts_with("Ask a question about a repository"),
-            "summary must describe the tool, got: {summary}"
-        );
-        assert!(!summary.contains("remains authoritative"));
-        assert!(!summary.contains("untrusted_mcp_description"));
+            ToolDocumentationMode::Full,
+        ] {
+            let summary = compact_tool_description(&wrapped, mode, None);
+            let body = summary.lines().find(|line| !line.starts_with('<')).unwrap_or_default();
+            assert!(
+                body.starts_with("Ask a question about a repository"),
+                "summary must describe the tool, got: {summary}"
+            );
+            assert!(!summary.contains("remains authoritative"), "{summary}");
+            assert!(!summary.contains("<!--"), "{summary}");
+        }
+    }
+
+    #[test]
+    fn progressive_and_full_mcp_descriptions_stay_fenced() {
+        let wrapped = wrapped_mcp_description("Ask a question about a repository. Returns an answer with citations.");
+        for mode in [ToolDocumentationMode::Progressive, ToolDocumentationMode::Full] {
+            let projected = compact_tool_description(&wrapped, mode, Some(MCP_TOOL_DESCRIPTION_MAX_LEN));
+            assert_eq!(
+                projected,
+                "<untrusted_mcp_description provider=\"deepwiki\" tool=\"ask_question\">\n\
+                 Ask a question about a repository. Returns an answer with citations.\n\
+                 </untrusted_mcp_description>",
+                "{mode:?}"
+            );
+        }
+
+        // The per-tool cap bounds the server-provided text inside the fence.
+        let long = wrapped_mcp_description(&"Server sentence here. ".repeat(60));
+        let projected =
+            compact_tool_description(&long, ToolDocumentationMode::Full, Some(MCP_TOOL_DESCRIPTION_MAX_LEN));
+        let inner = projected
+            .strip_prefix("<untrusted_mcp_description provider=\"deepwiki\" tool=\"ask_question\">\n")
+            .and_then(|rest| rest.strip_suffix("\n</untrusted_mcp_description>"))
+            .expect("fenced projection");
+        assert!(inner.chars().count() <= MCP_TOOL_DESCRIPTION_MAX_LEN, "{inner}");
+        assert!(!inner.contains('<'), "{inner}");
     }
 
     #[test]
