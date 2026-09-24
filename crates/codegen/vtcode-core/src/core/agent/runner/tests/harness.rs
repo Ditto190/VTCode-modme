@@ -789,3 +789,79 @@ async fn evaluator_exhaustion_writes_blocked_handoff_with_artifact_paths() {
     assert!(workspace.join(".vtcode/tasks/current_contract.md").exists());
     assert!(workspace.join(".vtcode/tasks/current_evaluation.md").exists());
 }
+
+fn refusal_response(content: Option<&str>, category: &str) -> LLMResponse {
+    LLMResponse {
+        content: content.map(str::to_string),
+        finish_reason: FinishReason::Refusal,
+        reasoning_details: Some(vec![json!({"type": "stop_details", "category": category}).to_string()]),
+        ..LLMResponse::default()
+    }
+}
+
+#[tokio::test]
+async fn refusal_stops_runner_immediately_with_reason_instead_of_idle_retries() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut vt_cfg = VTCodeConfig::default();
+    vt_cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
+    let mut runner = Box::pin(make_runner(&temp, vt_cfg, "thread-refusal-stop")).await;
+    let provider = RecordingQueuedProvider::with_name(
+        "queued-test-provider",
+        vec![
+            refusal_response(None, "cyber"),
+            text_response("should never be requested"),
+            text_response("should never be requested"),
+            text_response("should never be requested"),
+        ],
+    );
+    runner.provider_client = Box::new(provider.clone());
+
+    let result = Box::pin(runner.execute_task(&task("Refused task", "refused-task"), &[]))
+        .await
+        .expect("task result");
+
+    assert_eq!(provider.recorded_requests().len(), 1, "a refusal must not be resent");
+    let TaskOutcome::Refused { reason } = &result.outcome else {
+        panic!("expected refused outcome, got {:?}", result.outcome);
+    };
+    assert!(reason.starts_with("The model declined this request (category: cyber)."));
+    assert_eq!(result.outcome.code(), "refused");
+    assert!(result.summary.contains("Outcome Code: refused"));
+    assert!(result.summary.contains(reason.as_str()));
+    assert!(result.thread_events.iter().any(|event| matches!(
+        event,
+        ThreadEvent::TurnFailed(failed) if failed.message == *reason
+    )));
+    assert!(
+        !runner
+            .thread_handle
+            .messages()
+            .iter()
+            .any(|message| message.role == crate::llm::provider::MessageRole::Assistant),
+        "refused output must not stay in the kept history"
+    );
+}
+
+#[tokio::test]
+async fn refusal_explanation_falls_back_to_trimmed_content() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut vt_cfg = VTCodeConfig::default();
+    vt_cfg.agent.harness.orchestration_mode = vtcode_config::core::agent::HarnessOrchestrationMode::Single;
+    let mut runner = Box::pin(make_runner(&temp, vt_cfg, "thread-refusal-content")).await;
+    let mut response = refusal_response(Some("  I can't help with that request.  "), "");
+    response.reasoning_details = None;
+    runner.provider_client = Box::new(QueuedProvider::new(vec![response]));
+
+    let result = Box::pin(runner.execute_task(&task("Refused task", "refused-task"), &[]))
+        .await
+        .expect("task result");
+
+    assert_eq!(
+        result.outcome,
+        TaskOutcome::refused(
+            "The model declined this request: I can't help with that request. \
+             The request was not retried; rephrase it or switch models."
+                .to_string()
+        )
+    );
+}

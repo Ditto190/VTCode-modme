@@ -50,6 +50,7 @@ impl From<TaskResults> for TaskHistoryEntry {
             TaskOutcome::TurnLimitReached { .. } => vec!["turn_limit".to_string()],
             TaskOutcome::BudgetLimitReached { .. } => vec!["budget".to_string()],
             TaskOutcome::Cancelled => vec!["cancelled".to_string()],
+            TaskOutcome::Refused { .. } => vec!["refusal".to_string()],
             _ => Vec::new(),
         };
 
