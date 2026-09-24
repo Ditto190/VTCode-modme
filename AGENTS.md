@@ -22,7 +22,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 - Harness config is split across `agent.harness`, `automation.full_auto`, `context.dynamic` — do not add a new top-level harness subsystem.
 - Prefer `compact_str::CompactString` (aliased as `CompactStr` in `vtcode_core::types`) over `String` for small string fields. Use `Cow<'static, str>` for mostly-static return strings.
 - **Shape-suffix naming**: encode the dimensional structure of data in variable/type names. For feature vectors, document a **dimension key** (table of index → name → meaning). For bare tuples holding structured data, promote to named structs so the shape is explicit in the type system (inspired by Noam Shazeer's shape-suffix convention).
-- `clippy.toml` allows `unwrap`/`panic`/indexing in tests only.
+- `clippy.toml` allows `unwrap`/`panic`/indexing in tests only. Avoid Rust `unsafe` (workspace lints warn on `unsafe_code`); where it is unavoidable, keep the block minimal and justify it with a `// SAFETY:` comment (`undocumented_unsafe_blocks`).
 - Dev profile has `incremental = false` (sccache). Set `CARGO_INCREMENTAL=1` to override.
 - Treat the sandbox/exec boundary as a primary adversarial surface: use sandbox-aware launch paths and add adversarial regression coverage for command injection, path/symlink escape, environment leakage, and fail-closed behavior.
 - **All built-in themes must meet WCAG AA 4.5:1 contrast** for foreground and all accent fields against background. Validate with `cargo nextest run -p vtcode-ui -E 'test(theme)'`. See `.vtcode/memory/gotchas.md` for catppuccin-latte special-case.
