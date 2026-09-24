@@ -94,9 +94,14 @@ pub const CONTRACT_HEADER: &str = "## Contract";
 
 /// Contract rules shared across all prompt modes that are not universal
 /// user-facing runtime guidance.
+///
+/// The verification outcome rule lives here (not in a mode-specific list) so
+/// every profile, including Minimal, states it; per-edit cadence is enforced by
+/// the harness gate instead (docs/harness/ARCHITECTURAL_INVARIANTS.md §14).
 pub const SHARED_CONTRACT_LINES: &[&str] = &[
     "Preserve task goal, tracker state, touched files, verification status, and decisions across compaction.",
     "`spool_path` holds full tool output; inspect once via `exec_command.cmd`, never re-dump the whole file.",
+    "Verify changes yourself; never claim a check passed unless you ran it.",
 ];
 
 /// Default/Lightweight/Specialized mode: expanded contract lines beyond shared rules.
@@ -105,7 +110,6 @@ pub const DEFAULT_SPECIFIC_LINES: &[&str] = &[
     "Take safe, reversible steps; recover with smaller scope or one focused clarification.",
     "Ask only for material behavior, API, UX, or credential changes.",
     "Keep control on the main thread. Delegate bounded, independent work only.",
-    "Verify changes yourself; never claim a check passed unless you ran it.",
     "Keep user updates brief and high-signal.",
     "Never speculate about code you have not opened.",
     "Make only requested changes; use tools to implement directly, or stay within the active agent mode.",
@@ -1280,6 +1284,18 @@ mod tests {
             minimal_system_prompt().contains("touched files"),
             "Minimal prompt should preserve touched files across compaction"
         );
+        for (mode_name, prompt) in [
+            ("default", default_system_prompt()),
+            ("minimal", minimal_system_prompt()),
+            ("lightweight", default_lightweight_prompt()),
+            ("specialized", specialized_system_prompt()),
+        ] {
+            assert_eq!(
+                prompt.matches("never claim a check passed unless you ran it").count(),
+                1,
+                "{mode_name} prompt should state the verification outcome rule exactly once"
+            );
+        }
     }
 
     #[test]
@@ -1991,11 +2007,11 @@ Senior engineer in this codebase: read, plan, implement, verify, report. Scale e
 
 - Preserve task goal, tracker state, touched files, verification status, and decisions across compaction.
 - `spool_path` holds full tool output; inspect once via `exec_command.cmd`, never re-dump the whole file.
+- Verify changes yourself; never claim a check passed unless you ran it.
 - Start with the project instruction map (`AGENTS.md`/`CLAUDE.md`); inspect code first and match local patterns.
 - Take safe, reversible steps; recover with smaller scope or one focused clarification.
 - Ask only for material behavior, API, UX, or credential changes.
 - Keep control on the main thread. Delegate bounded, independent work only.
-- Verify changes yourself; never claim a check passed unless you ran it.
 - Keep user updates brief and high-signal.
 - Never speculate about code you have not opened.
 - Make only requested changes; use tools to implement directly, or stay within the active agent mode.
@@ -2066,11 +2082,11 @@ VT Code (Build mode). Be concise and safe.
 
 - Preserve task goal, tracker state, touched files, verification status, and decisions across compaction.
 - `spool_path` holds full tool output; inspect once via `exec_command.cmd`, never re-dump the whole file.
+- Verify changes yourself; never claim a check passed unless you ran it.
 - Start with the project instruction map (`AGENTS.md`/`CLAUDE.md`); inspect code first and match local patterns.
 - Take safe, reversible steps; recover with smaller scope or one focused clarification.
 - Ask only for material behavior, API, UX, or credential changes.
 - Keep control on the main thread. Delegate bounded, independent work only.
-- Verify changes yourself; never claim a check passed unless you ran it.
 - Keep user updates brief and high-signal.
 - Never speculate about code you have not opened.
 - Make only requested changes; use tools to implement directly, or stay within the active agent mode.
