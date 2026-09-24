@@ -25,8 +25,9 @@ use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool, web_fetch_par
 use crate::tools::web_search::{WEB_SEARCH_DESCRIPTION, WebSearchTool};
 use serde_json::json;
 use vtcode_utility_tool_specs::{
-    SEARCH_TOOLS_DESCRIPTION, agent_parameters, apply_patch_parameters, code_search_parameters, cron_parameters,
-    exec_command_parameters, list_files_parameters, mcp_parameters, search_tools_parameters, write_stdin_parameters,
+    EXEC_COMMAND_DESCRIPTION, SEARCH_TOOLS_DESCRIPTION, agent_parameters, apply_patch_parameters,
+    code_search_parameters, cron_parameters, exec_command_parameters, list_files_parameters, mcp_parameters,
+    search_tools_parameters, write_stdin_parameters,
 };
 
 use super::distributed::{BUILTIN_TOOLS, tool_config};
@@ -336,17 +337,10 @@ fn register_search_tools(_plan_state: Option<&PlanningWorkflowState>) -> ToolReg
 
 #[distributed_slice(BUILTIN_TOOLS)]
 fn register_exec_command(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
-    ToolRegistration::new(
-        tools::EXEC_COMMAND,
-        CapabilityLevel::Bash,
-        false,
-        ToolRegistry::exec_command_executor,
-    )
-    .with_description(
-        "Use this to execute a shell command. Optional sandbox_permissions, additional_permissions, and justification fields express request intent. Put normal shell tools such as ls, rg, find, cat, sed, awk, build tools, and test tools in cmd. Returns output, exit status, and a reusable session id when the command is still running.",
-    )
-    .with_parameter_schema(exec_command_parameters())
-    .with_permission(ToolPolicy::Allow)
+    ToolRegistration::new(tools::EXEC_COMMAND, CapabilityLevel::Bash, false, ToolRegistry::exec_command_executor)
+        .with_description(EXEC_COMMAND_DESCRIPTION)
+        .with_parameter_schema(exec_command_parameters())
+        .with_permission(ToolPolicy::Allow)
 }
 
 #[distributed_slice(BUILTIN_TOOLS)]

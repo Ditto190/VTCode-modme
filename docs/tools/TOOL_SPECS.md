@@ -22,6 +22,11 @@ Runs a shell command through the active shell profile. Permission-related
 fields express stable request intent; the execution gateway resolves runtime
 enforcement without changing the model-visible schema.
 
+File edits belong in `apply_patch` rather than shell redirection or in-place
+editors such as `sed -i`. Expanded `sandbox_permissions` modes trigger an
+approval check before the command runs; `require_escalated` and
+`bypass_sandbox` also need a non-empty `justification`.
+
 Required:
 
 - `cmd`: command text.

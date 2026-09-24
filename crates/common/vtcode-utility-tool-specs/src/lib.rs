@@ -207,6 +207,9 @@ pub fn cron_delete_parameters() -> Value {
     })
 }
 
+/// Model-visible description of the `exec_command` tool.
+pub const EXEC_COMMAND_DESCRIPTION: &str = "Run a shell command through the active sandbox policy and permission checks. Put normal shell tools such as ls, rg, find, cat, sed, awk, build tools, and test tools in cmd. Returns output, exit status, and a reusable session id when the command is still running. For file edits, use apply_patch instead of shell redirection or in-place editors such as `sed -i`. Expanded sandbox_permissions modes trigger an approval check before the command runs; `require_escalated` and `bypass_sandbox` also need a non-empty justification.";
+
 #[must_use]
 pub fn exec_command_parameters() -> Value {
     json!({
@@ -559,6 +562,25 @@ mod tests {
                 .contains("spool_path")
         );
         assert_eq!(stdin_params["additionalProperties"], false);
+    }
+
+    #[test]
+    fn exec_command_description_states_edit_routing_and_escalation_rules() {
+        assert!(EXEC_COMMAND_DESCRIPTION.starts_with("Run a shell command through the active sandbox policy"));
+        assert!(EXEC_COMMAND_DESCRIPTION.contains("For file edits, use apply_patch"));
+        assert!(EXEC_COMMAND_DESCRIPTION.contains("approval check"));
+        assert!(EXEC_COMMAND_DESCRIPTION.contains("non-empty justification"));
+        for mode in ["require_escalated", "bypass_sandbox"] {
+            assert!(EXEC_COMMAND_DESCRIPTION.contains(mode), "{mode}");
+            assert!(
+                exec_command_parameters()["properties"]["sandbox_permissions"]["enum"]
+                    .as_array()
+                    .expect("sandbox_permissions enum")
+                    .iter()
+                    .any(|value| value == mode),
+                "{mode} must stay a real sandbox_permissions value"
+            );
+        }
     }
 
     #[test]

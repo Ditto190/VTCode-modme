@@ -40,6 +40,7 @@ See [docs.rs/vtcode-utility-tool-specs](https://docs.rs/vtcode-utility-tool-spec
 - `DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION` – default input description for apply-patch
 - `APPLY_PATCH_TOOL_DESCRIPTION` – model-visible description of the apply-patch tool
 - `SEARCH_TOOLS_DESCRIPTION` – model-visible description of the search_tools tool
+- `EXEC_COMMAND_DESCRIPTION` – model-visible description of the exec_command tool
 
 ### Schema functions
 
