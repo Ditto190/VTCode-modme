@@ -176,13 +176,20 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
     None
 }
 
+/// Claude 5.x family ids. `matches_model` uses `contains`, so the Fable 5 id
+/// also matches `claude-fable-5-1` and the Opus 5 id matches `claude-opus-5-5`.
+const CLAUDE_5_FAMILY: &[&str] = &[
+    models::anthropic::CLAUDE_SONNET_5,
+    models::anthropic::CLAUDE_FABLE_5,
+    models::anthropic::CLAUDE_OPUS_5,
+];
+
+fn is_claude_5_family(model: &str) -> bool {
+    CLAUDE_5_FAMILY.iter().any(|candidate| matches_model(model, candidate))
+}
+
 fn supports_native_1m_context(model: &str) -> bool {
-    matches_model(model, models::anthropic::CLAUDE_SONNET_5)
-        || matches_model(model, models::anthropic::CLAUDE_FABLE_5)
-        || matches_model(model, models::anthropic::CLAUDE_FABLE_5_1)
-        || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
-        || matches_model(model, models::anthropic::CLAUDE_SONNET_5)
-        || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
+    is_claude_5_family(model)
 }
 
 pub(crate) fn supports_reasoning(model: &str, default_model: &str) -> bool {
@@ -378,12 +385,7 @@ pub(crate) fn effort_allowed_for_model(model: &str, default_model: &str, effort:
 }
 
 pub(crate) fn supports_compaction(model: &str) -> bool {
-    matches_model(model, models::anthropic::CLAUDE_SONNET_5)
-        || matches_model(model, models::anthropic::CLAUDE_FABLE_5)
-        || matches_model(model, models::anthropic::CLAUDE_FABLE_5_1)
-        || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
-        || matches_model(model, models::anthropic::CLAUDE_OPUS_5)
-        || matches_model(model, models::anthropic::CLAUDE_SONNET_5)
+    is_claude_5_family(model)
 }
 
 pub(crate) fn supports_parallel_tool_config(_model: &str) -> bool {
@@ -399,12 +401,7 @@ pub fn effective_context_size(model: &str) -> usize {
 }
 
 pub(crate) fn rejects_sampling(model: &str, default_model: &str) -> bool {
-    let requested = resolve_model_name(model, default_model);
-    matches_model(requested, models::anthropic::CLAUDE_SONNET_5)
-        || matches_model(requested, models::anthropic::CLAUDE_FABLE_5)
-        || matches_model(requested, models::anthropic::CLAUDE_FABLE_5_1)
-        || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
-        || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
+    is_claude_5_family(resolve_model_name(model, default_model))
 }
 
 pub(crate) fn supports_structured_output(model: &str, default_model: &str) -> bool {
@@ -416,9 +413,7 @@ pub(crate) fn supports_structured_output(model: &str, default_model: &str) -> bo
     }
 
     // Legacy models without thinking profiles that support structured outputs.
-    matches_model(requested, "claude-sonnet-4-5")
-        || matches_model(requested, "claude-opus-4-5")
-        || matches_model(requested, "claude-sonnet-5")
+    matches_model(requested, "claude-sonnet-4-5") || matches_model(requested, "claude-opus-4-5")
 }
 
 pub(crate) fn supports_vision(model: &str, default_model: &str) -> bool {
@@ -590,6 +585,33 @@ mod tests {
         assert_eq!(default_thinking_display(models::anthropic::CLAUDE_OPUS_5_5, ""), Some(ThinkingDisplay::Updates));
         assert_eq!(default_thinking_display(models::anthropic::CLAUDE_OPUS_5, ""), None);
         assert_eq!(default_thinking_display(models::anthropic::CLAUDE_SONNET_5, ""), None);
+    }
+
+    #[test]
+    fn claude_5_family_capabilities_cover_every_profiled_model() {
+        for model in [
+            models::anthropic::CLAUDE_SONNET_5,
+            models::anthropic::CLAUDE_FABLE_5,
+            models::anthropic::CLAUDE_FABLE_5_1,
+            models::anthropic::CLAUDE_OPUS_5,
+            models::anthropic::CLAUDE_OPUS_5_5,
+        ] {
+            assert!(claude_thinking_profile(model, "").is_some(), "{model}");
+            assert_eq!(effective_context_size(model), 1_000_000, "{model}");
+            assert!(supports_compaction(model), "{model}");
+            assert!(rejects_sampling(model, ""), "{model}");
+            assert!(supports_structured_output(model, ""), "{model}");
+        }
+        assert!(rejects_sampling("", models::anthropic::CLAUDE_OPUS_5_5));
+
+        for model in [CLAUDE_OPUS_4_8, "claude-sonnet-4-5", models::minimax::MINIMAX_M3, ""] {
+            assert_eq!(effective_context_size(model), 200_000, "{model}");
+            assert!(!supports_compaction(model), "{model}");
+            assert!(!rejects_sampling(model, ""), "{model}");
+        }
+        assert!(supports_structured_output("claude-sonnet-4-5", ""));
+        assert!(supports_structured_output("claude-opus-4-5", ""));
+        assert!(!supports_structured_output(models::minimax::MINIMAX_M3, ""));
     }
 
     #[test]
