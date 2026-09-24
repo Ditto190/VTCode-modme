@@ -70,6 +70,39 @@ The runtime mode can be changed for the current session with `Alt+T`. This actio
 
 Explicit `expanded` mode preserves the existing per-call summary and live-output layout.
 
+## Exec-session calls (`write_stdin` and the session readers)
+
+Exec-session calls repeat on every poll or wait of a long command, so their
+transcript rows stay minimal: the session identity plus an explicit wait
+deadline is the only parameter row shown (`└ Session run-2d5752f2 · wait 600s`),
+and the generic stream label is dropped next to it so the header reads
+`• Send command input` instead of appending `Use write_stdin output`.
+Output-token caps, yield windows, and the raw stdin payload are not rendered;
+the model still receives the full arguments and result.
+
+The captured stdin/stdout body is capped at 10 visible rows, taken from the
+tail, followed by the same `… +N lines (/share html for full transcript)` notice
+used for bounded command previews. A session body is terminal text, so it renders
+plain in the subdued PTY body color from the active theme: git-diff detection and
+`LS_COLORS` per-line styling are skipped, because both misfire on build logs
+(`PASS … .rs` picked up file-type colors). The spooled branch already bounds to
+six rows (three head, three tail). Complete output stays in the session-local
+Transcript Review and the spool file referenced in the spool message; only the
+rendered preview is bounded.
+
+The redundant stream label is only dropped for the generic capture label
+(`output`), which repeats the body already shown below the row. Diagnostic labels
+(`error`, `stderr`, `stdout`, `stdio`) survive so a failed session read does not
+lose its failure signal on the header.
+
+`• Ran` headers for long commands head-truncate at a word boundary with a single
+trailing ellipsis, sharing `preview_command` between the summary headline and the
+command line so a path is never cut in half (`…crates/…onfig/…`).
+
+Command launches (`exec_command`, `unified_exec` action `run`, `run_pty_cmd`)
+are unaffected: they keep the `• Ran …` header and the three-line head plus
+three-line tail command preview.
+
 ## Model-visible tool output budget
 
 Tool-result previews copied into provider-facing history share an

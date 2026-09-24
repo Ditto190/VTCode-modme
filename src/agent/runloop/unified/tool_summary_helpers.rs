@@ -7,6 +7,8 @@ pub(super) use vtcode_commons::formatting::truncate_path_middle;
 use vtcode_commons::formatting::{collapse_whitespace, truncate_middle};
 use vtcode_core::tools::command_args;
 
+pub(crate) use super::tool_pipeline::is_exec_session_call;
+
 pub(super) fn humanize_tool_name(name: &str) -> String {
     humanize_key(name)
 }
@@ -522,7 +524,32 @@ fn is_noise_param(key: &str) -> bool {
             | "call_type"
             // Redundant with summary headline (e.g., "Read file" already implies action=read)
             | "action"
+            // Output caps, same plumbing class as the size limits above.
+            | "max_output_tokens"
+            | "max_tokens"
     )
+}
+
+/// One row summarizing the plumbing of an exec-session call.
+///
+/// Keeps the session identity (so a reader can follow which command a poll or
+/// wait belongs to) plus the only knob that changes observable behavior — an
+/// explicit wait deadline. Output-token caps, yield windows, and the raw stdin
+/// payload are deliberately dropped from the transcript: the model receives the
+/// arguments unchanged, and the user only needs the session at a glance.
+///
+/// Returns `None` when the call carries neither, so non-session tools keep
+/// their normal detail rows.
+pub(super) fn exec_session_param_detail(args: &Value) -> Option<String> {
+    let session = lookup_string(args, "session_id").map(|id| format!("Session {id}"));
+    let wait = ["wait_timeout_seconds", "timeout_seconds"]
+        .iter()
+        .find_map(|key| args.get(key).and_then(Value::as_u64))
+        .filter(|secs| *secs > 0)
+        .map(|secs| format!("wait {secs}s"));
+
+    let parts = [session, wait].into_iter().flatten().collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 pub(super) fn should_render_command_line(highlights: &HashSet<String>) -> bool {
@@ -539,7 +566,13 @@ pub(super) fn command_line_for_args(args: &Value) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(truncate_middle(trimmed, 120))
+    // Head-truncate at a word boundary with a trailing ellipsis instead of
+    // `truncate_middle`. Splitting a middle token reads as a rendering bug —
+    // `git diff --stat crates/…onfig/config` looks malformed, and the command
+    // verb plus the first meaningful args are what the reader needs. Shares
+    // `preview_command` with the `describe_shell_command` headline so both
+    // surfaces truncate identically.
+    Some(preview_command(trimmed, COMPACT_PREVIEW_LEN))
 }
 
 pub(super) fn highlight_texts_for_summary(
@@ -716,6 +749,13 @@ mod tests {
         assert!(is_noise_param("shell"));
         assert!(is_noise_param("sandbox_permissions"));
         assert!(is_noise_param("action")); // Redundant with summary headline
+        // Output caps are plumbing like the size limits above.
+        assert!(is_noise_param("max_output_tokens"));
+        assert!(is_noise_param("max_tokens"));
+        // Session plumbing is folded by `exec_session_param_detail` instead.
+        assert!(!is_noise_param("session_id"));
+        assert!(!is_noise_param("chars"));
+        assert!(!is_noise_param("wait_timeout_seconds"));
         // Read file params should pass through (not noise)
         assert!(!is_noise_param("offset"));
         assert!(!is_noise_param("limit"));
@@ -727,6 +767,68 @@ mod tests {
         assert!(!is_noise_param("pattern"));
         assert!(!is_noise_param("path"));
         assert!(!is_noise_param("mode"));
+    }
+
+    #[test]
+    fn exec_session_param_detail_keeps_session_and_wait_only() {
+        let args = json!({
+            "session_id": "run-2d5752f2",
+            "chars": "y\n",
+            "yield_time_ms": 1000,
+            "wait_timeout_seconds": 600,
+            "max_output_tokens": 4000,
+            "max_tokens": 4000
+        });
+        // Token caps, the yield window, and the raw stdin payload must not each
+        // become their own tree row.
+        assert_eq!(exec_session_param_detail(&args).as_deref(), Some("Session run-2d5752f2 · wait 600s"));
+    }
+
+    #[test]
+    fn exec_session_param_detail_accepts_timeout_alias() {
+        let args = json!({ "session_id": "run-abc", "timeout_seconds": 30 });
+        assert_eq!(exec_session_param_detail(&args).as_deref(), Some("Session run-abc · wait 30s"));
+    }
+
+    #[test]
+    fn exec_session_param_detail_skips_zero_and_missing_wait() {
+        let args = json!({ "session_id": "run-abc", "wait_timeout_seconds": 0 });
+        assert_eq!(exec_session_param_detail(&args).as_deref(), Some("Session run-abc"));
+    }
+
+    #[test]
+    fn exec_session_param_detail_none_without_session_or_wait() {
+        assert!(exec_session_param_detail(&json!({ "chars": "y\n", "max_output_tokens": 4000 })).is_none());
+        assert!(exec_session_param_detail(&json!({ "path": "AGENTS.md" })).is_none());
+    }
+
+    #[test]
+    fn command_line_for_args_avoids_mid_string_ellipsis() {
+        // Long chained commands must not cut a path in half: `preview_command`
+        // head-truncates at a word boundary with a trailing ellipsis, while the
+        // old `truncate_middle` produced `crates/…onfig/…`-style artifacts in
+        // `• Ran` summaries (screenshot 2026-09-24 11.40.47).
+        let long = "cargo nextest run -p vtcode --bin vtcode && cargo fmt --all -- --check && \
+                    git status --short && git diff --stat && git diff --cached --stat && \
+                    ./scripts/check-dev.sh --workspace && echo done";
+        assert!(long.chars().count() > 120, "fixture must actually overflow the cap");
+        let args = json!({ "cmd": long });
+        let command = command_line_for_args(&args).expect("command line");
+
+        assert!(command.ends_with('\u{2026}'), "tail ellipsis expected, got: {command:?}");
+        // The head survives intact: no path is cut in half by a middle cut.
+        assert!(command.starts_with("cargo nextest run -p vtcode"), "got: {command:?}");
+        // A middle cut would splice the middle of a later token into the preview.
+        let body = command.trim_end_matches('\u{2026}');
+        assert!(!body.contains('\u{2026}'), "mid-string ellipsis leaked: {command:?}");
+        // Exactly one ellipsis, terminating the command.
+        assert_eq!(command.matches('\u{2026}').count(), 1, "got: {command:?}");
+    }
+
+    #[test]
+    fn command_line_for_args_keeps_short_commands_unchanged() {
+        let args = json!({ "cmd": "git status --short" });
+        assert_eq!(command_line_for_args(&args).as_deref(), Some("git status --short"));
     }
 
     #[test]

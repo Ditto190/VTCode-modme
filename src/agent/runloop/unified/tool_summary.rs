@@ -20,8 +20,9 @@ use vtcode_ui::tui::ui::syntax_highlight;
 use crate::agent::runloop::tool_output::render_tree_detail;
 use crate::agent::runloop::unified::tool_summary_helpers::{
     collect_param_details, command_line_for_args, describe_code_search, describe_fetch_action, describe_grep_file,
-    describe_list_files, describe_path_action, describe_shell_command, highlight_texts_for_summary,
-    relativize_command_paths, relativize_to_workspace, should_render_command_line, truncate_path_middle,
+    describe_list_files, describe_path_action, describe_shell_command, exec_session_param_detail,
+    highlight_texts_for_summary, is_exec_session_call, relativize_command_paths, relativize_to_workspace,
+    should_render_command_line, truncate_path_middle,
 };
 
 /// Ambient context required to render tool-call summaries.
@@ -161,13 +162,13 @@ pub(crate) fn render_tool_call_summary(
     ctx: &ToolSummaryRenderContext,
     bullet_color: Color,
 ) -> Result<()> {
-    let data = prepare_summary_data(tool_name, args, ctx.workspace_root);
+    let data = prepare_summary_data(tool_name, args, ctx.workspace_root, stream_label);
 
     if renderer.tool_display_mode() == ToolDisplayMode::Compact {
-        return render_compact_tool_summary_data(renderer, &data, stream_label);
+        return render_compact_tool_summary_data(renderer, &data);
     }
 
-    render_expanded_tool_summary_data(renderer, &data, stream_label, bullet_color)
+    render_expanded_tool_summary_data(renderer, &data, bullet_color)
 }
 
 pub(crate) fn render_expanded_tool_call_summary(
@@ -178,14 +179,13 @@ pub(crate) fn render_expanded_tool_call_summary(
     ctx: &ToolSummaryRenderContext,
     bullet_color: Color,
 ) -> Result<()> {
-    let data = prepare_summary_data(tool_name, args, ctx.workspace_root);
-    render_expanded_tool_summary_data(renderer, &data, stream_label, bullet_color)
+    let data = prepare_summary_data(tool_name, args, ctx.workspace_root, stream_label);
+    render_expanded_tool_summary_data(renderer, &data, bullet_color)
 }
 
 fn render_expanded_tool_summary_data(
     renderer: &mut AnsiRenderer,
     data: &SummaryData,
-    stream_label: Option<&str>,
     bullet_color: Color,
 ) -> Result<()> {
     let theme_styles = theme::active_styles();
@@ -199,7 +199,7 @@ fn render_expanded_tool_summary_data(
     line.push_str(&render_styled("•", bullet_color, None));
     line.push(' ');
 
-    let wrapped_run_segments = render_bullet_line(&mut line, data, stream_label, main_color, &palette);
+    let wrapped_run_segments = render_bullet_line(&mut line, data, main_color, &palette);
 
     renderer.line_with_override_style(MessageStyle::Info, AnsiStyle::new(), &line)?;
 
@@ -216,9 +216,12 @@ struct SummaryData {
     summary_highlights: Vec<String>,
     command_line: Option<String>,
     details: Vec<String>,
+    /// Stream label to append to the header row, already filtered of labels
+    /// that a session row makes redundant.
+    stream_label: Option<String>,
 }
 
-fn compact_summary_expanded_lines(data: &SummaryData, stream_label: Option<&str>) -> Vec<CompactToolSummaryLine> {
+fn compact_summary_expanded_lines(data: &SummaryData) -> Vec<CompactToolSummaryLine> {
     let mut lines = Vec::new();
     if let Some(command) = data.summary.strip_prefix("Ran ") {
         let wrapped = wrap_text_words(command, RUN_SUMMARY_FIRST_WIDTH, RUN_SUMMARY_CONTINUATION_WIDTH);
@@ -234,7 +237,14 @@ fn compact_summary_expanded_lines(data: &SummaryData, stream_label: Option<&str>
     } else {
         lines.push(CompactToolSummaryLine {
             kind: CompactToolSummaryLineKind::Info,
-            text: format!("• {}{}", data.summary, stream_label.map(|label| format!(" {label}")).unwrap_or_default()),
+            text: format!(
+                "• {}{}",
+                data.summary,
+                data.stream_label
+                    .as_deref()
+                    .map(|label| format!(" {label}"))
+                    .unwrap_or_default()
+            ),
         });
     }
     if let Some(command_line) = &data.command_line {
@@ -250,15 +260,40 @@ fn compact_summary_expanded_lines(data: &SummaryData, stream_label: Option<&str>
     lines
 }
 
-fn prepare_summary_data(tool_name: &str, args: &Value, workspace_root: Option<&Path>) -> SummaryData {
+/// Stream label to show beside a tool header.
+///
+/// `• Send command input output` reads as a stutter because the captured body
+/// is already visible below the row, so the generic capture label is dropped for
+/// exec-session calls. Diagnostic labels (`error`, `stderr`, `stdout`, `stdio`)
+/// are kept: a failed session read must not lose its failure signal.
+fn resolved_stream_label(stream_label: Option<&str>, is_exec_session: bool) -> Option<String> {
+    let label = stream_label?;
+    if is_exec_session && label == "output" {
+        return None;
+    }
+    Some(label.to_string())
+}
+
+fn prepare_summary_data(
+    tool_name: &str,
+    args: &Value,
+    workspace_root: Option<&Path>,
+    stream_label: Option<&str>,
+) -> SummaryData {
     let (headline, highlights) = describe_tool_action(tool_name, args, workspace_root);
     let command_line_candidate = command_line_for_args(args).map(|cmd| relativize_command_paths(&cmd, workspace_root));
     let summary_highlights = highlight_texts_for_summary(args, &highlights, workspace_root);
     let action_label = tool_action_label(tool_name, args);
     let is_run_command = action_label == "Run command";
+    let is_exec_session = is_exec_session_call(tool_name, args);
 
+    // Exec-session calls repeat on every poll/wait and carry plumbing the reader
+    // does not need, so they collapse to one row instead of several. Command
+    // launches already print the command as the headline.
     let details = if is_run_command {
         Vec::new()
+    } else if is_exec_session {
+        exec_session_param_detail(args).into_iter().collect()
     } else {
         collect_param_details(args, &highlights, workspace_root)
     };
@@ -280,14 +315,16 @@ fn prepare_summary_data(tool_name: &str, args: &Value, workspace_root: Option<&P
         command_line_candidate.filter(|_| should_render_command_line(&highlights))
     };
 
-    SummaryData { summary, summary_highlights, command_line, details }
+    SummaryData {
+        summary,
+        summary_highlights,
+        command_line,
+        details,
+        stream_label: resolved_stream_label(stream_label, is_exec_session),
+    }
 }
 
-fn render_compact_tool_summary_data(
-    renderer: &mut AnsiRenderer,
-    data: &SummaryData,
-    stream_label: Option<&str>,
-) -> Result<()> {
+fn render_compact_tool_summary_data(renderer: &mut AnsiRenderer, data: &SummaryData) -> Result<()> {
     if let Some(command) = data.summary.strip_prefix("Ran ") {
         return renderer.render_compact_command_activity(command.to_string(), 0, None, None);
     }
@@ -295,7 +332,7 @@ fn render_compact_tool_summary_data(
     // A non-command result is a hard grouping boundary. Its own detail lines
     // remain visible in compact mode, so the next command starts a fresh row.
     renderer.flush_compact_command_group();
-    for line in compact_summary_expanded_lines(data, stream_label) {
+    for line in compact_summary_expanded_lines(data) {
         match line.kind {
             CompactToolSummaryLineKind::Info => {
                 renderer.line_with_override_style(MessageStyle::Info, AnsiStyle::new(), &line.text)?;
@@ -309,7 +346,6 @@ fn render_compact_tool_summary_data(
 fn render_bullet_line(
     line: &mut String,
     data: &SummaryData,
-    stream_label: Option<&str>,
     main_color: Color,
     palette: &ColorPalette,
 ) -> Option<Vec<String>> {
@@ -329,17 +365,10 @@ fn render_bullet_line(
             palette.accent,
             palette.muted,
         ));
-    }
-
-    let effective_stream = if data.summary.starts_with("Ran ") {
-        None
-    } else {
-        stream_label
-    };
-
-    if let Some(stream) = effective_stream {
-        line.push(' ');
-        line.push_str(&render_styled(stream, palette.info, None));
+        if let Some(stream) = &data.stream_label {
+            line.push(' ');
+            line.push_str(&render_styled(stream, palette.info, None));
+        }
     }
 
     wrapped_run_segments
@@ -682,6 +711,16 @@ pub(crate) fn describe_tool_action(
                 _ => with_mcp("exec_command".into(), HashSet::new()),
             }
         }
+        // Session follow-ups name their action directly. Without these arms the
+        // generic `Use write_stdin` headline survives `build_tool_summary` and
+        // the row reads `Send command input Use write_stdin`.
+        actual_name if actual_name == tool_names::WRITE_STDIN => with_mcp("Send command input".into(), HashSet::new()),
+        actual_name if actual_name == tool_names::SEND_PTY_INPUT => {
+            with_mcp("Send command input".into(), HashSet::new())
+        }
+        actual_name if actual_name == tool_names::READ_PTY_SESSION => {
+            with_mcp("Read command session".into(), HashSet::new())
+        }
         actual_name if actual_name == tool_names::LIST_FILES => describe_list_files(args, workspace_root)
             .map(|(desc, used)| with_mcp(desc, used))
             .unwrap_or_else(|| fallback("List files")),
@@ -789,9 +828,10 @@ mod tests {
     use vtcode_ui::tui::app::{InlineCommand, InlineHandle};
 
     use super::{
-        ToolSummaryRenderContext, build_tool_summary, describe_tool_action, render_tool_call_summary,
-        run_summary_is_placeholder,
+        ToolSummaryRenderContext, build_tool_summary, describe_tool_action, prepare_summary_data,
+        render_tool_call_summary, run_summary_is_placeholder,
     };
+    use vtcode_core::tools::registry::labels::tool_action_label;
 
     #[test]
     fn build_tool_summary_formats_run_command_as_ran() {
@@ -850,6 +890,85 @@ mod tests {
 
         assert_eq!(description, "cargo check -p vtcode");
         assert!(used_keys.contains("command"));
+    }
+
+    #[test]
+    fn prepare_summary_data_folds_exec_session_params_into_one_row() {
+        let args = json!({
+            "session_id": "run-2d5752f2",
+            "chars": "y\n",
+            "wait_timeout_seconds": 600,
+            "max_output_tokens": 4000,
+            "max_tokens": 4000
+        });
+        let data = prepare_summary_data(tool_names::UNIFIED_EXEC, &args, None, Some("output"));
+
+        // The four plumbing rows from the screenshot collapse to one row that
+        // carries only the session identity and the wait deadline.
+        assert_eq!(data.summary, "Send command input");
+        assert_eq!(data.details, vec!["Session run-2d5752f2 · wait 600s".to_string()]);
+        // The generic capture label beside a session row reads as a stutter.
+        assert_eq!(data.stream_label, None);
+    }
+
+    #[test]
+    fn prepare_summary_data_uses_public_write_stdin_name() {
+        // The legacy `write_stdin` name must collapse to the action label rather
+        // than leaving a `Use write_stdin` tail after `Send command input`, and
+        // its plumbing must not re-leak through the generic detail collector.
+        let args = json!({
+            "session_id": "run-abc",
+            "chars": "y\n",
+            "yield_time_ms": 1000,
+            "wait_timeout_seconds": 600,
+            "max_output_tokens": 4000,
+            "max_tokens": 4000
+        });
+        let data = prepare_summary_data(tool_names::WRITE_STDIN, &args, None, Some("output"));
+
+        assert_eq!(data.summary, "Send command input");
+        assert_eq!(data.details, vec!["Session run-abc · wait 600s".to_string()]);
+        assert_eq!(data.stream_label, None);
+    }
+
+    #[test]
+    fn prepare_summary_data_keeps_failure_label_on_session_calls() {
+        // Dropping every session label would hide a failed read's signal, so
+        // only the redundant capture label is suppressed.
+        let args = json!({ "session_id": "run-abc", "action": "wait" });
+        let data = prepare_summary_data(tool_names::UNIFIED_EXEC, &args, None, Some("error"));
+
+        assert_eq!(data.stream_label.as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn prepare_summary_data_keeps_stream_label_for_ordinary_tools() {
+        let args = json!({ "path": "src/lib.rs", "start_line": 10, "offset": 0 });
+        let data = prepare_summary_data(tool_names::READ_FILE, &args, None, Some("content"));
+
+        assert_eq!(data.details, vec!["Start line: 10".to_string()]);
+        assert_eq!(data.stream_label.as_deref(), Some("content"));
+    }
+
+    #[test]
+    fn prepare_summary_data_hides_output_caps_on_ordinary_tools() {
+        // The cap is plumbing for every tool, not just session follow-ups.
+        let args = json!({ "query": "tool intent", "max_output_tokens": 200, "limit": 5 });
+        let data = prepare_summary_data(tool_names::SEARCH_TOOLS, &args, None, None);
+        assert_eq!(data.details, vec!["Limit: 5".to_string()]);
+    }
+
+    #[test]
+    fn describe_tool_action_labels_pty_session_readers() {
+        let args = json!({ "session_id": "run-abc" });
+        for (tool, label) in [
+            (tool_names::SEND_PTY_INPUT, "Send command input"),
+            (tool_names::READ_PTY_SESSION, "Read command session"),
+        ] {
+            let (headline, _) = describe_tool_action(tool, &args, None);
+            assert_eq!(headline, label);
+            assert_eq!(tool_action_label(tool, &args), label);
+        }
     }
 
     #[test]

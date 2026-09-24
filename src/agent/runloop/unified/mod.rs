@@ -66,3 +66,6 @@ pub(crate) mod tool_call_safety;
 
 pub(crate) use intent_extractor::extract_action_from_messages;
 pub(crate) use session_runtime::UnifiedSessionRuntime;
+/// Restated so the tool-output renderer can share the exec-session predicate
+/// without exposing the whole pipeline module.
+pub(crate) use tool_pipeline::is_exec_session_tool_name;
