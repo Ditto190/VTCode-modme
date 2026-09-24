@@ -1121,7 +1121,7 @@ async fn resumed_turn_cannot_complete_while_verification_is_pending() {
     }));
     assert!(history.iter().any(|message| {
         message.role == uni::MessageRole::System
-            && message.content.as_text().contains("AUTONOMOUS VERIFICATION RECOVERY")
+            && message.content.as_text().contains("Verification recovery (")
     }));
     assert!(
         !history
@@ -1200,7 +1200,7 @@ async fn harness_auto_verification_completes_text_only_turn_without_manual_conti
     assert!(
         !history.iter().any(|message| {
             message.role == uni::MessageRole::System
-                && message.content.as_text().contains("AUTONOMOUS VERIFICATION RECOVERY")
+                && message.content.as_text().contains("Verification recovery (")
         }),
         "fast path must skip directive rounds entirely"
     );

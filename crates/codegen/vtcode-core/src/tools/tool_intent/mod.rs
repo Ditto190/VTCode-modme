@@ -12,7 +12,7 @@ pub use actions::{
     file_operation_action, file_operation_action_in, file_operation_action_is, mcp_action, mcp_action_is,
 };
 pub use activity::{
-    ShellActivity, classify_shell_activity, default_verifier_for_workspace, rewrite_truncation_only_verifier,
+    ShellActivity, VERIFIER_SHELL_FORM_NOTE, classify_shell_activity, default_verifier_for_workspace, rewrite_truncation_only_verifier,
     shell_command_is_admitted_verification_attempt, verification_recovery_directive,
 };
 pub use classify::{

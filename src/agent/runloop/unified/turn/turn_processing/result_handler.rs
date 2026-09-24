@@ -942,7 +942,7 @@ mod tests {
             "second text response should consume the first auto-recovery attempt"
         );
         assert!(
-            backing.last_history_message_contains("AUTONOMOUS VERIFICATION RECOVERY (1/"),
+            backing.last_history_message_contains("Verification recovery (1/"),
             "recovery directive must carry attempt counts"
         );
         assert!(

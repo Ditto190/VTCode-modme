@@ -168,18 +168,25 @@ pub fn default_verifier_for_workspace(workspace_root: &Path) -> Option<String> {
     None
 }
 
+/// Which shell forms of a verifier clear the anti-blind-editing gate. Shared
+/// by the recovery directive and the blocked-mutation `next_action` so the
+/// two surfaces cannot drift.
+pub const VERIFIER_SHELL_FORM_NOTE: &str = "Cap output with `max_output_tokens`; pure `| head`/`| tail` truncators are elided at execution, \
+while filtering pipes (`| grep`), `;`, and `||` joins do not clear the gate.";
+
 /// Build the actionable verification-recovery directive with a concrete
 /// command. `default_verifier` should come from
 /// [`default_verifier_for_workspace`]; when `None`, the generic examples are
 /// kept so the directive never names a command that does not exist.
 pub fn verification_recovery_directive(default_verifier: Option<&str>, attempt: u8, max_attempts: u8) -> String {
-    let command = default_verifier.unwrap_or("cargo check --locked");
+    let verifier = match default_verifier {
+        Some(command) => format!("`{command}`"),
+        None => "your project's build/test/lint command (e.g. `cargo check --locked`, `go test ./...`, `npm test`, or `pytest -q`)".to_string(),
+    };
     format!(
-        "AUTONOMOUS VERIFICATION RECOVERY ({attempt}/{max_attempts}): verification is still pending and the turn will block without it. \
-        Stop editing and run one verifier NOW with `exec_command` — `{command}` — standalone or as a pure `&&` chain of verifiers \
-        (no `|`, `;`, or `||`; cap output with `max_output_tokens` instead of piping). Pure `| head`/`| tail` truncators are elided at execution. \
-        Let it exit 0 before another mutation. \
-        A failed verifier grants bounded fix-up edits before re-verify is required; filtering pipes (`| grep`), `;`, and `||` joins never clear the gate."
+        "Verification recovery ({attempt}/{max_attempts}): pending edits have not been verified, so further mutations are blocked \
+        and the turn ends blocked unless a verifier exits 0. Run {verifier} with `exec_command`, standalone or as a pure `&&` chain of verifiers. \
+        {VERIFIER_SHELL_FORM_NOTE} A failed verifier grants a bounded number of fix-up edits before the next verification is required."
     )
 }
 
