@@ -1,9 +1,3 @@
-check and cleanup TUI's user facing diagnostic messages and verbose error/info output. Keep it clean, short and concise. As most of the time users only need the essential information, avoid overwhelming them with too much detail. The information is targeted for the coding agent's consumption only.
-
-check current status for more context here: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.16.19.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.03.48.png'
-
-===
-
 check when VT Code is in Build/Auto mode and when it needs to switch to plan mode for planning. the system already switch as per user confirmation, but the header still shows the previous mode. Check and update the header accordingly.
 
 ===
@@ -73,3 +67,21 @@ reference:
 audit and make sure command are displayed correctly in full in the TUI with proper line wrapping and no truncation.
 
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.37.35.png'
+
+===
+
+fix plan mode rejection:
+
+"
+Plan revision rejected: invalid plan artifact:
+missing sections: Summary, Test Cases and Validation,
+Assumptions and Defaults; invalid implementation
+steps: step 1: must include a `verify:` or `
+verification:` marker; step 2: must name a concrete
+file, symbol, or behavior target; step 3: must name a
+concrete file, symbol, or behavior target; summary is
+empty; no validation items; no assumptions or
+defaults
+Rejected plan revision:"
+
+session: session-vtcode-20260924T133543Z_155288-07964
