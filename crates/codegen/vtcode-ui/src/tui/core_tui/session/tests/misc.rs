@@ -321,7 +321,7 @@ fn active_pty_observer_drives_compact_loading_status() {
 
     assert_eq!(session.status_left_text(), Some("Running PTY command..."));
     assert!(session.has_status_spinner());
-    assert!(session.is_running_activity());
+    assert!(!session.is_running_activity(), "foreground command status must not mark an idle turn busy");
 
     active_pty_sessions.store(0, Ordering::Relaxed);
 

@@ -476,10 +476,11 @@ impl Session {
         if matches!(self.activity_state, ActivityState::Blocked) {
             return false;
         }
-        let running_status =
-            self.appearance.should_animate_progress_status() && status_requires_shimmer(self.animation_status_text());
-        let active_pty = self.active_pty_session_count() > 0;
-        running_status || active_pty
+        let status = self.animation_status_text();
+        let running_status = self.appearance.should_animate_progress_status()
+            && status != ACTIVE_PTY_STATUS_TEXT
+            && status_requires_shimmer(status);
+        running_status
     }
 
     pub(crate) fn active_pty_session_count(&self) -> usize {

@@ -1716,7 +1716,11 @@ impl ExecSessionManager {
                     break;
                 }
                 match manager.is_session_completed(session_id.as_str()).await {
-                    Ok(Some(_)) => break,
+                    Ok(Some(_)) => {
+                        manager.release_foreground_pty_count(&record_for_task);
+                        manager.release_pending_background_request(session_id.as_str());
+                        break;
+                    }
                     Ok(None) => tokio::time::sleep(tokio::time::Duration::from_millis(50)).await,
                     Err(_) => {
                         if manager.session_record(session_id.as_str()).await.is_err() {
@@ -2477,11 +2481,13 @@ mod tests {
         let workspace_root = canonicalize_workspace(temp_dir.path());
         let pty_sessions = PtySessionManager::new(workspace_root.clone(), PtyConfig::default());
         let manager = ExecSessionManager::new(workspace_root.clone(), pty_sessions);
+        let foreground_count = Arc::new(AtomicUsize::new(0));
+        manager.set_foreground_pty_counter(Arc::clone(&foreground_count));
 
         manager
             .create_pipe_session(
                 "foreground-complete".to_string().into(),
-                vec!["/bin/sh".to_string(), "-c".to_string(), "true".to_string()],
+                vec!["/bin/sh".to_string(), "-c".to_string(), "exit 7".to_string()],
                 workspace_root,
                 HashMap::new(),
             )
@@ -2489,7 +2495,7 @@ mod tests {
 
         timeout(Duration::from_secs(2), async {
             loop {
-                if manager.foreground_session.lock().is_none() {
+                if manager.foreground_session.lock().is_none() && foreground_count.load(Ordering::Acquire) == 0 {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2498,8 +2504,12 @@ mod tests {
         .await
         .expect("completed foreground session should be cleared without a wait poll");
 
+        assert_eq!(foreground_count.load(Ordering::Acquire), 0);
         assert_eq!(manager.request_foreground_background(), None);
+        let retained = manager.snapshot_session("foreground-complete").await?;
+        assert_eq!(retained.exit_code, Some(7));
         manager.close_session("foreground-complete").await?;
+        assert_eq!(foreground_count.load(Ordering::Acquire), 0);
         Ok(())
     }
 
