@@ -276,14 +276,16 @@ impl LoopDetector {
         // --- Global read-only budget ---
         // Prevents the agent from alternating between different read-only tools
         // (e.g., code_search and file_operation) to evade per-tool limits.
+        // The total only resets with the detector (each turn), so once it is
+        // exhausted every later call this turn hits this stop, whatever its kind.
         let readonly_budget = self.effective_readonly_budget();
         if self.total_readonly_calls >= readonly_budget {
             let hard_limit = self.get_limit_for_tool(tool_name) * HARD_LIMIT_MULTIPLIER;
             self.tool_counts.insert(tool_name.to_string(), hard_limit);
             return Some(format!(
                 "{HARD_STOP_PREFIX} the global read-only budget is exhausted ({} total read-only calls, limit: {}), \
-                 so further read-only calls are blocked. Write the final answer from the results already in \
-                 the conversation.",
+                 so every further tool call this turn is blocked, including edits and commands. Write the final \
+                 answer from the results already in the conversation.",
                 self.total_readonly_calls, readonly_budget
             ));
         }
@@ -1428,6 +1430,26 @@ mod tests {
 
         assert!(hard_stop_count > 0, "Global budget should fire when alternating tools");
         assert_eq!(detector.total_readonly_calls(), MAX_TOTAL_READONLY_CALLS + 5);
+    }
+
+    #[test]
+    fn exhausted_global_readonly_budget_blocks_every_tool_and_says_so() {
+        let mut detector = LoopDetector::with_max_repeated_calls(100);
+        for i in 0..MAX_TOTAL_READONLY_CALLS {
+            let args = json!({"query": format!("p_{i}"), "path": "src/"});
+            detector.record_call(tools::CODE_SEARCH, &args);
+        }
+
+        let edit = json!({"path": "src/new.rs", "content": "fn main() {}"});
+        let msg = detector
+            .record_call(tools::WRITE_FILE, &edit)
+            .expect("an edit after the budget is exhausted is also stopped");
+        assert!(msg.starts_with(HARD_STOP_PREFIX), "{msg}");
+        assert!(
+            msg.contains("so every further tool call this turn is blocked, including edits and commands."),
+            "{msg}"
+        );
+        assert!(!msg.contains("further read-only calls are blocked"), "{msg}");
     }
 
     #[test]
