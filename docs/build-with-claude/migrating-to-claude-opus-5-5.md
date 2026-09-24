@@ -33,7 +33,7 @@ Guide for switching VT Code to Claude Opus 5.5 (`claude-opus-5-5`, `ModelId::Cla
 | Manual extended thinking | Not supported | Not supported |
 | Prefill | Not supported | Not supported |
 | Sampling params | Default only | Default only |
-| `thinking_display` default | `omitted` | `omitted` |
+| `thinking_display` default | `updates` in VT Code (API default `omitted`) | `omitted` |
 | Advisor tier | 7 (above Opus 5, below Fable 5) | 6 |
 
 ---
@@ -53,7 +53,7 @@ agent.default_model = "claude-opus-5-5"    # after
 [provider.anthropic]
 effort = "medium"                          # new default; was "high" on Opus 5
 extended_thinking_enabled = true           # must stay true; thinking can't be disabled
-thinking_display = "summarized"            # if your UI streams progress updates between tool calls
+thinking_display = "updates"              # VT Code default on Opus 5.5; "omitted" hides progress updates
 task_budget_tokens = 128000                # unchanged; supported on Opus 5.5 (min 20000)
 ```
 
@@ -110,7 +110,7 @@ No other config changes are required. `extended_thinking_enabled` must stay `tru
 
 **Recommended:**
 
-5. **Render progress updates from `thinking` blocks.** Text the model writes between tool calls now comes back as progress-update `thinking` blocks, empty at the default `omitted` display. If your UI streamed that text as progress updates, it goes quiet between tool calls. Set `thinking_display = "summarized"` and render non-empty `thinking` blocks ahead of the `tool_use` block they precede; pass the blocks back unchanged with the rest of the assistant turn.
+5. **Render progress updates from `thinking` blocks.** Text the model writes between tool calls now comes back as progress-update `thinking` blocks, empty at the default `omitted` display. If your UI streamed that text as progress updates, it goes quiet between tool calls. VT Code requests `thinking.display: "updates"` (beta `thinking-display-updates-2026-08-18`) on Opus 5.5 when `thinking_display` is unset, so those blocks carry their text and stream into the reasoning view; the reasoning itself stays hidden. Render non-empty `thinking` blocks ahead of the `tool_use` block they precede and pass the blocks back unchanged with the rest of the assistant turn. Set `thinking_display = "omitted"` to opt out, or `"summarized"` to also get summarized reasoning. A configured `"updates"` is ignored on models that reject it (Opus 5, Sonnet 5).
 
 6. **Handle `stop_reason: "refusal"`.** Opus 5.5 classifiers cover a broader set of categories than Opus 5's — expect values such as `bio` and `reasoning_extraction` in addition to `cyber`. VT Code maps `stop_reason: "refusal"` to `FinishReason::Refusal`; verify your handling surfaces the category.
 
@@ -126,7 +126,7 @@ No other config changes are required. `extended_thinking_enabled` must stay `tru
 - [ ] `thinking: {type: "enabled", budget_tokens: N}` paths removed (still 400)
 - [ ] `tool_choice` `any`/specific replaced with `auto` + strict tools or structured outputs
 - [ ] `extended_thinking_enabled` left `true` (or unset)
-- [ ] `thinking_display = "summarized"` set if UI renders text between tool calls
+- [ ] `thinking_display` left unset (`updates`) or set explicitly if your UI should not render text between tool calls
 - [ ] `FinishReason::Refusal` handling verified for new categories (`bio`, `reasoning_extraction`)
 - [ ] Advisor pairs re-validated if using the advisor feature
 - [ ] Cost and latency re-baselined at the chosen effort level

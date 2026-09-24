@@ -93,6 +93,11 @@ pub enum ThinkingDisplay {
     /// still carries encrypted full thinking for multi-turn continuity
     /// (default on Claude Opus 4.7).
     Omitted,
+    /// Progress-update thinking blocks (the short notes written between tool
+    /// calls) carry their text; reasoning blocks stay empty. Requires the
+    /// `thinking-display-updates-2026-08-18` beta; supported on Claude Opus
+    /// 5.5 and Claude Fable 5.x.
+    Updates,
     /// Catch-all for unknown display modes added by the Anthropic API.
     #[serde(other)]
     Unknown,

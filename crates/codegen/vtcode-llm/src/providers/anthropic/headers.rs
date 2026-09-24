@@ -12,6 +12,8 @@ use super::prompt_cache::requires_extended_ttl_beta;
 
 const EXTENDED_CACHE_TTL_BETA: &str = "extended-cache-ttl-2025-04-11";
 pub(crate) const MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA: &str = "mid-conversation-system-clear-at-2026-08-21";
+/// Required whenever a request sends `thinking.display: "updates"`.
+pub(crate) const THINKING_DISPLAY_UPDATES_BETA: &str = "thinking-display-updates-2026-08-18";
 
 /// Configuration for beta header generation
 pub struct BetaHeaderConfig<'a> {
@@ -25,6 +27,7 @@ pub struct BetaHeaderConfig<'a> {
     pub include_fallback_credit: bool,
     pub include_mid_conversation_tool_changes: bool,
     pub include_mid_conversation_system_clear_at: bool,
+    pub include_thinking_display_updates: bool,
 }
 
 pub fn combined_beta_header_value(
@@ -67,6 +70,10 @@ pub fn combined_beta_header_value(
         pieces.push(MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA.to_owned());
     }
 
+    if config.include_thinking_display_updates {
+        pieces.push(THINKING_DISPLAY_UPDATES_BETA.to_owned());
+    }
+
     if let Some(betas) = config.request_betas {
         for b in betas {
             if !pieces.contains(b) {
@@ -98,6 +105,7 @@ mod tests {
             include_fallback_credit: false,
             include_mid_conversation_tool_changes: false,
             include_mid_conversation_system_clear_at: false,
+            include_thinking_display_updates: false,
         }
     }
 
@@ -123,6 +131,20 @@ mod tests {
         let header = combined_beta_header_value(true, &cache_settings(3600), &beta_config(&config));
 
         assert_eq!(header.as_deref(), Some(EXTENDED_CACHE_TTL_BETA));
+    }
+
+    #[test]
+    fn thinking_display_updates_beta_is_sent_only_when_requested() {
+        let config = AnthropicConfig::default();
+        let mut beta = beta_config(&config);
+        assert_eq!(combined_beta_header_value(false, &cache_settings(300), &beta), None);
+
+        beta.include_thinking_display_updates = true;
+        let header = combined_beta_header_value(true, &cache_settings(3600), &beta);
+        assert_eq!(
+            header.as_deref(),
+            Some(format!("{EXTENDED_CACHE_TTL_BETA}, {THINKING_DISPLAY_UPDATES_BETA}").as_str())
+        );
     }
 
     #[test]

@@ -414,6 +414,19 @@ impl AnthropicProvider {
                         .iter()
                         .any(|message| message.get("clear_at").and_then(Value::as_str) == Some("next_user_message"))
                 }),
+            // The primary config or any server-side fallback entry may carry
+            // `display: "updates"`; either needs the beta.
+            include_thinking_display_updates: std::iter::once(anthropic_request.get("thinking"))
+                .chain(
+                    anthropic_request
+                        .get("fallbacks")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .map(|fallback| fallback.get("thinking")),
+                )
+                .flatten()
+                .any(|thinking| thinking.get("display").and_then(Value::as_str) == Some("updates")),
         };
 
         headers::combined_beta_header_value(self.prompt_cache_enabled, &self.prompt_cache_settings, &beta_config)
@@ -1220,6 +1233,82 @@ mod tests {
         if let Some(header) = &beta_header {
             assert!(!header.contains("interleaved-thinking-2025-05-14"));
         }
+    }
+
+    #[test]
+    fn opus_5_5_requests_progress_updates_display_with_its_beta() {
+        let model = models::anthropic::CLAUDE_OPUS_5_5;
+        let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert_eq!(payload["thinking"]["type"], "adaptive");
+        assert_eq!(payload["thinking"]["display"], "updates");
+
+        let beta_header = provider
+            .beta_header_for_request(&request, &payload, false, None)
+            .expect("display updates beta header");
+        assert_eq!(
+            beta_header
+                .split(", ")
+                .filter(|beta| *beta == headers::THINKING_DISPLAY_UPDATES_BETA)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn display_updates_beta_covers_fallback_entries() {
+        let model = models::anthropic::CLAUDE_SONNET_5;
+        let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            fallbacks: Some(vec![crate::provider::FallbackModel {
+                model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+                max_tokens: None,
+                thinking: Some(crate::provider::AnthropicThinkingConfig::Adaptive {
+                    display: Some("updates".to_string()),
+                }),
+            }]),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert!(payload["thinking"].get("display").is_none());
+        assert_eq!(payload["fallbacks"][0]["thinking"]["display"], "updates");
+        let beta_header = provider
+            .beta_header_for_request(&request, &payload, false, None)
+            .expect("beta header");
+        assert!(
+            beta_header
+                .split(", ")
+                .any(|beta| beta == headers::THINKING_DISPLAY_UPDATES_BETA)
+        );
+    }
+
+    #[test]
+    fn display_updates_beta_is_omitted_when_display_is_not_updates() {
+        let model = models::anthropic::CLAUDE_SONNET_5;
+        let provider = AnthropicProvider::with_model("test-key".to_string(), model.to_string());
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert!(payload["thinking"].get("display").is_none());
+        let beta_header = provider.beta_header_for_request(&request, &payload, false, None);
+        assert!(
+            !beta_header.is_some_and(|header| {
+                header.split(", ").any(|beta| beta == headers::THINKING_DISPLAY_UPDATES_BETA)
+            })
+        );
     }
 
     #[test]

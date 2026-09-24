@@ -276,6 +276,26 @@ pub(crate) fn preserves_thinking_across_turns(model: &str, default_model: &str) 
         || matches_model(requested, models::anthropic::CLAUDE_FABLE_5_1)
 }
 
+/// Whether the model accepts `thinking.display: "updates"` (beta
+/// `thinking-display-updates-2026-08-18`): its between-tool progress notes
+/// come back as their own `thinking` blocks. Other models reject the value.
+/// `claude-fable-5-1` contains the Fable 5 id, so both Fable releases match.
+pub(crate) fn supports_thinking_display_updates(model: &str, default_model: &str) -> bool {
+    let requested = resolve_model_name(model, default_model);
+    matches_model(requested, models::anthropic::CLAUDE_OPUS_5_5)
+        || matches_model(requested, models::anthropic::CLAUDE_FABLE_5)
+}
+
+/// Display used when neither the request nor `[provider.anthropic]` sets one.
+/// On Claude Opus 5.5 the text written between tool calls arrives only as
+/// progress-update thinking blocks, which the API default (`omitted`) empties;
+/// requesting `updates` keeps that narration visible in the reasoning view
+/// while the reasoning itself stays hidden.
+pub(crate) fn default_thinking_display(model: &str, default_model: &str) -> Option<ThinkingDisplay> {
+    let requested = resolve_model_name(model, default_model);
+    matches_model(requested, models::anthropic::CLAUDE_OPUS_5_5).then_some(ThinkingDisplay::Updates)
+}
+
 pub(crate) fn default_effort_for_model(model: &str, default_model: &str) -> Option<&'static str> {
     claude_thinking_profile(model, default_model)
         .filter(|profile| profile.supports_effort)
@@ -495,5 +515,22 @@ mod tests {
         assert!(!preserves_thinking_across_turns(models::anthropic::CLAUDE_OPUS_5, ""));
         assert!(!preserves_thinking_across_turns(models::anthropic::CLAUDE_FABLE_5, ""));
         assert!(!preserves_thinking_across_turns(models::anthropic::CLAUDE_SONNET_5, ""));
+    }
+
+    #[test]
+    fn thinking_display_updates_support_and_default() {
+        for model in [
+            models::anthropic::CLAUDE_OPUS_5_5,
+            models::anthropic::CLAUDE_FABLE_5_1,
+            models::anthropic::CLAUDE_FABLE_5,
+        ] {
+            assert!(supports_thinking_display_updates(model, ""), "{model}");
+        }
+        assert!(!supports_thinking_display_updates(models::anthropic::CLAUDE_OPUS_5, ""));
+        assert!(!supports_thinking_display_updates(models::anthropic::CLAUDE_SONNET_5, ""));
+
+        assert_eq!(default_thinking_display(models::anthropic::CLAUDE_OPUS_5_5, ""), Some(ThinkingDisplay::Updates));
+        assert_eq!(default_thinking_display(models::anthropic::CLAUDE_OPUS_5, ""), None);
+        assert_eq!(default_thinking_display(models::anthropic::CLAUDE_SONNET_5, ""), None);
     }
 }

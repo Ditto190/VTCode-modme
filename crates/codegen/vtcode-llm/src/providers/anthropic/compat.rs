@@ -814,6 +814,7 @@ fn compatibility_thinking_display(thinking: Option<&ThinkingConfig>) -> Anthropi
     match display {
         Some(ThinkingDisplay::Summarized) => AnthropicThinkingDisplayOverride::Summarized,
         Some(ThinkingDisplay::Omitted) => AnthropicThinkingDisplayOverride::Omitted,
+        Some(ThinkingDisplay::Updates) => AnthropicThinkingDisplayOverride::Updates,
         Some(ThinkingDisplay::Unknown) | None => AnthropicThinkingDisplayOverride::Inherit,
     }
 }

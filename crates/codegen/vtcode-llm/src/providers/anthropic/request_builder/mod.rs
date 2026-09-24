@@ -397,6 +397,7 @@ fn parse_thinking_display(display: Option<&str>) -> Option<ThinkingDisplay> {
     match display? {
         "summarized" => Some(ThinkingDisplay::Summarized),
         "omitted" => Some(ThinkingDisplay::Omitted),
+        "updates" => Some(ThinkingDisplay::Updates),
         _ => None,
     }
 }
@@ -513,6 +514,44 @@ mod tests {
 
     fn fallback_thinking(payload: &Value, index: usize) -> &Value {
         &payload["fallbacks"][index]["thinking"]
+    }
+
+    #[test]
+    fn inherited_updates_display_is_dropped_for_fallbacks_without_progress_updates() {
+        // Opus 5.5 defaults to `display: "updates"`; Sonnet 5 rejects it.
+        let request = request_with_fallbacks(
+            anthropic::CLAUDE_OPUS_5_5,
+            vec![
+                fallback(anthropic::CLAUDE_SONNET_5, None),
+                fallback(anthropic::CLAUDE_FABLE_5, None),
+            ],
+        );
+        let payload = convert(&request);
+
+        assert_eq!(payload["thinking"], json!({ "type": "adaptive", "display": "updates" }));
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive" }));
+        assert!(payload["fallbacks"][1].get("thinking").is_none(), "Fable 5 accepts the inherited display");
+    }
+
+    #[test]
+    fn explicit_updates_display_is_parsed_for_fallbacks() {
+        let request = request_with_fallbacks(
+            anthropic::CLAUDE_SONNET_5,
+            vec![
+                fallback(
+                    anthropic::CLAUDE_OPUS_5_5,
+                    Some(AnthropicThinkingConfig::Adaptive { display: Some("updates".to_string()) }),
+                ),
+                fallback(
+                    anthropic::CLAUDE_OPUS_5,
+                    Some(AnthropicThinkingConfig::Adaptive { display: Some("updates".to_string()) }),
+                ),
+            ],
+        );
+        let payload = convert(&request);
+
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive", "display": "updates" }));
+        assert_eq!(fallback_thinking(&payload, 1), &json!({ "type": "adaptive" }));
     }
 
     #[test]

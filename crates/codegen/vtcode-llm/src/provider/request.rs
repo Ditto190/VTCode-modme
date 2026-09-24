@@ -59,6 +59,7 @@ pub enum AnthropicThinkingDisplayOverride {
     Inherit,
     Summarized,
     Omitted,
+    Updates,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
