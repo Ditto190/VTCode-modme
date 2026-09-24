@@ -16,6 +16,7 @@ use futures::StreamExt;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
+use super::block_order::StreamBlockOrder;
 use super::response_parser::{parse_finish_reason, parse_usage, stop_details_reasoning_detail};
 
 enum ReasoningBlockState {
@@ -50,6 +51,7 @@ pub fn create_stream(
         let mut finalized_reasoning_details = Vec::new();
         let mut advisor_blocks: Vec<Value> = Vec::new();
         let mut stop_details_detail: Option<String> = None;
+        let mut block_order = StreamBlockOrder::default();
 
         while let Some(chunk_result) = body_stream.next().await {
             let chunk = chunk_result.map_err(|err| {
@@ -75,6 +77,7 @@ pub fn create_stream(
                         }
                     })?;
 
+                    block_order.observe(&event);
                     match event {
                         AnthropicStreamEvent::MessageStart { message } => {
                             let usage_value = serde_json::to_value(&message.usage).unwrap_or_else(|_| Value::Object(Map::new()));
@@ -332,6 +335,9 @@ pub fn create_stream(
             let mut details = response.reasoning_details.unwrap_or_default();
             details.push(detail.to_string());
             response.reasoning_details = Some(details);
+        }
+        if let Some(detail) = block_order.into_detail() {
+            response.reasoning_details.get_or_insert_with(Vec::new).push(detail);
         }
         response.request_id = request_id.clone();
         response.organization_id = organization_id.clone();

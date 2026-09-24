@@ -2,6 +2,7 @@ use hashbrown::HashSet;
 
 use crate::error_display;
 use crate::provider::{ContentPart, LLMError, LLMRequest, Message, MessageContent, MessageRole};
+use crate::providers::anthropic::block_order::{AssistantBlockParts, assemble_assistant_blocks};
 use crate::providers::anthropic::capabilities::supports_mid_conversation_system_messages;
 use crate::providers::anthropic_types::{
     AnthropicContentBlock, AnthropicMessage, AnthropicToolResultBlock, AnthropicToolUseBlock, CacheControl, ImageSource,
@@ -100,20 +101,24 @@ pub(crate) fn build_messages(
                         return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
                     }
                     compaction_seen = true;
-                    blocks.extend(compaction_blocks);
                 }
 
                 // The compaction-history builder removes thinking blocks from
                 // the pre-compaction continuity tail. Keep replaying thinking
                 // here so responses generated after that boundary are not
-                // accidentally dropped on every later request.
-                blocks.extend(build_reasoning_blocks(msg));
-
-                blocks.extend(content_blocks_from_message_content(&msg.content, None, allow_container_uploads));
-
-                blocks.extend(build_advisor_blocks(msg));
-
-                blocks.extend(build_tool_use_blocks(msg));
+                // accidentally dropped on every later request. Blocks are
+                // replayed in the order the model produced them when the
+                // response recorded it (interleaved thinking and text).
+                blocks.extend(assemble_assistant_blocks(
+                    msg,
+                    AssistantBlockParts {
+                        compaction: compaction_blocks,
+                        reasoning: build_reasoning_blocks(msg),
+                        content: content_blocks_from_message_content(&msg.content, None, allow_container_uploads),
+                        advisor: build_advisor_blocks(msg),
+                        tool_use: build_tool_use_blocks(msg),
+                    },
+                ));
 
                 if blocks.is_empty() {
                     blocks.push(AnthropicContentBlock::Text {

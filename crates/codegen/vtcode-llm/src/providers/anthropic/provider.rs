@@ -880,6 +880,98 @@ mod tests {
         assert_eq!(detail["fallback_has_prefill_claim"], true);
     }
 
+    #[tokio::test]
+    async fn stream_records_interleaved_block_order_for_replay() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-opus-5-5\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-1\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Reading \"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"the parser.\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Checking entry.\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-2\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"read_file\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"src/parser.rs\\\"}\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":3}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":12}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let model = models::anthropic::CLAUDE_OPUS_5_5;
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            model.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let mut stream = LLMProvider::stream(
+            &provider,
+            LLMRequest {
+                model: model.to_string(),
+                messages: vec![Message::user("fix the parser".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("stream request should succeed");
+
+        let mut completed = None;
+        while let Some(event) = stream.next().await {
+            if let LLMStreamEvent::Completed { response } = event.expect("stream event") {
+                completed = Some(*response);
+            }
+        }
+        let response = completed.expect("completed stream response");
+        let tool_calls = response.tool_calls.clone().expect("tool calls");
+        let details = response
+            .reasoning_details
+            .clone()
+            .map(|details| details.into_iter().map(serde_json::Value::String).collect());
+        let assistant = Message::assistant_with_tools_and_reasoning(
+            response.content.clone().expect("text content"),
+            tool_calls,
+            details,
+        );
+
+        let replay = LLMRequest {
+            model: model.to_string(),
+            messages: vec![
+                Message::user("fix the parser".to_string()),
+                assistant,
+                Message::tool_response("toolu_1".to_string(), "fn parse() {}".to_string()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        let payload = provider.convert_to_anthropic_format(&replay).expect("payload conversion");
+        assert_eq!(
+            payload["messages"][1]["content"],
+            json!([
+                { "type": "thinking", "thinking": "", "signature": "sig-1" },
+                { "type": "text", "text": "Reading the parser." },
+                { "type": "thinking", "thinking": "Checking entry.", "signature": "sig-2" },
+                { "type": "tool_use", "id": "toolu_1", "name": "read_file", "input": { "path": "src/parser.rs" } }
+            ])
+        );
+    }
+
     #[test]
     fn non_streaming_capability_is_pinned_for_stream_timeout_fallback() {
         // Pinned true in the provider impl; MinimaxProvider's delegation and

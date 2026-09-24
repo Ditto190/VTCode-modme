@@ -13,6 +13,8 @@ use crate::provider::{FinishReason, LLMError, LLMResponse, ToolCall, Usage};
 use crate::providers::extract_reasoning_trace;
 use serde_json::{Value, json};
 
+use super::block_order::{BlockOrderRecorder, BlockSlot};
+
 pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse, LLMError> {
     let content = response_json.get("content").and_then(|c| c.as_array()).ok_or_else(|| {
         let formatted = error_display::format_llm_error("Anthropic", "Invalid response format: missing content");
@@ -29,11 +31,15 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
     // Raw advisor server_tool_use + advisor_tool_result blocks, preserved verbatim
     // for faithful round-trip on subsequent turns (transport: reasoning_details).
     let mut advisor_blocks: Vec<Value> = Vec::new();
+    // Interleaved blocks (thinking between text and tool use) must be
+    // replayed in this order; see `block_order`.
+    let mut block_order = BlockOrderRecorder::default();
 
     for block in content {
         match block.get("type").and_then(|t| t.as_str()) {
             Some("text") => {
                 if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                    block_order.push(BlockSlot::Text { len: text.len() });
                     text_parts.push(text.to_string());
                 }
             }
@@ -44,7 +50,12 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
                         "type": "thinking",
                         "thinking": thinking,
                     });
-                    if let Some(signature) = block.get("signature").and_then(|value| value.as_str())
+                    let signature = block.get("signature").and_then(|value| value.as_str());
+                    // Replay skips thinking blocks without text or signature.
+                    if !thinking.is_empty() || signature.is_some_and(|value| !value.trim().is_empty()) {
+                        block_order.push(BlockSlot::Reasoning);
+                    }
+                    if let Some(signature) = signature
                         && let Some(obj) = detail.as_object_mut()
                     {
                         obj.insert("signature".to_string(), Value::String(signature.to_string()));
@@ -54,6 +65,7 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
                 }
             }
             Some("redacted_thinking") => {
+                block_order.push(BlockSlot::Reasoning);
                 reasoning_details_vec.push(
                     json!({
                         "type": "redacted_thinking",
@@ -72,11 +84,13 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
                 if name == "structured_output" {
                     let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
                     let output_text = serde_json::to_string(&input).unwrap_or_else(|_| "{{}}".to_string());
+                    block_order.push(BlockSlot::Text { len: output_text.len() });
                     text_parts.push(output_text);
                 } else {
                     let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
                     let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{{}}".to_string());
                     if !id.is_empty() && !name.is_empty() {
+                        block_order.push(BlockSlot::ToolUse { id: id.clone() });
                         tool_calls.push(ToolCall::function(id, name, arguments));
                     }
                 }
@@ -85,12 +99,14 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
                 // The advisor tool is the only supported server-side tool. Preserve
                 // the block verbatim so it can be round-tripped on the next turn.
                 if block.get("name").and_then(|n| n.as_str()).is_some_and(|name| name == "advisor") {
+                    block_order.push(BlockSlot::Advisor);
                     advisor_blocks.push(block.clone());
                 }
             }
             Some("advisor_tool_result") => {
                 // Preserve the advisor result verbatim (advisor_result,
                 // advisor_redacted_result, or advisor_tool_result_error).
+                block_order.push(BlockSlot::Advisor);
                 advisor_blocks.push(block.clone());
             }
             Some("tool_search_tool_result") => {
@@ -111,6 +127,7 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
                 // signatures, cache controls, and provider extensions belong
                 // in reasoning_details so the next request can send them back.
                 compaction = block.get("content").and_then(|t| t.as_str()).map(str::to_owned);
+                block_order.push(BlockSlot::Compaction);
                 reasoning_details_vec.push(block.to_string());
             }
             Some("fallback") => {
@@ -160,6 +177,10 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
             "blocks": advisor_blocks,
         });
         reasoning_details_vec.push(detail.to_string());
+    }
+
+    if let Some(detail) = block_order.into_detail() {
+        reasoning_details_vec.push(detail);
     }
 
     Ok(LLMResponse {

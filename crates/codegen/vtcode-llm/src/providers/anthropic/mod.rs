@@ -14,6 +14,7 @@
 
 #[cfg(feature = "anthropic-api")]
 pub mod api;
+mod block_order;
 pub mod capabilities;
 pub mod compat;
 mod headers;
