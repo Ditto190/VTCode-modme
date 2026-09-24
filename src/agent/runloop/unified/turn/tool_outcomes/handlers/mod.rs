@@ -725,7 +725,7 @@ pub(crate) fn block_mutation_until_verification(
     let message = pending_mutations.map_or_else(
         || {
             format!(
-                "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain; no `|`, `;`, or `||`.{fix_hint}"
+                "Mutation blocked until verification: a mutation batch from an earlier turn is still awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool — standalone or as a pure `&&` chain. {VERIFIER_SHELL_FORM_NOTE}{fix_hint}"
             )
         },
         |count| {
@@ -734,13 +734,14 @@ pub(crate) fn block_mutation_until_verification(
             // number of files touched — say so instead of claiming "file
             // changes" (session-vtcode-20260912T083718Z: counted 4 with one
             // file edited). The clearing recipe belongs in `error` itself:
-            // piped or `;`-joined verifiers never clear the gate, and the
-            // model reading the rejection must not have to guess. Examples
+            // filtering-piped or `;`-joined verifiers never clear the gate
+            // (pure `head`/`tail` pipes run standalone), and the model
+            // reading the rejection must not have to guess. Examples
             // span ecosystems because `is_verification_invocation` admits
             // cargo/go/npm/bun/deno/make/ruff/tsc/eslint/pytest/gradle/scripts/check.sh,
             // not just cargo. Docs-only prose edits stay allowed while pending.
             format!(
-                "Mutation blocked until verification: {count} mutating command(s) since the last successful verification are awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `pytest` — standalone or as a pure `&&` chain; no `|`, `;`, or `||`. Docs-only edits stay allowed.{fix_hint}"
+                "Mutation blocked until verification: {count} mutating command(s) since the last successful verification are awaiting a verifier. Run one with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, or `pytest` — standalone or as a pure `&&` chain. {VERIFIER_SHELL_FORM_NOTE} Docs-only edits stay allowed.{fix_hint}"
             )
         },
     );
@@ -783,8 +784,13 @@ pub(crate) fn block_mutation_until_verification(
         tool_call_id,
         Some(tool_name),
         Some(args_val),
-        verification_required_payload(tool_name, pending_mutations, repeated_tool_attempts.fix_edits_remaining, &message)
-            .to_string(),
+        verification_required_payload(
+            tool_name,
+            pending_mutations,
+            repeated_tool_attempts.fix_edits_remaining,
+            &message,
+        )
+        .to_string(),
     );
     Ok(MutationVerificationResult::Blocked)
 }

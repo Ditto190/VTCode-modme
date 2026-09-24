@@ -6,7 +6,7 @@ use vtcode_core::core::agent::refusal;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::names::canonical_tool_name;
 use vtcode_core::tools::tool_intent::{
-    ShellActivity, classify_shell_activity, shell_command_is_admitted_verification_attempt,
+    ShellActivity, classify_shell_activity, shell_args_as_executed, shell_command_is_admitted_verification_attempt,
 };
 
 use crate::agent::runloop::unified::tool_pipeline::{ToolExecutionStatus, ToolPipelineOutcome};
@@ -17,7 +17,10 @@ use crate::agent::runloop::unified::turn::tool_outcomes::{is_grep_style_no_match
 /// warning fires. NL2Repo-Bench recommends verifying after every few edits.
 pub(crate) const BLIND_EDITING_THRESHOLD: usize = 6;
 pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let it exit 0 before further edits.";
-pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "Several edits have landed without a build/test/lint run since the last check, so further code mutations are blocked until a verifier exits 0 (docs-only edits stay allowed). Run your project's build/test/lint tool with `exec_command` (e.g. `cargo check`, `go test`, `npm test`, or `pytest`), standalone or as a pure `&&` chain. A `|`, `;`, or `||` makes the exit status belong to another command, so it does not clear the gate; cap output with `max_output_tokens` instead.";
+/// Ends with the text of [`VERIFIER_SHELL_FORM_NOTE`] so the shell forms it
+/// describes match what the execution kernel elides; a test keeps the two in
+/// lockstep because `concat!` cannot splice a cross-crate const.
+pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "Several edits have landed without a build/test/lint run since the last check, so further code mutations are blocked until a verifier exits 0 (docs-only edits stay allowed). Run your project's build/test/lint tool with `exec_command` (e.g. `cargo check`, `go test`, `npm test`, or `pytest`), standalone or as a pure `&&` chain. Cap output with `max_output_tokens`. A verifier piped only into `head` or `tail` runs without the truncator and counts as standalone; filtering pipes (`| grep`), `;`, and `||` make the exit status another command's, so they do not clear the gate.";
 /// Fix-up window granted after a failed verification attempt. A failed
 /// `cargo check` / `cargo nextest run` must not deadlock the turn: the agent
 /// needs a bounded number of edits to address the reported failure before
@@ -31,7 +34,7 @@ pub(crate) const VERIFICATION_RESULT_LOST_WARNING: &str =
     "[!] Verification result lost: the exec session ended before the verifier's output was captured.";
 /// Model-facing directive paired with [`VERIFICATION_RESULT_LOST_WARNING`]:
 /// a standalone verifier re-run is the only way to clear the pending gate.
-pub(crate) const VERIFICATION_RESULT_LOST_DIRECTIVE: &str = "Verification result lost: the exec session ended before the verifier's output was captured. Re-run the verification command standalone (no pipes/truncation) to confirm or reject the recent edits.";
+pub(crate) const VERIFICATION_RESULT_LOST_DIRECTIVE: &str = "Verification result lost: the exec session ended before the verifier's output was captured. Re-run the verification command standalone or as a pure `&&` chain to confirm or reject the recent edits.";
 /// Warning rendered while the failed-verifier fix-up window is active. Distinct
 /// from [`ANTI_BLIND_EDITING_WARNING`] so the pending-verification block notice
 /// does not imply verification was never run when the verifier already failed.
@@ -41,19 +44,19 @@ pub(crate) const FAILED_VERIFICATION_FIX_WARNING: &str =
 /// the verifier ran and reported failure, so text responses must repair the
 /// reported failure and re-run a standalone verifier instead of claiming
 /// completion.
-pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verification command ran and FAILED. A bounded fix window is active: apply fixes for the reported failure, then re-run the standalone verification command (no pipes/truncation). Verification success is still required before the work can be accepted.";
-/// Warning rendered when a piped verifier (e.g. `cargo check 2>&1 | tail -5`)
-/// succeeded while the gate is pending: the pipeline's exit status belongs to
-/// the tail command, so the verifier's success cannot clear the gate.
-/// NOTE: pure `head`/`tail` truncator shapes no longer reach this notice —
-/// the exec layer elides them into standalone verifiers with truthful exit
-/// codes. Only non-rewritable pipelines (filtering tails, `;` joins) land
-/// here.
-pub(crate) const PIPED_VERIFICATION_WARNING: &str = "[!] Piped verifier did not clear the verification gate: the pipeline exit status is the truncator's, not the verifier's.";
+pub(crate) const FAILED_VERIFICATION_FIX_DIRECTIVE: &str = "The last verification command ran and failed. A bounded fix window is active: apply fixes for the reported failure, then re-run the verification command standalone or as a pure `&&` chain. The work is accepted once a verifier exits 0.";
+/// Warning rendered when a verifier behind a filtering pipe or a `;`/`||`
+/// join (e.g. `cargo check 2>&1 | grep error`) succeeded while the gate is
+/// pending: the exit status belongs to another command, so the verifier's
+/// success cannot clear the gate. Pure `head`/`tail` truncator shapes never
+/// land here: the execution kernel runs them as standalone verifiers, and the
+/// tracker classifies the command as executed
+/// ([`vtcode_core::tools::tool_intent::shell_args_as_executed`]).
+pub(crate) const PIPED_VERIFICATION_WARNING: &str = "[!] Piped verifier did not clear the verification gate: the exit status belongs to another command, not the verifier.";
 /// Model-facing directive paired with [`PIPED_VERIFICATION_WARNING`]: without
 /// this feedback a piped success reads as "verified" to the model and the
 /// pending gate deadlocks the turn on unverified text responses.
-pub(crate) const PIPED_VERIFICATION_DIRECTIVE: &str = "The verification command ran inside a pipeline, so its exit status is the pipeline tail's (e.g. `tail`/`head`), not the verifier's, and it did not clear the verification gate. Re-run the verifier standalone or as a pure `&&` chain of verifiers without `|`, `;`, or `||` (pass `max_output_tokens` instead of piping) to clear verification.";
+pub(crate) const PIPED_VERIFICATION_DIRECTIVE: &str = "The verification command ran behind a filtering pipe or a `;`/`||` join, so its exit status belongs to another command (e.g. `grep`) and it did not clear the verification gate. Re-run the verifier standalone or as a pure `&&` chain of verifiers; a pipe only into `head` or `tail` also counts as standalone. Cap output with `max_output_tokens` instead of filtering it.";
 /// Bounded in-turn autonomous recovery attempts when the model emits text
 /// instead of a verifier while the gate is pending.
 ///
@@ -2300,8 +2303,9 @@ fn is_execution_tool(name: &str) -> bool {
 /// checkpoint is pending.
 /// A failed verifier grants a bounded fix-up window ([`FAILED_VERIFICATION_FIX_ALLOWANCE`])
 /// so a broken build can be repaired, and piped verifier attempts
-/// (e.g. `cargo check 2>&1 | head`) are admitted to run even though only a
-/// standalone success clears the gate.
+/// (e.g. `cargo check 2>&1 | grep error`) are admitted to run even though
+/// they cannot clear the gate. A verifier piped only into `head`/`tail` runs
+/// as a standalone verifier (see [`shell_args_as_executed`]).
 pub(crate) fn mutation_blocked_until_verification(
     loop_tracker: &LoopTracker,
     name: &str,
@@ -2313,17 +2317,17 @@ pub(crate) fn mutation_blocked_until_verification(
 
     let canonical_name = canonical_tool_name(name);
     if is_execution_tool(canonical_name) {
-        // Truncation-only verifier attempts (`cargo check 2>&1 | head`) must
-        // run so the model can see the failure; they never clear the gate
-        // (see update_repetition_tracker). The admission predicate requires
-        // every shell segment to be verification-or-readonly, so a smuggled
-        // mutation such as `cargo check && rm -rf target` stays blocked.
-        if shell_command_is_admitted_verification_attempt(args)
-            && matches!(classify_shell_activity(canonical_name, args), ShellActivity::Mutation)
-        {
-            return false;
-        }
-        if !matches!(classify_shell_activity(canonical_name, args), ShellActivity::Mutation) {
+        // Classify the command the kernel will run: a verifier piped only
+        // into `head`/`tail` executes standalone and is a verification.
+        let executed = shell_args_as_executed(canonical_name, args);
+        let activity = classify_shell_activity(canonical_name, &executed);
+        // Other piped verifier attempts (`cargo check 2>&1 | grep error`)
+        // still run so the model can see the failure; they never clear the
+        // gate (see update_repetition_tracker). The admission predicate
+        // requires every shell segment to be verification-or-readonly, so a
+        // smuggled mutation such as `cargo check && rm -rf target` stays
+        // blocked.
+        if !matches!(activity, ShellActivity::Mutation) || shell_command_is_admitted_verification_attempt(&executed) {
             return false;
         }
         // Fix-up window: allow bounded repair edits after a failed verifier.
@@ -2356,8 +2360,8 @@ pub(crate) fn mutation_blocked_until_verification(
 /// [`VERIFICATION_RESULT_LOST_DIRECTIVE`] for the handlers to surface.
 ///
 /// A `true` return finally covers a *piped* verifier success while the gate
-/// is pending (`cargo check 2>&1 | tail -5`): the pipeline exit status
-/// cannot clear the gate, so the tracker queues
+/// is pending (`cargo check 2>&1 | grep error`): the exit status belongs to
+/// another command and cannot clear the gate, so the tracker queues
 /// [`PIPED_VERIFICATION_DIRECTIVE`] instead of leaving the model to believe
 /// the check verified the edits.
 pub(crate) fn update_repetition_tracker(
@@ -2433,7 +2437,11 @@ pub(crate) fn update_repetition_tracker(
     // step (cargo check, cargo test, etc.) should RESET the mutation counter,
     // not increment it.
     if is_execution_tool(canonical_name) {
-        match classify_shell_activity(canonical_name, args) {
+        // Classify the command the kernel ran, not the typed text: a verifier
+        // piped only into `head`/`tail` executes standalone, so its truthful
+        // exit status is the verifier's and it counts as verification.
+        let executed = shell_args_as_executed(canonical_name, args);
+        match classify_shell_activity(canonical_name, &executed) {
             ShellActivity::Inspection => {
                 loop_tracker.consecutive_navigations = loop_tracker.consecutive_navigations.saturating_add(1);
                 loop_tracker.nav_signatures.insert(navigation_signature_key);
@@ -2472,15 +2480,16 @@ pub(crate) fn update_repetition_tracker(
                 loop_tracker.reset_navigation_window(low_signal_family.is_none());
             }
             ShellActivity::Mutation => {
-                // Truncation-only verifier attempts (e.g. `cargo check 2>&1 | head`)
-                // are admitted to run but never clear the gate: the pipeline
-                // exit status is the truncator's, not the verifier's. Don't
-                // count them as blind edits; a failed piped attempt still
+                // Piped verifier attempts that the kernel cannot elide (e.g.
+                // `cargo check 2>&1 | grep error`, or a `;` join) are admitted
+                // to run but never clear the gate: the exit status belongs to
+                // another command, not the verifier. Don't count them as
+                // blind edits; a failed piped attempt still
                 // opens the fix window so the agent can repair and re-run a
                 // standalone verifier. Chained mutations smuggled behind a
                 // verifier prefix are rejected by the admission predicate and
                 // take the blind-edit path below.
-                if shell_command_is_admitted_verification_attempt(args) {
+                if shell_command_is_admitted_verification_attempt(&executed) {
                     let ran_and_failed =
                         matches!(&outcome.status, ToolExecutionStatus::Success { command_success: false, .. });
                     if ran_and_failed {
@@ -2488,12 +2497,12 @@ pub(crate) fn update_repetition_tracker(
                         loop_tracker.reset_navigation_window(low_signal_family.is_none());
                         return true;
                     }
-                    // A piped verifier's exit status belongs to the pipeline
-                    // tail, so a success cannot clear the gate. While the
+                    // A piped verifier's exit status belongs to another
+                    // command, so a success cannot clear the gate. While the
                     // gate is pending that silence reads as "verified" to
                     // the model (checkpoint session-vtcode-20260912T083718Z:
-                    // `cargo check 2>&1 | tail -5` exited 0 and the turn
-                    // still deadlocked). Queue the one-shot piped-verifier
+                    // a piped verifier exited 0 and the turn still
+                    // deadlocked). Queue the one-shot piped-verifier
                     // directive so the handlers surface it after the tool
                     // response lands.
                     if loop_tracker.verification_is_pending()
@@ -2933,12 +2942,12 @@ mod tests {
     fn piped_verifier_is_admitted_but_does_not_clear_gate() {
         let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
         tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
-        // Piped verifiers must run (not block) so the model sees output, but
-        // the pipeline status is the truncator's — only standalone success clears.
+        // Filtering-piped verifiers must run (not block) so the model sees
+        // output, but the exit status is the filter's — they never clear.
         assert!(!mutation_blocked_until_verification(
             &tracker,
             tools::EXEC_COMMAND,
-            &json!({"cmd": "cargo check --locked 2>&1 | head -c 4000"})
+            &json!({"cmd": "cargo check --locked 2>&1 | grep error"})
         ));
         let piped_success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
             output: serde_json::json!({"exit_code": 0}),
@@ -2950,10 +2959,48 @@ mod tests {
             &mut tracker,
             &piped_success,
             tools::EXEC_COMMAND,
-            &json!({"cmd": "cargo check --locked 2>&1 | head -c 4000"}),
+            &json!({"cmd": "cargo check --locked 2>&1 | grep error"}),
         );
         assert!(tracker.verification_is_pending());
         assert_eq!(tracker.consecutive_mutations, BLIND_EDITING_THRESHOLD);
+    }
+
+    #[test]
+    fn truncation_only_piped_verifier_success_clears_gate() {
+        // The kernel elides a pure `| head`/`| tail` tail and runs the
+        // standalone verifier, so its exit 0 is the verifier's own. The
+        // tracker must agree even when handed the typed (raw) arguments,
+        // e.g. after a PreToolUse hook rewrite.
+        let success = ToolPipelineOutcome::from_status(ToolExecutionStatus::Success {
+            output: serde_json::json!({"exit_code": 0}),
+            stdout: None,
+            modified_files: vec![],
+            command_success: true,
+        });
+        for command in [
+            "cargo check --locked 2>&1 | tail -5",
+            "cargo check --locked 2>&1 | head -c 4000",
+        ] {
+            let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
+            tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
+            assert!(
+                !mutation_blocked_until_verification(&tracker, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "{command}"
+            );
+            assert!(
+                !update_repetition_tracker(&mut tracker, &success, tools::EXEC_COMMAND, &json!({"cmd": command})),
+                "{command}"
+            );
+            assert!(!tracker.verification_is_pending(), "elided verifier success must clear: {command}");
+            assert_eq!(tracker.consecutive_mutations, 0, "{command}");
+            assert!(!tracker.take_piped_verification_notice(), "no piped notice for {command}");
+        }
+    }
+
+    #[test]
+    fn anti_blind_editing_directive_states_the_shared_shell_form_note() {
+        assert!(ANTI_BLIND_EDITING_DIRECTIVE.ends_with(vtcode_core::tools::tool_intent::VERIFIER_SHELL_FORM_NOTE));
+        assert!(!PIPED_VERIFICATION_DIRECTIVE.contains("`tail`/`head`"));
     }
 
     #[test]
@@ -3012,7 +3059,7 @@ mod tests {
         for command in [
             "cargo check --locked; cargo nextest run --locked -p vtcode-ui",
             "cargo check --locked || cargo nextest run --locked -p vtcode-ui",
-            "cargo check --locked | head -40",
+            "cargo check --locked | grep -v warning",
         ] {
             let mut tracker = LoopTracker::with_verification_snapshot((true, 0));
             tracker.consecutive_mutations = BLIND_EDITING_THRESHOLD;
@@ -3172,7 +3219,7 @@ mod tests {
             &mut tracker,
             &piped_success,
             tools::EXEC_COMMAND,
-            &json!({"cmd": "cargo check --locked -p vtcode 2>&1 | tail -5"}),
+            &json!({"cmd": "cargo check --locked -p vtcode 2>&1 | grep -E 'error|warning'"}),
         ));
         assert!(tracker.verification_is_pending(), "piped success must not clear the gate");
         assert!(tracker.take_piped_verification_notice(), "piped success must queue the notice");
@@ -3209,7 +3256,7 @@ mod tests {
             &mut tracker,
             &piped_success,
             tools::EXEC_COMMAND,
-            &json!({"cmd": "cargo check --locked 2>&1 | tail -5"}),
+            &json!({"cmd": "cargo check --locked 2>&1 | grep error"}),
         ));
         assert!(!tracker.take_piped_verification_notice());
     }

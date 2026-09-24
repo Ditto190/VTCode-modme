@@ -171,8 +171,9 @@ pub fn default_verifier_for_workspace(workspace_root: &Path) -> Option<String> {
 /// Which shell forms of a verifier clear the anti-blind-editing gate. Shared
 /// by the recovery directive and the blocked-mutation `next_action` so the
 /// two surfaces cannot drift.
-pub const VERIFIER_SHELL_FORM_NOTE: &str = "Cap output with `max_output_tokens`; pure `| head`/`| tail` truncators are elided at execution, \
-while filtering pipes (`| grep`), `;`, and `||` joins do not clear the gate.";
+pub const VERIFIER_SHELL_FORM_NOTE: &str = "Cap output with `max_output_tokens`. A verifier piped only into `head` or `tail` runs without \
+the truncator and counts as standalone; filtering pipes (`| grep`), `;`, and `||` make the exit status another command's, \
+so they do not clear the gate.";
 
 /// Build the actionable verification-recovery directive with a concrete
 /// command. `default_verifier` should come from
@@ -378,6 +379,33 @@ pub fn rewrite_truncation_only_verifier(args: &Value) -> Option<String> {
         return None;
     }
     Some(head.to_string())
+}
+
+/// Shell-call arguments as the execution kernel runs them.
+///
+/// The kernel applies [`rewrite_truncation_only_verifier`] to every
+/// command-run call before execution, so the process that runs (and whose
+/// exit status the outcome reports) is the standalone verifier, not the typed
+/// pipeline. Gate bookkeeping must classify that same command; classifying the
+/// typed pipeline would call a truthful `cargo check 2>&1 | tail -5` success a
+/// mutation and leave the gate pending. Arguments the kernel runs unchanged
+/// (already-normalized arguments included, since the rewrite is idempotent)
+/// are borrowed as-is.
+pub fn shell_args_as_executed<'a>(tool_name: &str, args: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if !super::is_command_run_tool_call(tool_name, args) {
+        return std::borrow::Cow::Borrowed(args);
+    }
+    let Some(rewritten) = rewrite_truncation_only_verifier(args) else {
+        return std::borrow::Cow::Borrowed(args);
+    };
+    let mut executed = args.clone();
+    match executed.as_object_mut() {
+        Some(payload) => {
+            payload.insert("command".to_string(), Value::String(rewritten));
+            std::borrow::Cow::Owned(executed)
+        }
+        None => std::borrow::Cow::Borrowed(args),
+    }
 }
 
 fn is_known_inspection(words: &[String]) -> bool {
@@ -872,7 +900,8 @@ mod tests {
         assert!(directive.contains("go test ./..."));
         assert!(directive.contains("1/2"));
         assert!(directive.contains("max_output_tokens"));
-        assert!(directive.contains("elided at execution"));
+        assert!(directive.contains(VERIFIER_SHELL_FORM_NOTE));
+        assert!(directive.contains("counts as standalone"));
         let fallback = verification_recovery_directive(None, 2, 2);
         assert!(fallback.contains("cargo check --locked"));
         assert!(fallback.contains("2/2"));
@@ -930,5 +959,49 @@ mod tests {
             "array-form commands keep today's behavior"
         );
         assert_eq!(rewrite_truncation_only_verifier(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn args_as_executed_classify_elided_truncation_verifiers_as_verification() {
+        for command in [
+            "cargo check --locked 2>&1 | tail -5",
+            "cargo nextest run 2>&1 | head -c 4000",
+        ] {
+            let typed = exec_command(command);
+            let executed = shell_args_as_executed(tools::EXEC_COMMAND, &typed);
+            assert!(matches!(executed, std::borrow::Cow::Owned(_)), "expected rewrite: {command}");
+            assert_eq!(
+                classify_shell_activity(tools::EXEC_COMMAND, &executed),
+                ShellActivity::Verification,
+                "{command}"
+            );
+            // Idempotent: the executed form runs unchanged on a second pass.
+            assert!(matches!(shell_args_as_executed(tools::EXEC_COMMAND, &executed), std::borrow::Cow::Borrowed(_)));
+        }
+
+        let unified = json!({"action": "run", "command": "cargo check 2>&1 | tail -5"});
+        assert_eq!(shell_args_as_executed(tools::UNIFIED_EXEC, &unified)["command"], "cargo check 2>&1");
+    }
+
+    #[test]
+    fn args_as_executed_keep_filtering_pipes_and_non_run_calls_as_typed() {
+        for command in [
+            "cargo check 2>&1 | grep error",
+            "cargo check; git status",
+            "cargo check || true",
+        ] {
+            let typed = exec_command(command);
+            let executed = shell_args_as_executed(tools::EXEC_COMMAND, &typed);
+            assert!(matches!(executed, std::borrow::Cow::Borrowed(_)), "must run as typed: {command}");
+            assert_ne!(
+                classify_shell_activity(tools::EXEC_COMMAND, &executed),
+                ShellActivity::Verification,
+                "{command}"
+            );
+        }
+        let poll = json!({"action": "poll", "session_id": "s1", "command": "cargo check | tail -5"});
+        assert!(matches!(shell_args_as_executed(tools::UNIFIED_EXEC, &poll), std::borrow::Cow::Borrowed(_)));
+        let read = json!({"path": "src/lib.rs"});
+        assert!(matches!(shell_args_as_executed(tools::READ_FILE, &read), std::borrow::Cow::Borrowed(_)));
     }
 }

@@ -1348,7 +1348,7 @@ mod tests {
         assert!(matches!(outcome, TurnHandlerOutcome::Continue));
         // The active fix window means the verifier already ran and failed: the
         // notice must say so instead of implying verification was never run.
-        assert!(backing.last_history_message_contains("verification command ran and FAILED"));
+        assert!(backing.last_history_message_contains("verification command ran and failed"));
         assert!(
             !backing.last_history_message_contains(ANTI_BLIND_EDITING_DIRECTIVE),
             "generic never-ran directive must not be used while fix edits are granted"
