@@ -71,20 +71,35 @@ including small local models.
   lost work may be unrecoverable"). Do not use capitalized emphasis such as
   MUST, NEVER, or CRITICAL; the runtime-guidance test rejects it.
 - **One home per rule.** Universal rules (scope, grounding, verification
-  honesty, delegation, safety, progress updates) live only in
+  honesty, delegation, safety, tool-failure recovery, waiting on
+  `next_wait_args` instead of polling, `spool_path` paging and
+  `preview_budget_exhausted` handling, progress updates) live only in
   `RUNTIME_GUIDANCE_SECTION`, which every profile includes and which is
-  re-added when a workspace `system.md` replaces the base. Extended style
-  for the Default and Specialized profiles lives in `DEFAULT_SPECIFIC_LINES`.
-  Operating deltas describe only mode mechanics (tools, planning, tracker).
-  Tests assert that shared sentences appear exactly once per profile.
+  re-added when a workspace `system.md` replaces the base. State the
+  harness carries across compaction lives in `SHARED_CONTRACT_LINES`.
+  Extended style for the Default, Lightweight, and Specialized profiles
+  lives in `DEFAULT_SPECIFIC_LINES`. Operating deltas describe only mode
+  mechanics (core tools, Planning workflow, tracker). Per-tool mechanics,
+  including the single `start_planning` line, live in the `## Active Tools`
+  section from `prompts/guidelines.rs`, and `[Harness Limits]` states limit
+  values, their exemptions, and how to work within each limit; neither
+  restates a universal rule.
+  `static_prompts::tests::shared_contract_lines_and_runtime_bullets_appear_exactly_once_per_profile`
+  asserts that every `SHARED_CONTRACT_LINES` entry, every profile-specific
+  contract line, and every Runtime Guidance bullet appears exactly once in
+  each profile, and
+  `guidelines::tests::universal_rules_have_one_home_across_composed_prompt_sections`
+  composes each profile with the Default, Minimal, and Planning tool
+  guidance plus Harness Limits and asserts each universal rule appears
+  exactly once.
 - **Provider-agnostic.** No model or provider names, no references to
   provider-specific features such as thinking blocks or context-clearing
   parameters, and no formatting that depends on one vendor's renderer.
 - **Budgets with justification.** Each profile and section has a token or
   character bound in its tests. When a bound is raised, the constant or
   assertion carries a one-line comment saying why and what it measured.
-  Current base sizes (cl100k estimate): Minimal about 480, Lightweight about
-  730, Default and Specialized about 870, Runtime Guidance about 390.
+  Current base sizes (cl100k estimate): Minimal about 525, Lightweight about
+  730, Default about 860, Specialized about 875, Runtime Guidance about 440.
 
 ## Few-shot management (Section 18.3.3)
 
