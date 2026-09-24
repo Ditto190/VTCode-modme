@@ -9,7 +9,10 @@ use vtcode_core::utils::session_archive::{
     SessionArchive, SessionProgressArgs, SessionProgressPersistenceStatus, VerifiedSessionArchiveIdentifier,
 };
 
+use vtcode_core::tools::tool_intent::{VERIFIER_SHELL_FORM_NOTE, verifier_reference};
+
 use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter, harness_event};
+use crate::agent::runloop::unified::state::VerificationFailureSummary;
 
 const NO_ARCHIVE_RESUME_EXPLANATION: &str = "Resume is unavailable because no session archive exists.";
 const UNVERIFIED_RESUME_EXPLANATION: &str = "Resume is unavailable because the session archive could not be verified.";
@@ -65,6 +68,77 @@ pub(super) fn plan_mode_switch_guidance_lines(is_mutation_block: bool) -> [&'sta
             "  • Implement now: approve the plan or run `/mode build` (`/mode auto` for unattended)",
         ]
     }
+}
+
+/// Shell-form guidance for verifier commands the user is asked to run in a
+/// blocked handoff. It states the same rule as [`VERIFIER_SHELL_FORM_NOTE`]
+/// in a parenthetical that fits inside a handoff sentence.
+const HANDOFF_VERIFIER_SHELL_FORM: &str = "standalone or as a pure `&&` chain (piping only into `head` or `tail` \
+    also counts; cap output with `max_output_tokens`)";
+
+/// Queued input for an autonomous cross-turn verification-recovery turn.
+/// `verifier` is the resolved harness verifier; when none was resolved the
+/// input names the generic build/test/lint description instead of presuming
+/// a command that may not exist in this workspace. The leading sentence is
+/// matched by `is_follow_up_prompt_like`.
+pub(super) fn verification_auto_recovery_follow_up(verifier: Option<&str>) -> String {
+    let verifier = verifier_reference(verifier);
+    format!(
+        "Continue autonomously from the last stalled turn. Verification is still pending; the request resumes once \
+        {verifier} runs with `exec_command`, standalone or as a pure `&&` chain, and exits 0. {VERIFIER_SHELL_FORM_NOTE} \
+        A text-only reply leaves the gate pending, so this turn would end blocked again."
+    )
+}
+
+/// Transcript line announcing an autonomous verification-recovery turn.
+pub(super) fn verification_auto_recovery_status_line(verifier: Option<&str>, attempt: u8, max: u8) -> String {
+    match verifier.map(str::trim).filter(|command| !command.is_empty()) {
+        Some(command) => format!(
+            "[i] Verification gate auto-recovery turn {attempt}/{max}: retrying `{command}` without manual `continue`."
+        ),
+        None => format!(
+            "[i] Verification gate auto-recovery turn {attempt}/{max}: asking for a project verifier run without manual `continue`."
+        ),
+    }
+}
+
+/// Blocked-handoff reason for a verification block whose autonomous recovery
+/// ended. With an escalated failure the reason carries the failing command
+/// and its output tail; otherwise it reports the spent (or disabled)
+/// cross-turn budget and whether harness auto-verification ran at all, which
+/// it only does when a verifier was resolved.
+pub(super) fn verification_exhausted_handoff_reason(
+    base: &str,
+    verifier: Option<&str>,
+    attempt: u8,
+    max: u8,
+    escalated_failure: Option<&VerificationFailureSummary>,
+) -> String {
+    if let Some(failure) = escalated_failure {
+        return format!(
+            "{base} The harness auto-verification `{}` failed {} time(s) consecutively, so autonomous recovery stopped. \
+            Last output tail:\n{}\nFix the reported failure, then run `{}` {HANDOFF_VERIFIER_SHELL_FORM} and let it exit 0 \
+            before typing `continue` to resume with the gate preserved.",
+            failure.command, failure.consecutive_failures, failure.excerpt_tail, failure.command,
+        );
+    }
+    let command = verifier.map(str::trim).filter(|command| !command.is_empty());
+    let harness_note = match command {
+        Some(command) => format!("harness auto-verification already tried `{command}`"),
+        None => "no project verifier was detected, so harness auto-verification did not run".to_string(),
+    };
+    // `max == 0` disables cross-turn recovery via config: report it as
+    // disabled rather than the confusing `0/0 turns`.
+    let recovery_note = if max == 0 {
+        format!("with cross-turn auto-recovery disabled ({harness_note})")
+    } else {
+        format!("after {attempt}/{max} auto-recovery turns ({harness_note})")
+    };
+    let verifier = verifier_reference(command);
+    format!(
+        "{base} Autonomous verification recovery was exhausted {recovery_note}. Run {verifier} \
+        {HANDOFF_VERIFIER_SHELL_FORM} and let it exit 0, then type `continue` to resume with the gate preserved."
+    )
 }
 
 /// Build the `# Last-Turn Diagnostics` footer from the turn snapshot and the
@@ -295,8 +369,8 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             let full_reason_path = artifacts.current_path.display().to_string();
             let transcript_reason = truncated_block_reason(blocker_summary, &full_reason_path);
             let _ = renderer.line(MessageStyle::Warning, &format!("Turn blocked: {transcript_reason}"));
-            // Verification blocks already name the exact verifier in the summary and
-            // attempted harness auto-verification: lead with the actionable
+            // Verification blocks name the verifier (or the generic description
+            // when none was detected) in the summary: lead with the actionable
             // verifier-first step instead of the generic `continue` nudge so
             // long-running work can resume without re-reading handoff files.
             // Lowercase match follows the helper convention for compound reasons.
@@ -305,7 +379,7 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
                 let _ = renderer.line(MessageStyle::Info, "What to do now (verification gate still pending):");
                 let _ = renderer.line(
                     MessageStyle::Info,
-                    "  • Run the verifier standalone (no pipes; cap with `max_output_tokens`), let it exit 0, then type 'continue' — harness auto-verification already tried.",
+                    "  • Run the project verifier standalone or as a pure `&&` chain (piping only into `head` or `tail` also counts; cap output with `max_output_tokens`), let it exit 0, then type 'continue'.",
                 );
             } else {
                 let _ = renderer.line(MessageStyle::Info, "What you can do:");
@@ -399,8 +473,83 @@ mod tests {
     use super::{
         NO_ARCHIVE_RESUME_EXPLANATION, TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics,
         is_plan_mode_mutation_block, plan_mode_switch_guidance_lines, truncated_block_reason,
+        verification_auto_recovery_follow_up, verification_auto_recovery_status_line,
+        verification_exhausted_handoff_reason,
     };
+    use crate::agent::runloop::unified::state::{VerificationFailureSummary, is_follow_up_prompt_like};
     use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
+    use vtcode_core::tools::tool_intent::{GENERIC_VERIFIER_DESCRIPTION, VERIFIER_SHELL_FORM_NOTE};
+
+    const BASE: &str = "Turn blocked after repeated unverified assistant responses; verification is still pending.";
+
+    #[test]
+    fn auto_recovery_follow_up_names_resolved_verifier_in_calm_prose() {
+        let follow_up = verification_auto_recovery_follow_up(Some("go test ./..."));
+
+        assert!(is_follow_up_prompt_like(&follow_up));
+        assert!(follow_up.contains("`go test ./...` runs with `exec_command`"));
+        assert!(follow_up.contains(VERIFIER_SHELL_FORM_NOTE));
+        assert!(!follow_up.contains("no pipes"), "piping into head/tail alone counts: {follow_up}");
+        assert!(!follow_up.contains("Do not"), "states the consequence instead: {follow_up}");
+    }
+
+    #[test]
+    fn auto_recovery_follow_up_without_verifier_names_generic_description() {
+        let follow_up = verification_auto_recovery_follow_up(None);
+
+        assert!(follow_up.contains(&format!("once {GENERIC_VERIFIER_DESCRIPTION} runs")));
+        assert!(!follow_up.contains("once `cargo check --locked`"), "no single command is presumed: {follow_up}");
+    }
+
+    #[test]
+    fn auto_recovery_status_line_does_not_claim_a_retry_without_verifier() {
+        assert_eq!(
+            verification_auto_recovery_status_line(Some("npm test"), 1, 2),
+            "[i] Verification gate auto-recovery turn 1/2: retrying `npm test` without manual `continue`."
+        );
+        let generic = verification_auto_recovery_status_line(None, 2, 2);
+        assert!(generic.contains("2/2"));
+        assert!(!generic.contains("retrying `"), "{generic}");
+    }
+
+    #[test]
+    fn exhausted_handoff_with_verifier_reports_harness_attempt() {
+        let reason = verification_exhausted_handoff_reason(BASE, Some("pytest -q"), 2, 2, None);
+
+        assert!(reason.starts_with(BASE));
+        assert!(reason.contains("recovery was exhausted after 2/2 auto-recovery turns"));
+        assert!(reason.contains("harness auto-verification already tried `pytest -q`"));
+        assert!(reason.contains("Run `pytest -q` standalone or as a pure `&&` chain"));
+        assert!(!reason.contains("no pipes"));
+    }
+
+    #[test]
+    fn exhausted_handoff_without_verifier_does_not_claim_harness_attempt() {
+        let reason = verification_exhausted_handoff_reason(BASE, None, 2, 2, None);
+
+        assert!(reason.contains("no project verifier was detected, so harness auto-verification did not run"));
+        assert!(!reason.contains("already tried"));
+        assert!(reason.contains(&format!("Run {GENERIC_VERIFIER_DESCRIPTION} standalone")));
+        assert!(!reason.contains("`cargo check --locked` standalone"));
+
+        let disabled = verification_exhausted_handoff_reason(BASE, None, 0, 0, None);
+        assert!(disabled.contains("with cross-turn auto-recovery disabled"));
+        assert!(!disabled.contains("0/0"));
+    }
+
+    #[test]
+    fn exhausted_handoff_after_escalation_carries_failure_tail() {
+        let failure = VerificationFailureSummary {
+            command: "cargo nextest run".to_string(),
+            excerpt_tail: "error[E0308]: mismatched types".to_string(),
+            consecutive_failures: 3,
+        };
+        let reason = verification_exhausted_handoff_reason(BASE, Some("cargo nextest run"), 1, 2, Some(&failure));
+
+        assert!(reason.contains("`cargo nextest run` failed 3 time(s) consecutively"));
+        assert!(reason.contains("Last output tail:\nerror[E0308]: mismatched types\n"));
+        assert!(reason.contains("then run `cargo nextest run` standalone or as a pure `&&` chain"));
+    }
 
     #[test]
     fn quiet_handoff_resume_explanation_is_non_empty() {

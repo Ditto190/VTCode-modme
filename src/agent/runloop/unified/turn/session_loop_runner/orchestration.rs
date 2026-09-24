@@ -2058,12 +2058,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             attempt,
                             max,
                         );
-                        let verifier_command = default_verifier.as_deref().unwrap_or("cargo check --locked");
-                        let follow_up = format!(
-                            "Continue autonomously from the last stalled turn. Verification is still pending: run `{verifier_command}` \
-                            with exec_command standalone or as a pure `&&` chain (no pipes, no `;`/`||`; cap output with \
-                            `max_output_tokens`), let it exit 0, then resume the request. Do not reply with text instead of verifying."
-                        );
+                        let follow_up =
+                            super::blocked_handoff::verification_auto_recovery_follow_up(default_verifier.as_deref());
                         // Queue first: on a full queue the turn must fall
                         // through to the manual blocked handoff without leaving
                         // an orphan recovery directive in history.
@@ -2073,8 +2069,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     .push(vtcode_core::llm::provider::Message::system(directive));
                                 let _ = renderer.line(
                                     MessageStyle::Info,
-                                    &format!(
-                                        "[i] Verification gate auto-recovery turn {attempt}/{max}: retrying `{verifier_command}` without manual `continue`."
+                                    &super::blocked_handoff::verification_auto_recovery_status_line(
+                                        default_verifier.as_deref(),
+                                        attempt,
+                                        max,
                                     ),
                                 );
                                 session_stats.mark_turn_stalled(
@@ -2108,30 +2106,15 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             vt_cfg.as_ref(),
                             config.workspace.as_path(),
                         );
-                        let command = verifier.as_deref().unwrap_or("cargo check --locked");
                         let attempt = session_stats.verification_auto_recovery_turns();
                         let max = verification_gate::verification_cross_turn_turns(vt_cfg.as_ref());
-                        // `max == 0` disables cross-turn recovery via config: report
-                        // it as disabled rather than the confusing `0/0 turns`.
-                        let recovery_note = if max == 0 {
-                            format!(
-                                "with cross-turn auto-recovery disabled (harness auto-verification already tried `{command}`)"
-                            )
-                        } else {
-                            format!(
-                                "after {attempt}/{max} auto-recovery turns (harness auto-verification already tried `{command}`)"
-                            )
-                        };
-                        match (escalated, session_stats.last_verification_failure()) {
-                            (true, Some(failure)) => format!(
-                                "{base} The harness auto-verification `{}` failed {} time(s) consecutively, so autonomous recovery stopped. Last output tail:\n{}\nFix the reported failure, then run `{}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0 before typing `continue` to resume with the gate preserved.",
-                                failure.command, failure.consecutive_failures, failure.excerpt_tail, failure.command,
-                            ),
-                            _ => format!(
-                                "{base} Autonomous verification recovery was exhausted {recovery_note}. \
-                                Run `{command}` standalone (no pipes; use `max_output_tokens` for output) and let it exit 0, then type `continue` to resume with the gate preserved."
-                            ),
-                        }
+                        super::blocked_handoff::verification_exhausted_handoff_reason(
+                            base,
+                            verifier.as_deref(),
+                            attempt,
+                            max,
+                            session_stats.last_verification_failure().filter(|_| escalated),
+                        )
                     } else {
                         base.to_string()
                     };

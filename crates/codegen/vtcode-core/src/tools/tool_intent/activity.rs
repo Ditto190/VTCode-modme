@@ -175,15 +175,31 @@ pub const VERIFIER_SHELL_FORM_NOTE: &str = "Cap output with `max_output_tokens`.
 the truncator and counts as standalone; filtering pipes (`| grep`), `;`, and `||` make the exit status another command's, \
 so they do not clear the gate.";
 
+/// Stand-in for the verifier when no project command was detected or
+/// configured. It lists examples across ecosystems instead of naming one
+/// command, because a single concrete fallback (such as a Cargo command in a
+/// Go or Node workspace) would direct the model to a verifier that does not
+/// exist.
+pub const GENERIC_VERIFIER_DESCRIPTION: &str =
+    "your project's build/test/lint command (e.g. `cargo check --locked`, `go test ./...`, `npm test`, or `pytest -q`)";
+
+/// How harness text names the verifier to run: the resolved command in
+/// backticks, or [`GENERIC_VERIFIER_DESCRIPTION`] when none was resolved.
+/// `default_verifier` should come from [`default_verifier_for_workspace`] or
+/// the harness override resolution built on it.
+pub fn verifier_reference(default_verifier: Option<&str>) -> String {
+    match default_verifier.map(str::trim).filter(|command| !command.is_empty()) {
+        Some(command) => format!("`{command}`"),
+        None => GENERIC_VERIFIER_DESCRIPTION.to_string(),
+    }
+}
+
 /// Build the actionable verification-recovery directive with a concrete
 /// command. `default_verifier` should come from
 /// [`default_verifier_for_workspace`]; when `None`, the generic examples are
 /// kept so the directive never names a command that does not exist.
 pub fn verification_recovery_directive(default_verifier: Option<&str>, attempt: u8, max_attempts: u8) -> String {
-    let verifier = match default_verifier {
-        Some(command) => format!("`{command}`"),
-        None => "your project's build/test/lint command (e.g. `cargo check --locked`, `go test ./...`, `npm test`, or `pytest -q`)".to_string(),
-    };
+    let verifier = verifier_reference(default_verifier);
     format!(
         "Verification recovery ({attempt}/{max_attempts}): pending edits have not been verified, so further mutations are blocked \
         and the turn ends blocked unless a verifier exits 0. Run {verifier} with `exec_command`, standalone or as a pure `&&` chain of verifiers. \
@@ -903,8 +919,22 @@ mod tests {
         assert!(directive.contains(VERIFIER_SHELL_FORM_NOTE));
         assert!(directive.contains("counts as standalone"));
         let fallback = verification_recovery_directive(None, 2, 2);
-        assert!(fallback.contains("cargo check --locked"));
+        assert!(fallback.contains(GENERIC_VERIFIER_DESCRIPTION));
         assert!(fallback.contains("2/2"));
+    }
+
+    #[test]
+    fn verifier_reference_names_resolved_command_or_generic_description() {
+        assert_eq!(verifier_reference(Some("go test ./...")), "`go test ./...`");
+        assert_eq!(verifier_reference(Some("  npm test ")), "`npm test`");
+        for missing in [None, Some(""), Some("   ")] {
+            let reference = verifier_reference(missing);
+            assert_eq!(reference, GENERIC_VERIFIER_DESCRIPTION);
+            assert!(!reference.starts_with('`'), "no single command is named: {reference}");
+            for ecosystem in ["cargo check --locked", "go test ./...", "npm test", "pytest -q"] {
+                assert!(reference.contains(ecosystem), "missing {ecosystem}: {reference}");
+            }
+        }
     }
 
     #[test]
