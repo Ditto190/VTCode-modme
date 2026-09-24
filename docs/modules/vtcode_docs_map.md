@@ -65,7 +65,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/EXTENDED_THINKING.md`
   - **Content**: Anthropic Thinking in VT Code
-  - **Topics**: Compact Runtime Matrix, Configuration, Adaptive Thinking Behavior, Budgeted Thinking Behavior, Feature Compatibility
+  - **Topics**: Compact Runtime Matrix, Configuration, Adaptive Thinking Behavior, Feature Compatibility, Disabling Thinking
   - **User Questions**: "What can you tell me about Anthropic Thinking in VT Code?", "How does Compact Runtime Matrix work?", "How does Configuration work?"
 
 - **File**: `docs/development/CPP_CORE_GUIDELINES_ADOPTION.md`

@@ -16,8 +16,8 @@ use vtcode_config::types::ReasoningEffortLevel;
 use super::capabilities::{
     adaptive_thinking_always_on, allowed_efforts_for_model, claude_thinking_profile, default_effort_for_model,
     default_max_tokens_for_model, effort_allowed_for_model, effort_is_at_most_high, matches_model, rejects_sampling,
-    resolve_model_name, supports_effort, supports_manual_interleaved_beta, supports_manual_thinking_budget,
-    supports_structured_output, supports_task_budget,
+    resolve_model_name, structured_output_models, supports_effort, supports_manual_interleaved_beta,
+    supports_manual_thinking_budget, supports_structured_output, supports_task_budget,
 };
 
 pub fn validate_request(
@@ -39,8 +39,9 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             provider_name,
             &format!(
-                "Structured output is not supported for model '{}'. Structured outputs are only available for Claude Sonnet 4.5/4.6, Claude Opus 4.5/4.7/4.8, and Claude Haiku 4.5 models.",
-                request.model
+                "Structured output is not supported for model '{}'. Models that support it: {}.",
+                request.model,
+                structured_output_models().join(", ")
             ),
         );
         return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
@@ -59,7 +60,7 @@ pub fn validate_request(
     let resolved_model = resolve_model_name(&request.model, default_model);
     let effective_thinking_mode = resolve_effective_thinking_mode(request, default_model, anthropic_config);
 
-    // Models with adaptive thinking always on (Fable 5, Mythos 5) reject disabled thinking.
+    // Models with adaptive thinking always on (Opus 5.5, Fable 5/5.1) reject disabled thinking.
     // Sonnet 5 has default thinking on but allows disabling via `thinking: {type: "disabled"}`.
     // Opus 5 allows disabling thinking only at effort ≤ high.
     if adaptive_thinking_always_on(resolved_model, default_model)

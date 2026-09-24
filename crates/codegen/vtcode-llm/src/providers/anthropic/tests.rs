@@ -18,6 +18,21 @@ mod capabilities_tests {
     }
 
     #[test]
+    fn structured_output_models_lists_exactly_the_accepted_models() {
+        let listed = structured_output_models();
+        for model in models::anthropic::SUPPORTED_MODELS {
+            assert!(listed.contains(model), "{model} accepts structured output but is not listed");
+        }
+        for model in &listed {
+            assert!(supports_structured_output(model, ""), "{model} is listed but rejected");
+        }
+        for rejected in ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"] {
+            assert!(!supports_structured_output(rejected, ""), "{rejected}");
+            assert!(!listed.contains(&rejected), "{rejected}");
+        }
+    }
+
+    #[test]
     fn test_supports_vision() {
         assert!(supports_vision(models::CLAUDE_SONNET_5, models::anthropic::DEFAULT_MODEL));
         assert!(supports_vision("claude-3-opus", models::anthropic::DEFAULT_MODEL));
@@ -93,6 +108,25 @@ mod validation_tests {
         };
         let config = AnthropicConfig::default();
         assert!(validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic").is_err());
+    }
+
+    #[test]
+    fn unsupported_structured_output_error_names_the_supported_models() {
+        let request = LLMRequest {
+            messages: vec![Message::user("hi".to_string())].into(),
+            model: "claude-haiku-4-5".to_string(),
+            output_format: Some(json!({ "type": "object", "properties": {}, "additionalProperties": false })),
+            ..Default::default()
+        };
+        let config = AnthropicConfig::default();
+        let err = validate_request(&request, models::anthropic::DEFAULT_MODEL, &config, "Anthropic")
+            .expect_err("haiku 4.5 has no structured output support");
+        let message = err.to_string();
+        assert!(message.contains("'claude-haiku-4-5'"), "{message}");
+        for model in crate::providers::anthropic::capabilities::structured_output_models() {
+            assert!(message.contains(model), "missing {model}: {message}");
+        }
+        assert!(!message.contains("4.6") && !message.contains("Haiku 4.5 models"), "{message}");
     }
 
     #[test]

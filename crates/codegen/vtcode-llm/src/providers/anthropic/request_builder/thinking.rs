@@ -269,7 +269,7 @@ mod tests {
     use vtcode_config::constants::models::anthropic;
 
     #[test]
-    fn ignores_explicit_budget_for_opus_4_8() {
+    fn ignores_explicit_budget_for_opus_5() {
         let request = LLMRequest {
             model: anthropic::CLAUDE_OPUS_5.to_string(),
             thinking_budget: Some(2048),

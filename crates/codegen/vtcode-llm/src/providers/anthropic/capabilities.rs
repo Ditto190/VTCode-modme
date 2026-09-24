@@ -404,6 +404,10 @@ pub(crate) fn rejects_sampling(model: &str, default_model: &str) -> bool {
     is_claude_5_family(resolve_model_name(model, default_model))
 }
 
+/// Pre-5.x Claude models without a thinking profile that still accept
+/// structured outputs.
+const LEGACY_STRUCTURED_OUTPUT_MODELS: &[&str] = &["claude-sonnet-4-5", "claude-opus-4-5"];
+
 pub(crate) fn supports_structured_output(model: &str, default_model: &str) -> bool {
     let requested = resolve_model_name(model, default_model);
 
@@ -412,8 +416,21 @@ pub(crate) fn supports_structured_output(model: &str, default_model: &str) -> bo
         return true;
     }
 
-    // Legacy models without thinking profiles that support structured outputs.
-    matches_model(requested, "claude-sonnet-4-5") || matches_model(requested, "claude-opus-4-5")
+    LEGACY_STRUCTURED_OUTPUT_MODELS
+        .iter()
+        .any(|candidate| matches_model(requested, candidate))
+}
+
+/// Model ids that accept structured outputs, derived from
+/// `supports_structured_output` so user-facing errors cannot drift from it:
+/// every supported model with a thinking profile, then the legacy ids.
+pub(crate) fn structured_output_models() -> Vec<&'static str> {
+    models::anthropic::SUPPORTED_MODELS
+        .iter()
+        .copied()
+        .filter(|model| supports_structured_output(model, ""))
+        .chain(LEGACY_STRUCTURED_OUTPUT_MODELS.iter().copied())
+        .collect()
 }
 
 pub(crate) fn supports_vision(model: &str, default_model: &str) -> bool {
