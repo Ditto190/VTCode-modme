@@ -384,7 +384,7 @@ async fn build_prompt_sections(
 
     let mut sections = vec![PromptSection { kind: SectionKind::BaseContract, text: base_prompt }];
 
-    if should_include_structured_reasoning(vtcode_config, prompt_mode) {
+    if should_include_structured_reasoning(vtcode_config) {
         sections.push(PromptSection {
             kind: SectionKind::StructuredReasoning,
             text: STRUCTURED_REASONING_INSTRUCTIONS.to_string(),
@@ -552,16 +552,10 @@ fn apply_agent_identity(prompt: &str, agent_label: &str) -> String {
     result
 }
 
-fn should_include_structured_reasoning(
-    vtcode_config: Option<&crate::config::VTCodeConfig>,
-    mode: SystemPromptMode,
-) -> bool {
-    if let Some(cfg) = vtcode_config {
-        return cfg.agent.should_include_structured_reasoning_tags();
-    }
-
-    // Backward-compatible fallback when no config is available.
-    matches!(mode, SystemPromptMode::Specialized)
+/// Structured reasoning tags are opt-in (`agent.include_structured_reasoning_tags`)
+/// in every prompt mode; without a config there is nothing to opt in.
+fn should_include_structured_reasoning(vtcode_config: Option<&crate::config::VTCodeConfig>) -> bool {
+    vtcode_config.is_some_and(|cfg| cfg.agent.should_include_structured_reasoning_tags())
 }
 
 /// Generate the stable base system instruction with configuration-aware sections.
@@ -936,6 +930,23 @@ mod tests {
         assert!(
             !result.contains("## Structured Reasoning"),
             "Default mode should omit structured reasoning by default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_specialized_prompt_omits_structured_reasoning_by_default() {
+        let mut config = VTCodeConfig::default();
+        config.agent.system_prompt_mode = SystemPromptMode::Specialized;
+        config.agent.include_temporal_context = false;
+        config.agent.include_working_directory = false;
+        config.agent.instruction_max_bytes = 0;
+        config.agent.include_structured_reasoning_tags = None;
+
+        let result = compose_system_instruction_text(&PathBuf::from("."), Some(&config), None).await;
+
+        assert!(
+            !result.contains("## Structured Reasoning"),
+            "Specialized mode should omit structured reasoning unless explicitly enabled"
         );
     }
 

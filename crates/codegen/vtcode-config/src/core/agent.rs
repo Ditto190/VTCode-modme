@@ -238,10 +238,10 @@ pub struct AgentConfig {
     /// Behavior:
     /// - `Some(true)`: always include structured reasoning instructions.
     /// - `Some(false)`: never include structured reasoning instructions.
-    /// - `None` (default): include only for `default` and `specialized` prompt modes.
+    /// - `None` (default): omit structured reasoning instructions in every prompt mode.
     ///
-    /// This keeps lightweight/minimal prompts smaller by default while allowing
-    /// explicit opt-in when users want tag-based reasoning guidance.
+    /// Models with native reasoning do not need visible reasoning tags, so the
+    /// block is opt-in for users who want tag-based reasoning guidance.
     #[serde(default)]
     pub include_structured_reasoning_tags: Option<bool>,
 
@@ -1114,8 +1114,7 @@ impl Default for AgentConfig {
 impl AgentConfig {
     /// Determine whether structured reasoning tag instructions should be included.
     pub fn should_include_structured_reasoning_tags(&self) -> bool {
-        self.include_structured_reasoning_tags
-            .unwrap_or(matches!(self.system_prompt_mode, SystemPromptMode::Specialized))
+        self.include_structured_reasoning_tags.unwrap_or(false)
     }
 
     /// Validate LLM generation parameters
@@ -2274,7 +2273,7 @@ budget_warning_threshold = 0.5
     }
 
     #[test]
-    fn test_structured_reasoning_defaults_follow_prompt_mode() {
+    fn test_structured_reasoning_is_opt_in_for_every_prompt_mode() {
         let default_prompt_config = AgentConfig {
             system_prompt_mode: SystemPromptMode::Default,
             ..Default::default()
@@ -2285,7 +2284,7 @@ budget_warning_threshold = 0.5
             system_prompt_mode: SystemPromptMode::Specialized,
             ..Default::default()
         };
-        assert!(specialized_mode.should_include_structured_reasoning_tags());
+        assert!(!specialized_mode.should_include_structured_reasoning_tags());
 
         let minimal_mode = AgentConfig {
             system_prompt_mode: SystemPromptMode::Minimal,
