@@ -83,6 +83,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Configuration, Usage, Integration with Release Process, Commit Message Format, Excluded Commits
   - **User Questions**: "What can you tell me about Changelog Generation with git-cliff?", "How does Configuration work?", "How does Usage work?"
 
+- **File**: `docs/development/filesnap-checkpoints.md`
+  - **Content**: Checkpoints and combined rewind
+  - **Topics**: Rewind in the terminal
+  - **User Questions**: "What can you tell me about Checkpoints and combined rewind?", "How does Rewind in the terminal work?"
+
 - **File**: `docs/development/compaction.md`
   - **Content**: Compaction Engine
   - **Topics**: Strategy dispatch, Anthropic context-edit ladder, Input bounding and overflow retry, Per-route policy, Verification
