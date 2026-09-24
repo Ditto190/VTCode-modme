@@ -184,6 +184,7 @@ mod tests {
             pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
+            refused: false,
         };
 
         apply_turn_outcome(
@@ -240,6 +241,7 @@ mod tests {
             pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
+            refused: false,
         };
         conversation_history.push(uni::Message::assistant("done".to_string()));
 
@@ -287,6 +289,7 @@ mod tests {
             pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
+            refused: false,
         };
         conversation_history.push(uni::Message::assistant("done".to_string()));
 
@@ -334,6 +337,7 @@ mod tests {
             pending_plan_execution_target: None,
             plan_approved_execution_pending: false,
             final_response_was_fallback: false,
+            refused: false,
         };
         conversation_history.push(uni::Message::assistant("done".to_string()));
 

@@ -20,6 +20,75 @@ use vtcode_ui::tui::app::{
 const STARTUP_PLANNING_WORKFLOW_ENTER_ACTION: &str = "planning_active:start_enter";
 const STARTUP_PLANNING_WORKFLOW_STAY_ACTION: &str = "planning_active:start_stay";
 
+/// Boundary captured before a turn starts so a provider refusal can roll the
+/// refused turn out of model-visible history.
+///
+/// A refused request is terminal: resending it, or keeping it where the next
+/// request replays it, is refused again. Rolling back truncates history to its
+/// state before the refused user message, so the surviving prefix is exactly
+/// what the provider accepted and stays append-only. The refusal notice is
+/// shown in the transcript and the harness event stream only.
+#[derive(Debug, Clone)]
+pub(super) struct RefusedTurnRollback {
+    /// First index removed by the rollback: the turn's prompt message, or the
+    /// pre-turn history length when the turn has no prompt message.
+    index: usize,
+    /// The prompt message at `index`, used to locate the boundary again if an
+    /// in-turn rewrite (for example compaction) shifted it.
+    prompt: Option<vtcode_core::llm::provider::Message>,
+}
+
+impl RefusedTurnRollback {
+    /// Capture the boundary before any per-turn notes are appended.
+    ///
+    /// `prompt_message_index` is the index the interaction loop (or the
+    /// approved-plan handoff) pushed the prompt at. Queued follow-ups report
+    /// no index but append the prompt as the last user message.
+    pub(super) fn capture(
+        history: &[vtcode_core::llm::provider::Message],
+        prompt_message_index: Option<usize>,
+        prompt_text: &str,
+    ) -> Self {
+        let index = prompt_message_index.filter(|index| *index < history.len()).or_else(|| {
+            history
+                .last()
+                .filter(|message| {
+                    message.role == MessageRole::User && message.content.as_text().trim() == prompt_text.trim()
+                })
+                .map(|_| history.len() - 1)
+        });
+        match index {
+            Some(index) => Self { index, prompt: history.get(index).cloned() },
+            None => Self { index: history.len(), prompt: None },
+        }
+    }
+
+    /// Truncate `history` to its state before the refused turn. Returns
+    /// whether the boundary was found; when it was not, history is left
+    /// untouched rather than truncated at a guessed position.
+    pub(super) fn apply(&self, history: &mut Vec<vtcode_core::llm::provider::Message>) -> bool {
+        let boundary = match &self.prompt {
+            Some(prompt) if history.get(self.index) == Some(prompt) => Some(self.index),
+            Some(prompt) => history.iter().rposition(|message| message == prompt),
+            None => (self.index <= history.len()).then_some(self.index),
+        };
+        match boundary {
+            Some(boundary) => {
+                history.truncate(boundary);
+                true
+            }
+            None => {
+                tracing::warn!(
+                    index = self.index,
+                    history_len = history.len(),
+                    "Refused turn boundary not found; history left unchanged"
+                );
+                false
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[derive(Clone)]
 pub(super) struct TurnHistoryCheckpoint {
@@ -603,7 +672,7 @@ pub(super) async fn prompt_startup_planning_workflow(
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecutionSummaryStatus, classify_execution_summary};
+    use super::{ExecutionSummaryStatus, RefusedTurnRollback, classify_execution_summary};
     use crate::agent::runloop::unified::turn::context::TurnLoopResult;
     use serde_json::json;
 
@@ -888,5 +957,96 @@ mod tests {
 
         let prefix_mention = json!({"items": [{"description": "Review prefix handling", "status": "completed"}]});
         assert!(!super::checklist_is_review_only(&prefix_mention));
+    }
+
+    fn pre_turn_history() -> Vec<vtcode_core::llm::provider::Message> {
+        use vtcode_core::llm::provider::Message;
+        vec![
+            Message::system("system prompt".to_string()),
+            Message::user("first request".to_string()),
+            Message::assistant("first answer".to_string()),
+        ]
+    }
+
+    fn run_refused_turn(history: &mut Vec<vtcode_core::llm::provider::Message>) {
+        use vtcode_core::llm::provider::Message;
+        // Transient note, tool round-trip, and a partial assistant response
+        // accumulated before the provider refused.
+        history.push(Message::system("Freshness note: transient".to_string()));
+        history.push(Message::assistant("partial answer".to_string()));
+        history.push(Message::system("recovery directive".to_string()));
+    }
+
+    #[test]
+    fn refused_turn_rollback_restores_history_before_the_turn() {
+        use vtcode_core::llm::provider::Message;
+        let before = pre_turn_history();
+        let mut history = before.clone();
+        let prompt_index = history.len();
+        history.push(Message::user("refused request".to_string()));
+
+        let rollback = RefusedTurnRollback::capture(&history, Some(prompt_index), "refused request");
+        run_refused_turn(&mut history);
+
+        assert!(rollback.apply(&mut history));
+        assert_eq!(history, before);
+    }
+
+    #[test]
+    fn refused_turn_rollback_finds_queued_follow_up_prompt_without_index() {
+        use vtcode_core::llm::provider::Message;
+        let before = pre_turn_history();
+        let mut history = before.clone();
+        history.push(Message::user("queued follow-up".to_string()));
+
+        let rollback = RefusedTurnRollback::capture(&history, None, "queued follow-up");
+        run_refused_turn(&mut history);
+
+        assert!(rollback.apply(&mut history));
+        assert_eq!(history, before);
+    }
+
+    #[test]
+    fn refused_turn_rollback_relocates_shifted_prompt() {
+        use vtcode_core::llm::provider::Message;
+        let mut history = pre_turn_history();
+        let prompt_index = history.len();
+        history.push(Message::user("refused request".to_string()));
+        let rollback = RefusedTurnRollback::capture(&history, Some(prompt_index), "refused request");
+
+        // An in-turn rewrite removed an earlier message, shifting the prompt.
+        history.remove(0);
+        let rewritten_prefix = history[..prompt_index - 1].to_vec();
+        run_refused_turn(&mut history);
+
+        assert!(rollback.apply(&mut history));
+        assert_eq!(history, rewritten_prefix);
+    }
+
+    #[test]
+    fn refused_turn_rollback_leaves_history_when_boundary_is_lost() {
+        use vtcode_core::llm::provider::Message;
+        let mut history = pre_turn_history();
+        let prompt_index = history.len();
+        history.push(Message::user("refused request".to_string()));
+        let rollback = RefusedTurnRollback::capture(&history, Some(prompt_index), "refused request");
+
+        history.pop();
+        history.push(Message::user("summarized request".to_string()));
+        let unchanged = history.clone();
+
+        assert!(!rollback.apply(&mut history));
+        assert_eq!(history, unchanged);
+    }
+
+    #[test]
+    fn refused_turn_rollback_without_prompt_restores_pre_turn_length() {
+        let before = pre_turn_history();
+        let mut history = before.clone();
+        let rollback = RefusedTurnRollback::capture(&history, None, "prompt that was never appended");
+        run_refused_turn(&mut history);
+
+        assert!(rollback.apply(&mut history));
+        assert_eq!(history, before);
     }
 }

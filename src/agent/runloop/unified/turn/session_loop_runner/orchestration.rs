@@ -36,7 +36,7 @@ use super::metrics::{
 };
 use super::plan_seed::load_active_plan_seed;
 use super::support::{
-    ExecutionSummaryStatus, append_transient_turn_notes, approved_plan_execution_summary,
+    ExecutionSummaryStatus, RefusedTurnRollback, append_transient_turn_notes, approved_plan_execution_summary,
     build_unrelated_dirty_worktree_note, checkpoint_session_archive_start, force_reload_workspace_config_for_execution,
     format_workspace_relative_paths, latest_assistant_result_text, prepare_resume_bootstrap_without_archive,
     prompt_startup_planning_workflow, remove_transient_system_notes, take_pending_resumed_user_prompt,
@@ -1230,6 +1230,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 }
                 let (session_state, runtime_steering) = runtime.split_mut();
                 let working_history = std::sync::Arc::make_mut(&mut session_state.messages);
+                let refused_turn_rollback = RefusedTurnRollback::capture(
+                    working_history,
+                    completed_turn_prompt_message_index,
+                    &next_turn_input,
+                );
                 let _prompt_checkpoint_lease = if let Some(manager) = checkpoint_manager.as_ref() {
                     let prefix = completed_turn_prompt_message_index
                         .unwrap_or(working_history.len())
@@ -1447,6 +1452,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             pending_plan_execution_target: None,
                             plan_approved_execution_pending: false,
                             final_response_was_fallback: false,
+                            refused: false,
                         }
                     }
                 };
@@ -1458,10 +1464,20 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     handle.set_placeholder(default_placeholder.clone());
                     handle.set_activity_state(ActivityState::Idle);
                 }
-                remove_transient_system_notes(working_history, &transient_system_notes);
+                // A refused request must not stay in model-visible history:
+                // the next request would replay it and be refused again. Roll
+                // back before any post-turn history edits, checkpointing, or
+                // persistence; the refusal notice already reached the
+                // transcript and the harness event stream.
+                let refused_turn_rolled_back = outcome.refused && refused_turn_rollback.apply(working_history);
+                if !refused_turn_rolled_back {
+                    remove_transient_system_notes(working_history, &transient_system_notes);
+                }
 
                 // Cross-turn loop detection: fingerprint this turn's actions and
-                // inject a warning if a loop or stuck pattern is detected.
+                // inject a warning if a loop or stuck pattern is detected. The
+                // warning describes activity from a rolled-back refused turn,
+                // which the model no longer sees, so it is not injected then.
                 if let Some(cross_turn_warning) = cross_turn_tracker.seal_turn_with_progress(
                     &cross_turn_read_sigs,
                     &cross_turn_written,
@@ -1469,7 +1485,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     cross_turn_failed_shell_key.as_deref(),
                     cross_turn_out_of_band_progress,
                     planning_active,
-                ) {
+                ) && !refused_turn_rolled_back
+                {
                     tracing::warn!(warning = %cross_turn_warning, "Cross-turn loop detector triggered");
                     working_history.push(vtcode_core::llm::provider::Message::system(cross_turn_warning));
                 }

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use vtcode_core::core::agent::refusal;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::names::canonical_tool_name;
 use vtcode_core::tools::tool_intent::{
@@ -284,6 +285,12 @@ pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
 /// recovery), not paraphrases. Unknown / missing reasons are not auto-queued
 /// when the turn did not complete.
 pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -> bool {
+    // A provider refusal is terminal for the refused request: resending it is
+    // refused again. Checked before the substring classifiers because the
+    // notice may quote provider or response text containing any token.
+    if reason.is_some_and(refusal::is_refusal_notice) {
+        return false;
+    }
     let Some(reason) = reason.map(str::to_ascii_lowercase) else {
         // Only used when the outer gate already marked the turn Completed.
         // Blocked { reason: None } must not auto-queue.
@@ -445,6 +452,10 @@ pub(crate) fn should_queue_plan_mode_auto_continue(
 /// that path and forced a user `continue` nudge. Interview/approval/permission
 /// handoffs stay denied after the allow-list misses.
 pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
+    // Refusals never auto-continue; see `tracker_auto_continue_is_recoverable_block`.
+    if refusal::is_refusal_notice(reason) {
+        return false;
+    }
     let lower = reason.to_ascii_lowercase();
     // True handoffs deny even when recovery/budget tokens are also present
     // (compound reasons must not auto-queue past a permission/interview wait).
@@ -697,6 +708,31 @@ mod tracker_continue_tests {
         assert!(prompt.contains("Do not ask the user to resume"));
         assert!(prompt.contains("do not implement"));
         assert!(prompt.contains("<proposed_plan>"));
+    }
+
+    #[test]
+    fn refusal_notices_never_auto_continue() {
+        // A refusal explanation may quote text that matches recoverable
+        // tokens ("recovery fallback", "tool budget"); the refusal still wins.
+        let reason = format!(
+            "{}: the request looked like a recovery fallback for a tool budget bypass. \
+             The request was not retried; rephrase it or switch models.",
+            refusal::REFUSAL_NOTICE_PREFIX
+        );
+        assert!(!tracker_auto_continue_is_recoverable_block(Some(&reason)));
+        assert!(!plan_mode_recoverable_block(&reason));
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some(&reason),
+            false,
+            Some(&["step".to_string()]),
+            3,
+            false,
+            false,
+        ));
+        assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, Some(&reason), false, 3, 0));
     }
 
     #[test]

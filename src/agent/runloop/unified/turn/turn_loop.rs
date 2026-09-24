@@ -19,6 +19,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use vtcode_core::acp::ToolPermissionCache;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::core::agent::events::{tool_invocation_completed_event, tool_output_completed_event};
+use vtcode_core::core::agent::refusal;
 use vtcode_core::core::agent::runtime::RuntimeSteering;
 use vtcode_core::core::decision_tracker::DecisionTracker;
 use vtcode_core::core::trajectory::TrajectoryLogger;
@@ -141,8 +142,8 @@ fn pending_verification_final_response() -> String {
 const CONTEXT_CAPACITY_FINAL_RESPONSE: &str = "The turn is blocked because context capacity or compaction failed. \
     The retained tool outputs and progress are preserved; resume the request or switch \
     models and try again.";
-const GENERIC_BLOCKED_FINAL_RESPONSE: &str = "The turn is blocked before success could be confirmed. \
-    The available history and outputs are retained; resume the request to continue.";
+const GENERIC_BLOCKED_FINAL_RESPONSE: &str =
+    "The turn stopped before the request was completed. Resume the request or give updated instructions to continue.";
 /// Maximum number of times the post-tool follow-up failure path may schedule
 /// a tool-free recovery pass within a single turn. This is a defense-in-depth
 /// backstop: the recovery pass itself is terminal (a text response ends the
@@ -345,6 +346,11 @@ fn publish_final_assistant_response(ctx: &mut TurnLoopContext<'_>, text: &str) -
 }
 
 pub(crate) fn format_blocked_turn_final_response(reason: &str) -> String {
+    if refusal::is_refusal_notice(reason) {
+        // The refusal notice is already a complete, user-facing explanation
+        // with its own next step; wrapping it would repeat that guidance.
+        return reason.trim().to_string();
+    }
     if reason.contains(PENDING_VERIFICATION_BLOCK_REASON) {
         pending_verification_final_response()
     } else if reason.contains(POST_TOOL_CONTEXT_COMPACTION_FAILED_REASON) {
@@ -354,16 +360,40 @@ pub(crate) fn format_blocked_turn_final_response(reason: &str) -> String {
         || reason.contains("Blocked tool-call limit")
     {
         format!(
-            "The turn is blocked because repeated tool calls were rejected: {reason}. The available history and outputs are retained. You can resume the request with specific guidance, or adjust permissions/tools to continue."
+            "The turn stopped because repeated tool calls were rejected: {}. Resume the request with specific guidance, or adjust permissions or tools to continue.",
+            reason_clause(reason)
         )
     } else if reason.contains("Repeated shell command") {
-        "The turn is blocked because repeated identical shell commands were detected. The available history and outputs are retained. Please provide alternative instructions or adjust the command.".to_string()
-    } else if !reason.trim().is_empty() && reason != "blocked" {
+        "The turn stopped because repeated identical shell commands were detected. Give alternative instructions or adjust the command to continue.".to_string()
+    } else if !reason.trim().is_empty() && reason.trim() != "blocked" {
         format!(
-            "The turn is blocked before success could be confirmed: {reason}. The available history and outputs are retained; resume the request or provide updated instructions to continue."
+            "The turn stopped: {}. Resume the request or give updated instructions to continue.",
+            reason_clause(reason)
         )
     } else {
         GENERIC_BLOCKED_FINAL_RESPONSE.to_string()
+    }
+}
+
+/// Render a block reason as a clause that continues a sentence after a colon:
+/// trailing sentence punctuation is dropped (the caller supplies the period)
+/// and a leading capitalized plain word is lowercased. Acronyms and
+/// identifiers keep their case.
+fn reason_clause(reason: &str) -> String {
+    let trimmed = reason.trim().trim_end_matches(['.', '!', '?']).trim_end();
+    let mut chars = trimmed.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let second = chars.clone().next();
+    let plain_word =
+        first.is_uppercase() && first != 'I' && second.is_none_or(|c| c.is_lowercase() || c.is_whitespace());
+    if plain_word {
+        let mut clause: String = first.to_lowercase().collect();
+        clause.push_str(chars.as_str());
+        clause
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -378,6 +408,9 @@ fn ensure_blocked_turn_response(
     turn_history_start_len: usize,
     reason: &str,
 ) -> Result<()> {
+    if ctx.harness_state.turn_refused() {
+        return publish_refusal_notice(ctx, reason);
+    }
     let existing_final = latest_final_assistant_response(working_history, turn_history_start_len);
     let generated_fallback = existing_final.is_none();
     let final_text = existing_final.unwrap_or_else(|| format_blocked_turn_final_response(reason));
@@ -397,6 +430,33 @@ fn ensure_blocked_turn_response(
         }
     } else {
         let _ = publish_final_assistant_response(ctx, &final_text)?;
+    }
+    Ok(())
+}
+
+/// Publish the refusal notice for a refused turn.
+///
+/// The notice is always shown, even when an earlier final answer exists in
+/// this turn: that answer predates the refused request and would misreport
+/// the outcome. The notice goes to the transcript and the harness event
+/// stream only. It is not appended to `working_history`, because the session
+/// loop rolls the refused turn out of model-visible history.
+fn publish_refusal_notice(ctx: &mut TurnLoopContext<'_>, reason: &str) -> Result<()> {
+    let notice = format_blocked_turn_final_response(reason);
+    ctx.harness_state.mark_final_response_fallback();
+    ctx.renderer.line(MessageStyle::Response, &notice)?;
+    ctx.harness_state.mark_final_response_rendered();
+    if ctx.harness_emitter.is_none() {
+        ctx.harness_state.mark_final_response_event_emitted();
+    } else if !ctx.harness_state.final_response_event_emitted()
+        && let Some(emitter) = ctx.harness_emitter
+    {
+        // When a stale final was already emitted, the canonical final item is
+        // taken; the `turn.blocked` event still carries the refusal reason.
+        match emitter.emit_assistant_message(&ctx.harness_state.turn_id.0, &notice) {
+            Ok(()) => ctx.harness_state.mark_final_response_event_emitted(),
+            Err(err) => tracing::warn!(error = %err, "refusal notice harness emission failed"),
+        }
     }
     Ok(())
 }
@@ -465,6 +525,10 @@ pub(crate) struct TurnLoopOutcome {
     /// Whether the turn's final response came from deterministic recovery
     /// fallback rather than a confirmed model synthesis.
     pub final_response_was_fallback: bool,
+    /// Whether the provider refused this turn's request. The session loop
+    /// rolls a refused turn out of model-visible history and skips every
+    /// auto-continue and recovery path for it.
+    pub refused: bool,
 }
 
 pub(crate) fn effective_vt_cfg<'a>(
@@ -1930,6 +1994,7 @@ pub(crate) async fn run_turn_loop(
         pending_plan_execution_target,
         plan_approved_execution_pending,
         final_response_was_fallback,
+        refused: ctx.harness_state.turn_refused(),
     })
 }
 

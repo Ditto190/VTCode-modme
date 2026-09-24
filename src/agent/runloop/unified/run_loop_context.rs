@@ -149,7 +149,6 @@ impl ToolBudgetWarning {
     }
 }
 
-
 /// Shared tail of the tool-call and wall-clock budget exhaustion directives.
 const BUDGET_EXHAUSTED_SYNTHESIS_NOTE: &str = "Tools are disabled for the rest of this turn, so further tool calls are \
 skipped. Synthesize your final answer now from the tool outputs already gathered in this conversation.";
@@ -560,6 +559,10 @@ pub(crate) struct HarnessTurnState {
     /// Whether the final response was produced by deterministic recovery
     /// fallback rather than by a successful model synthesis.
     final_response_was_fallback: bool,
+    /// Whether the provider refused this turn (`FinishReason::Refusal`). A
+    /// refused turn is rolled back out of model-visible history and never
+    /// auto-continued, so the flag travels to the session loop.
+    turn_refused: bool,
     pub consecutive_spool_chunk_reads: usize,
     pub consecutive_same_shell_command_runs: usize,
     pub last_shell_command_signature: Option<String>,
@@ -727,6 +730,7 @@ impl HarnessTurnState {
             final_response_event_emitted: false,
             streamed_response_event_emitted: false,
             final_response_was_fallback: false,
+            turn_refused: false,
             consecutive_spool_chunk_reads: 0,
             consecutive_same_shell_command_runs: 0,
             last_shell_command_signature: None,
@@ -1523,6 +1527,14 @@ impl HarnessTurnState {
 
     pub(crate) fn final_response_was_fallback(&self) -> bool {
         self.final_response_was_fallback
+    }
+
+    pub(crate) fn mark_turn_refused(&mut self) {
+        self.turn_refused = true;
+    }
+
+    pub(crate) fn turn_refused(&self) -> bool {
+        self.turn_refused
     }
 
     pub(crate) fn is_approved_plan_execution(&self) -> bool {
