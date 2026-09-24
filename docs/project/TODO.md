@@ -20,11 +20,10 @@ screenshot: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09
 
 check /review command doesn't work
 
-input: "
-Running /review...
-I can’t access the repository or run tests in this session, so I can’t review or
-modify the diff. Share the diff and relevant surrounding code, or enable
-repository tools, and I can identify issues and propose fixes."
+input: "/review Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
+unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
+positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
+stop, start implement fixes for each one "
 
 response: "
 Running /review...
