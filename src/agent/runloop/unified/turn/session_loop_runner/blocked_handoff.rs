@@ -215,7 +215,24 @@ pub(super) fn blocker_summary_with_diagnostics(
 /// Bound the block reason for transcript rendering. When the summary exceeds
 /// [`TRANSCRIPT_BLOCK_REASON_LIMIT`] chars it is truncated and suffixed with
 /// an ellipsis plus the handoff path that holds the full text.
+///
+/// User-facing transcripts stay concise: the `# Last-Turn Diagnostics` footer
+/// (elapsed/tools/token counts for agent forensics) is stripped here so it
+/// only lives in the handoff markdown + `events.jsonl`. Only the first
+/// non-empty line (headline) is shown; multi-line reasons keep their full
+/// text in the handoff file.
 fn truncated_block_reason(summary: &str, full_reason_path: &str) -> String {
+    let without_footer = summary.split("\n\n# Last-Turn Diagnostics").next().unwrap_or(summary);
+    let headline = without_footer
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    let summary = if headline.is_empty() {
+        without_footer.trim()
+    } else {
+        headline
+    };
     let suffix = format!("… — full reason: {full_reason_path}");
     let suffix_len = suffix.chars().count();
     let summary_len = summary.chars().count();
@@ -374,19 +391,17 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             // verifier-first step instead of the generic `continue` nudge so
             // long-running work can resume without re-reading handoff files.
             // Lowercase match follows the helper convention for compound reasons.
+            // TUI stays to one actionable line; full diagnostics live in the
+            // handoff file + `events.jsonl` for agent consumption.
             let is_verification_block = blocker_summary.to_ascii_lowercase().contains("verification is still pending");
             if is_verification_block {
-                let _ = renderer.line(MessageStyle::Info, "What to do now (verification gate still pending):");
                 let _ = renderer.line(
                     MessageStyle::Info,
-                    "  • Run the project verifier standalone or as a pure `&&` chain (piping only into `head` or `tail` also counts; cap output with `max_output_tokens`), let it exit 0, then type 'continue'.",
+                    "  • Run the verifier standalone or as a pure `&&` chain, let it exit 0, then type 'continue'.",
                 );
             } else {
-                let _ = renderer.line(MessageStyle::Info, "What you can do:");
-                let _ = renderer.line(
-                    MessageStyle::Info,
-                    "  • In this session: Type 'continue' to resume, or describe alternative instructions",
-                );
+                let _ = renderer
+                    .line(MessageStyle::Info, "  • Type 'continue' to resume, or describe alternative instructions");
             }
             // Plan-mode QoL: a blocked turn while planning is active is a
             // read-only policy stop. `continue` keeps planning, but the user
@@ -587,6 +602,30 @@ mod tests {
         assert!(truncated.chars().count() <= TRANSCRIPT_BLOCK_REASON_LIMIT);
         assert!(truncated.ends_with("full reason: h.md"));
         assert!(truncated.contains('é'), "multi-byte chars must survive intact");
+    }
+
+    #[test]
+    fn transcript_reason_strips_diagnostics_footer_keeps_headline() {
+        let summary = "Turn ended with a recovery fallback; the requested work was not confirmed.\n\n# Last-Turn Diagnostics\n\nElapsed: 12916ms\nTools used this session (8): apply_patch, code_search\nTurn usage: prompt=85173 cached=0 completion=542";
+        let truncated = truncated_block_reason(summary, ".vtcode/tasks/current_blocked.md");
+        assert_eq!(truncated, "Turn ended with a recovery fallback; the requested work was not confirmed.");
+        assert!(!truncated.contains("Elapsed:"), "agent forensics stay file-only: {truncated}");
+        assert!(!truncated.contains("Tools used"), "agent forensics stay file-only: {truncated}");
+        assert!(!truncated.contains("Turn usage"), "agent forensics stay file-only: {truncated}");
+        assert!(!truncated.contains("# Last-Turn Diagnostics"), "footer marker leaks: {truncated}");
+    }
+
+    #[test]
+    fn transcript_reason_uses_headline_for_multiline_reason() {
+        let single = truncated_block_reason("provider 429 rate limited", "h.md");
+        assert_eq!(single, "provider 429 rate limited");
+
+        let multi = truncated_block_reason(
+            "Turn blocked: verification is still pending.\nSecond line with verifier detail.\nThird line.",
+            "h.md",
+        );
+        assert_eq!(multi, "Turn blocked: verification is still pending.");
+        assert!(!multi.contains("Second line"), "only headline shows in TUI: {multi}");
     }
 
     #[test]

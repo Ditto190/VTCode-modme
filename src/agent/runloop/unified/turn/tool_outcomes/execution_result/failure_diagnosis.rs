@@ -82,7 +82,7 @@ pub(crate) struct ToolFailureDiagnosis {
 }
 
 impl ToolFailureDiagnosis {
-    fn new(observed: impl AsRef<str>, likely_cause: impl AsRef<str>, next_action: impl AsRef<str>) -> Self {
+    pub(crate) fn new(observed: impl AsRef<str>, likely_cause: impl AsRef<str>, next_action: impl AsRef<str>) -> Self {
         Self {
             observed: evidence::bounded_field(observed.as_ref()),
             likely_cause: evidence::bounded_field(likely_cause.as_ref()),

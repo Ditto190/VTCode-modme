@@ -75,16 +75,21 @@ pub(crate) async fn handle_direct_tool_execution(
     let (tool_name_str, args, is_bang_prefix) = match parsed {
         DirectToolInput::Execute { tool_name, args, is_bang_prefix } => (tool_name, args, is_bang_prefix),
         DirectToolInput::InvalidBang { command, diagnosis } => {
+            // TUI stays concise: one rejection line + one actionable line.
+            // The full parser diagnosis is kept in trace logs for forensics.
+            tracing::debug!(command = %command, diagnosis = %diagnosis, "rejected invalid bang shell command");
+            let detail: String = if diagnosis.chars().count() > 160 {
+                format!("{}…", diagnosis.chars().take(159).collect::<String>())
+            } else {
+                diagnosis.clone()
+            };
             ctx.interaction_ctx.renderer.line(
                 vtcode_core::utils::ansi::MessageStyle::Info,
                 "Shell mode (!): command rejected (invalid shell syntax).",
             )?;
-            ctx.interaction_ctx
-                .renderer
-                .line(vtcode_core::utils::ansi::MessageStyle::Info, &format!("Diagnosis: {diagnosis}"))?;
             ctx.interaction_ctx.renderer.line(
                 vtcode_core::utils::ansi::MessageStyle::Info,
-                &format!("Recovery: fix syntax and retry as `!{command}`, or remove `!` to ask in natural language."),
+                &format!("Fix syntax and retry as `!{command}`, or ask without `!`. ({detail})"),
             )?;
             return Ok(Some(InteractionOutcome::DirectToolHandled));
         }
