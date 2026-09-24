@@ -721,6 +721,25 @@ mod tests {
     }
 
     #[test]
+    fn web_fetch_builtin_description_matches_preview_and_temp_file_result() {
+        let registrations = builtin_tool_registrations(None);
+        let web_fetch = registrations
+            .iter()
+            .find(|registration| registration.name() == tools::WEB_FETCH)
+            .expect("web_fetch registration should exist");
+        let description = web_fetch.metadata().description().expect("web_fetch description");
+
+        // The default mode returns a preview plus a temp_file path; it does
+        // not produce an analyzed summary.
+        assert!(description.contains("`preview`"));
+        assert!(description.contains("`temp_file`"));
+        assert!(description.contains("format=markdown"));
+        assert!(!description.contains("analyzed summary"));
+        assert!(!description.contains("Accepts:"));
+        assert!(!description.contains("Do NOT"));
+    }
+
+    #[test]
     fn web_fetch_schema_accepts_markdown_format() {
         let registrations = builtin_tool_registrations(None);
         let web_fetch = registrations
