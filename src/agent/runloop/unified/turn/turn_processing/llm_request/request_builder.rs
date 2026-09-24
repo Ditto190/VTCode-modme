@@ -31,6 +31,9 @@ use super::metrics::{
     estimate_message_history_tokens, estimate_tool_schema_tokens,
 };
 use super::prompt_assembly::{PromptAssemblyInput, assemble_prompt, render_primary_agent_runtime_context};
+use super::request_context::{
+    persist_turn_few_shot_context, request_context_needs_wire_translation, translate_request_context_for_wire,
+};
 use super::response_chain::{prepare_responses_request_history, prepend_request_context_message};
 use super::snapshot::TurnRequestSnapshot;
 use super::tool_shaping::{client_local_wire_tools, uses_out_of_band_copilot_tools};
@@ -305,6 +308,9 @@ pub(super) async fn build_turn_request(
     );
     let context_management = resolve_context_management(ctx, turn_snapshot, request_model);
     append_collapsed_tool_output_notice(ctx);
+    // Few-shot examples are persisted once per user turn so every request of
+    // the turn (and every later turn) replays the same prefix.
+    persist_turn_few_shot_context(ctx.working_history, few_shot_context);
     let continuation_messages = Arc::new(
         ctx.context_manager
             .normalize_history_for_request(ctx.working_history)
@@ -322,29 +328,23 @@ pub(super) async fn build_turn_request(
         Cow::Owned(messages) => Arc::new(messages),
     };
 
-    // The typed marker is persisted once in canonical history. Translate its
-    // provider-specific lifecycle field into an ordinary system directive for
-    // routes without native support so every provider/model still receives the
-    // disclosure without an unsupported `clear_at` field.
-    if !turn_snapshot.capabilities.turn_scoped_system_messages
-        && request_messages.iter().any(|message| message.clear_at.is_some())
-    {
-        let messages = Arc::make_mut(&mut request_messages);
-        for message in messages {
-            if message.clear_at.is_some() {
-                message.clear_at = None;
-            }
-        }
+    // Typed turn-scoped markers (the collapsed-output notice, few-shot
+    // context) are persisted once in canonical history. Routes without native
+    // support receive them without the Anthropic-only `clear_at` field, and
+    // few-shot context as a user-role message so it is never folded into the
+    // top-level system prompt.
+    let turn_scoped_system_messages = turn_snapshot.capabilities.turn_scoped_system_messages;
+    if request_context_needs_wire_translation(&request_messages, turn_scoped_system_messages) {
+        translate_request_context_for_wire(
+            Arc::make_mut(&mut request_messages).as_mut_slice(),
+            turn_scoped_system_messages,
+        );
     }
 
     let request_context_message = ctx.context_manager.request_editor_context_message();
-    if request_context_message.is_some() || few_shot_context.is_some() {
-        let mut messages = Arc::unwrap_or_clone(request_messages);
-        messages = prepend_request_context_message(messages, request_context_message);
-        if let Some(few_shot_context) = few_shot_context {
-            messages.push(uni::Message::system(few_shot_context));
-        }
-        request_messages = Arc::new(messages);
+    if request_context_message.is_some() {
+        let messages = Arc::unwrap_or_clone(request_messages);
+        request_messages = Arc::new(prepend_request_context_message(messages, request_context_message));
     }
     let request_plan = build_harness_request_plan(HarnessRequestPlanInput {
         messages: request_messages,
@@ -1557,6 +1557,87 @@ mod tests {
             Some(ToolOutputMode::Compact),
             &history_with_system_directive,
         ));
+    }
+
+    fn write_patch_edit_few_shot_example(workspace: &std::path::Path) {
+        let examples_dir = workspace.join(".vtcode/prompts/examples");
+        std::fs::create_dir_all(&examples_dir).expect("examples dir");
+        std::fs::write(
+            examples_dir.join("patch-edit.md"),
+            "---\nid: patch-edit\ntags: [patch, edit]\nsummary: Use apply_patch for edits.\n---\n# User\nedit the file\n\n# Assistant\nRead it, then apply_patch.\n",
+        )
+        .expect("few-shot example");
+    }
+
+    fn is_few_shot_block(message: &uni::Message) -> bool {
+        message
+            .content
+            .as_text()
+            .starts_with(vtcode_core::prompts::FEW_SHOT_SECTION_HEADER)
+    }
+
+    #[tokio::test]
+    async fn few_shot_context_is_persisted_once_and_replayed_append_only() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        write_patch_edit_few_shot_example(backing.workspace_path());
+        let mut ctx = backing.turn_processing_context();
+        ctx.working_history
+            .push(uni::Message::user("please patch and edit the parser".to_string()));
+
+        let mut snapshot = capture_turn_request_snapshot(&mut ctx, "claude-opus-5-5", false);
+        snapshot.provider_name = "anthropic".to_string();
+        snapshot.capabilities.turn_scoped_system_messages = true;
+
+        let first = build_turn_request(&mut ctx, 1, "claude-opus-5-5", &snapshot, Some(320), None, false)
+            .await
+            .expect("first request should build");
+        let first_messages = non_runtime_request_messages(&first.request);
+        assert_eq!(first_messages.len(), 2);
+        assert_eq!(first_messages[0], uni::Message::user("please patch and edit the parser".to_string()));
+        assert_eq!(first_messages[1].role, uni::MessageRole::System);
+        assert_eq!(first_messages[1].clear_at, Some(uni::MessageClearAt::NextUserMessage));
+        assert!(is_few_shot_block(&first_messages[1]));
+        assert!(first_messages[1].content.as_text().contains("### patch-edit"));
+        assert!(!system_prompt_text(&first.request).contains(vtcode_core::prompts::FEW_SHOT_SECTION_HEADER));
+
+        ctx.working_history.push(uni::Message::assistant_with_tools(
+            String::new(),
+            vec![uni::ToolCall::function(
+                "call_1".to_string(),
+                "read_file".to_string(),
+                "{}".to_string(),
+            )],
+        ));
+        ctx.working_history
+            .push(uni::Message::tool_response("call_1".to_string(), "fn parse() {}".to_string()));
+
+        let second = build_turn_request(&mut ctx, 2, "claude-opus-5-5", &snapshot, Some(320), None, false)
+            .await
+            .expect("second request should build");
+        let second_messages = non_runtime_request_messages(&second.request);
+        assert_eq!(
+            &second_messages[..first_messages.len()],
+            first_messages.as_slice(),
+            "later requests of the turn must only append to the earlier request"
+        );
+        assert_eq!(second_messages.iter().filter(|message| is_few_shot_block(message)).count(), 1);
+
+        let mut fold_snapshot = snapshot.clone();
+        fold_snapshot.capabilities.turn_scoped_system_messages = false;
+        let folded = build_turn_request(&mut ctx, 3, "claude-sonnet-5", &fold_snapshot, Some(320), None, false)
+            .await
+            .expect("fold-route request should build");
+        let folded_messages = non_runtime_request_messages(&folded.request);
+        assert_eq!(folded_messages[1].role, uni::MessageRole::User);
+        assert!(is_few_shot_block(&folded_messages[1]));
+        assert!(folded_messages.iter().all(|message| message.clear_at.is_none()));
+        assert!(
+            !folded_messages
+                .iter()
+                .any(|message| message.role == uni::MessageRole::System && is_few_shot_block(message)),
+            "fold routes must not receive few-shot context as a system message"
+        );
+        assert_eq!(ctx.working_history.iter().filter(|message| is_few_shot_block(message)).count(), 1);
     }
 
     #[tokio::test]

@@ -56,9 +56,9 @@ immutable `system_prompt` in this order:
 9. **GitHub Copilot Client Tools** — only for the Copilot provider.
 10. **Active Primary Agent Runtime State** — model, reasoning effort,
     instructions, and `### Memory Appendix` if the agent has memory.
-11. **[Few-Shot Examples]** — appended after the immutable prompt as a
-    synthetic system context message when relevant and budget allows (see
-    below).
+11. **[Few-Shot Examples]** — never part of the system prompt. When
+    relevant and budget allows, the block is persisted in history once per
+    user turn, directly after the user message (see below).
 
 ## Few-shot management (Section 18.3.3)
 
@@ -103,8 +103,21 @@ For each turn, the harness:
 5. Walks in order, appending until the running total exceeds
    [`DEFAULT_FEW_SHOT_BUDGET_TOKENS`] (default 800 tokens, ~10% of an 8K
    context window).
-6. Renders the chosen examples as a `[Few-Shot Examples]` block appended
-   to the system prompt before the tool catalog.
+6. Renders the chosen examples as a `[Few-Shot Examples]` block and, at
+   the first request of the turn only, persists it in canonical history
+   directly after the user message
+   (`llm_request/request_context.rs`). Every later request of the turn, and
+   every later turn, replays it unchanged at that position, so requests stay
+   append-only for prompt caching and for models that bind replayed thinking
+   to the exact prior prefix (Claude Opus 5.5, Claude Fable 5.1).
+7. Shapes the persisted block per route: routes with turn-scoped system
+   messages send it as `role: "system"` with
+   `clear_at: "next_user_message"`, so it stops applying once the next user
+   turn arrives; other routes receive it as a user-role context message,
+   because their adapters fold mid-history system messages into the
+   top-level system prompt and would rewrite the cached system prefix
+   whenever the selection changes. Earlier turns' blocks stay in history
+   (bounded by the per-turn budget) until compaction removes them.
 
 The selection is keyword-based and runs in-process without an embedding
 provider. Embedding-based selection is the documented next step (see
