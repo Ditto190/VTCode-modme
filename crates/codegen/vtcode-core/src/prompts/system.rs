@@ -110,7 +110,7 @@ pub const DEFAULT_SPECIFIC_LINES: &[&str] = &[
     "Write updates and summaries for a teammate who is catching up: complete sentences, technical terms spelled out, and no fragments, arrow chains, or labels you invented along the way.",
     "Answer a simple question directly in prose. Use headers, lists, and tables only when the content has real structure.",
     "Correct an earlier statement only when the error changes the user's code, conclusions, or decisions, and do it in one plain sentence.",
-    "Subagents cost context and time, so reserve them for work like a wide multi-file investigation. Brief a subagent fully the first time, and use its findings rather than redoing the work.",
+    "Brief a subagent fully the first time, and use its findings rather than redoing the work.",
     "Match the surrounding code's naming, idiom, and comment density, and comment only on constraints the code cannot show.",
     "For tests, start from the risks: check boundaries and asymmetric cases from both sides, derive high-risk expected values without the code's own helpers, and assert observable behavior, not just the absence of a panic.",
 ];
@@ -1410,9 +1410,14 @@ mod tests {
             "Default prompt should restrict delegation to sizeable independent work"
         );
         assert!(
-            prompt.contains("use its findings rather than redoing the work"),
+            prompt.contains(
+                "- Brief a subagent fully the first time, and use its findings rather than redoing the work.\n"
+            ),
             "Default prompt should tell the parent to reuse subagent findings"
         );
+        // When to delegate has one home in Runtime Guidance; the Default line
+        // covers only how to brief and reuse.
+        assert!(!prompt.contains("reserve them for work like"), "Default prompt should not restate when to delegate");
         assert!(
             minimal_system_prompt().contains("Delegate only sizeable, independent work to subagents"),
             "Minimal prompt should preserve the delegation contract"
@@ -2033,7 +2038,7 @@ Work the way a senior engineer on this codebase would: understand the relevant c
 - Write updates and summaries for a teammate who is catching up: complete sentences, technical terms spelled out, and no fragments, arrow chains, or labels you invented along the way.
 - Answer a simple question directly in prose. Use headers, lists, and tables only when the content has real structure.
 - Correct an earlier statement only when the error changes the user's code, conclusions, or decisions, and do it in one plain sentence.
-- Subagents cost context and time, so reserve them for work like a wide multi-file investigation. Brief a subagent fully the first time, and use its findings rather than redoing the work.
+- Brief a subagent fully the first time, and use its findings rather than redoing the work.
 - Match the surrounding code's naming, idiom, and comment density, and comment only on constraints the code cannot show.
 - For tests, start from the risks: check boundaries and asymmetric cases from both sides, derive high-risk expected values without the code's own helpers, and assert observable behavior, not just the absence of a panic.
 
@@ -2104,7 +2109,7 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 - Write updates and summaries for a teammate who is catching up: complete sentences, technical terms spelled out, and no fragments, arrow chains, or labels you invented along the way.
 - Answer a simple question directly in prose. Use headers, lists, and tables only when the content has real structure.
 - Correct an earlier statement only when the error changes the user's code, conclusions, or decisions, and do it in one plain sentence.
-- Subagents cost context and time, so reserve them for work like a wide multi-file investigation. Brief a subagent fully the first time, and use its findings rather than redoing the work.
+- Brief a subagent fully the first time, and use its findings rather than redoing the work.
 - Match the surrounding code's naming, idiom, and comment density, and comment only on constraints the code cannot show.
 - For tests, start from the risks: check boundaries and asymmetric cases from both sides, derive high-risk expected values without the code's own helpers, and assert observable behavior, not just the absence of a panic.
 
