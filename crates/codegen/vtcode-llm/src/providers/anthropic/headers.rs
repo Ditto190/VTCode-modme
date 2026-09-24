@@ -2,7 +2,7 @@
 //!
 //! Manages:
 //! - API version headers
-//! - Beta feature headers (prompt caching, extended thinking, structured outputs)
+//! - Beta feature headers (extended cache TTL, interleaved thinking, server-side tools)
 //! - Authentication headers
 
 use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings};
@@ -10,6 +10,7 @@ use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings};
 use super::capabilities::supports_manual_interleaved_beta;
 use super::prompt_cache::requires_extended_ttl_beta;
 
+const EXTENDED_CACHE_TTL_BETA: &str = "extended-cache-ttl-2025-04-11";
 pub(crate) const MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA: &str = "mid-conversation-system-clear-at-2026-08-21";
 
 /// Configuration for beta header generation
@@ -26,20 +27,6 @@ pub struct BetaHeaderConfig<'a> {
     pub include_mid_conversation_system_clear_at: bool,
 }
 
-pub fn prompt_cache_beta_header_value(cache_enabled: bool, settings: &AnthropicPromptCacheSettings) -> Option<String> {
-    if !cache_enabled {
-        return None;
-    }
-
-    let mut betas = vec!["prompt-caching-2024-07-31"];
-
-    if requires_extended_ttl_beta(settings) {
-        betas.push("extended-cache-ttl-2025-04-11");
-    }
-
-    Some(betas.join(", "))
-}
-
 pub fn combined_beta_header_value(
     cache_enabled: bool,
     settings: &AnthropicPromptCacheSettings,
@@ -47,10 +34,9 @@ pub fn combined_beta_header_value(
 ) -> Option<String> {
     let mut pieces: Vec<String> = Vec::new();
 
-    if let Some(pc) = prompt_cache_beta_header_value(cache_enabled, settings) {
-        for p in pc.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) {
-            pieces.push(p);
-        }
+    // Prompt caching is GA and needs no beta; only the 1h TTL still does.
+    if cache_enabled && requires_extended_ttl_beta(settings) {
+        pieces.push(EXTENDED_CACHE_TTL_BETA.to_owned());
     }
 
     if config.include_manual_interleaved_beta && supports_manual_interleaved_beta(config.model, config.model) {
@@ -93,5 +79,57 @@ pub fn combined_beta_header_value(
         None
     } else {
         Some(pieces.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn beta_config(config: &AnthropicConfig) -> BetaHeaderConfig<'_> {
+        BetaHeaderConfig {
+            config,
+            model: vtcode_config::constants::models::anthropic::DEFAULT_MODEL,
+            include_advanced_tool_use: false,
+            include_manual_interleaved_beta: false,
+            request_betas: None,
+            include_task_budget: false,
+            include_server_side_fallback: false,
+            include_fallback_credit: false,
+            include_mid_conversation_tool_changes: false,
+            include_mid_conversation_system_clear_at: false,
+        }
+    }
+
+    fn cache_settings(ttl_seconds: u64) -> AnthropicPromptCacheSettings {
+        AnthropicPromptCacheSettings {
+            tools_ttl_seconds: ttl_seconds,
+            messages_ttl_seconds: ttl_seconds,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn prompt_caching_sends_no_beta_header_with_default_ttl() {
+        let config = AnthropicConfig::default();
+        let header = combined_beta_header_value(true, &cache_settings(300), &beta_config(&config));
+
+        assert_eq!(header, None);
+    }
+
+    #[test]
+    fn prompt_caching_sends_only_extended_ttl_beta_for_one_hour_ttl() {
+        let config = AnthropicConfig::default();
+        let header = combined_beta_header_value(true, &cache_settings(3600), &beta_config(&config));
+
+        assert_eq!(header.as_deref(), Some(EXTENDED_CACHE_TTL_BETA));
+    }
+
+    #[test]
+    fn extended_ttl_beta_is_omitted_when_caching_is_disabled() {
+        let config = AnthropicConfig::default();
+        let header = combined_beta_header_value(false, &cache_settings(3600), &beta_config(&config));
+
+        assert_eq!(header, None);
     }
 }

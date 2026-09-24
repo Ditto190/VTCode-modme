@@ -10,9 +10,7 @@
 //! - Header management (headers)
 
 use crate::client::LLMClient;
-use crate::provider::{
-    ContentPart, LLMError, LLMProvider, LLMRequest, LLMResponse, LLMStream, Message, MessageContent, ToolDefinition,
-};
+use crate::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, LLMStream, Message, ToolDefinition};
 use vtcode_config::TimeoutsConfig;
 use vtcode_config::constants::{env_vars, models, urls};
 use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings, ModelConfig, PromptCachingConfig};
@@ -266,15 +264,6 @@ impl AnthropicProvider {
         betas
     }
 
-    fn requires_files_api_beta(&self, request: &LLMRequest) -> bool {
-        request.messages.iter().any(|message| match &message.content {
-            MessageContent::Parts(parts) => parts
-                .iter()
-                .any(|part| matches!(part, ContentPart::File { file_id: Some(_), .. })),
-            MessageContent::Text(_) => false,
-        })
-    }
-
     /// Whether the advisor server-side tool should be sent for this request.
     ///
     /// Delegates to the request builder's `resolve_advisor_tool` so the beta
@@ -396,10 +385,6 @@ impl AnthropicProvider {
                 betas.push(beta);
             }
         }
-        if self.requires_files_api_beta(request) && !betas.iter().any(|beta| beta == "files-api-2025-04-14") {
-            betas.push("files-api-2025-04-14".to_string());
-        }
-
         if self.advisor_enabled_for_request(request) && !betas.iter().any(|beta| beta == ANTHROPIC_ADVISOR_BETA) {
             betas.push(ANTHROPIC_ADVISOR_BETA.to_string());
         }
@@ -961,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_betas_include_code_execution_and_files_api_when_needed() {
+    fn effective_betas_include_code_execution_but_not_files_api_for_file_inputs() {
         let provider = AnthropicProvider::with_model("test-key".to_string(), models::CLAUDE_SONNET_5.to_string());
         let request = LLMRequest {
             model: models::CLAUDE_SONNET_5.to_string(),
@@ -993,7 +978,8 @@ mod tests {
 
         let betas = provider.effective_betas(&request).expect("betas");
         assert!(betas.iter().any(|beta| beta == "code-execution-2025-08-25"));
-        assert!(betas.iter().any(|beta| beta == "files-api-2025-04-14"));
+        // The Files API is GA: file_id inputs need no beta header.
+        assert!(!betas.iter().any(|beta| beta.starts_with("files-api")), "betas: {betas:?}");
     }
 
     #[test]
