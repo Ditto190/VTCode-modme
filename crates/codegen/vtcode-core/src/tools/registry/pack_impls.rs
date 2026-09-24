@@ -35,8 +35,8 @@ use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool, web_fetch_par
 use crate::tools::web_search::{WEB_SEARCH_DESCRIPTION, WebSearchTool};
 use serde_json::json;
 use vtcode_utility_tool_specs::{
-    agent_parameters, apply_patch_parameters, code_search_parameters, cron_parameters, exec_command_parameters,
-    list_files_parameters, mcp_parameters, search_tools_parameters, write_stdin_parameters,
+    SEARCH_TOOLS_DESCRIPTION, agent_parameters, apply_patch_parameters, code_search_parameters, cron_parameters,
+    exec_command_parameters, list_files_parameters, mcp_parameters, search_tools_parameters, write_stdin_parameters,
 };
 
 // ===========================================================================
@@ -256,9 +256,7 @@ impl ToolPack for SearchPack {
                 false,
                 ToolRegistry::search_tools_executor,
             )
-            .with_description(
-                "Search the deferred local tool catalog by capability. Matching definitions are expanded deterministically for the next request segment.",
-            )
+            .with_description(SEARCH_TOOLS_DESCRIPTION)
             .with_parameter_schema(search_tools_parameters())
             .with_permission(ToolPolicy::Allow),
         ];

@@ -262,6 +262,9 @@ pub fn write_stdin_parameters() -> Value {
     })
 }
 
+/// Model-visible description of the `search_tools` tool.
+pub const SEARCH_TOOLS_DESCRIPTION: &str = "Search the session tool catalog by capability and return ranked matches. Use it to find tools whose definitions are deferred and not yet sent to you, such as code_search, web_fetch, web_search, cron, and MCP server tools. Deferred matches are listed in `expanded_for_next_segment` and become callable on the next request. It is not needed for tools already defined in the current request; call those directly.";
+
 #[must_use]
 pub fn search_tools_parameters() -> Value {
     with_max_output_tokens_parameter(json!({
@@ -277,12 +280,14 @@ pub fn search_tools_parameters() -> Value {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 25,
-                "default": 5
+                "default": 5,
+                "description": "Maximum number of ranked matches to return (default: 5, max: 25)."
             },
             "detail_level": {
                 "type": "string",
                 "enum": ["name", "name_description", "full"],
-                "default": "name_description"
+                "default": "name_description",
+                "description": "Fields returned per match (default: name_description). name returns the tool name and score; name_description adds the description; full also adds the parameter schema."
             }
         },
         "additionalProperties": false
@@ -390,6 +395,29 @@ mod tests {
             .as_str()
             .expect("input description");
         assert!(input_description.contains(SEMANTIC_ANCHOR_GUIDANCE));
+    }
+
+    #[test]
+    fn search_tools_schema_documents_limit_and_detail_level_defaults() {
+        let schema = search_tools_parameters();
+        let limit = &schema["properties"]["limit"];
+        assert_eq!(limit["default"], json!(5));
+        assert_eq!(limit["maximum"], json!(25));
+        let limit_description = limit["description"].as_str().expect("limit description");
+        assert!(limit_description.contains("default: 5"));
+        assert!(limit_description.contains("max: 25"));
+
+        let detail_level = &schema["properties"]["detail_level"];
+        assert_eq!(detail_level["default"], json!("name_description"));
+        let detail_description = detail_level["description"].as_str().expect("detail_level description");
+        for level in ["name", "name_description", "full"] {
+            assert!(detail_description.contains(level), "{level}");
+        }
+
+        assert!(SEARCH_TOOLS_DESCRIPTION.contains("deferred"));
+        assert!(SEARCH_TOOLS_DESCRIPTION.contains("next request"));
+        assert!(SEARCH_TOOLS_DESCRIPTION.contains("MCP"));
+        assert!(SEARCH_TOOLS_DESCRIPTION.contains("not needed"));
     }
 
     #[test]

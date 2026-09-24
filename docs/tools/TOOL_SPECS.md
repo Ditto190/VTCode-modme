@@ -113,10 +113,12 @@ Example:
 
 ### `search_tools`
 
-Searches the deferred local catalog by name and description. `query` is
-required; `limit` is optional (1–25), and `detail_level` accepts `name`,
-`name_description`, or `full`. Ranked matches are expanded deterministically
-for the next request segment.
+Searches the session tool catalog by name and description, so the model can
+find tools whose definitions are deferred (for example `code_search`,
+`web_fetch`, `web_search`, `cron`, and MCP server tools). `query` is required;
+`limit` is optional (1–25, default 5), and `detail_level` accepts `name`,
+`name_description` (default), or `full`. Deferred matches are listed in
+`expanded_for_next_segment` and become callable on the next request segment.
 
 ```json
 {"query":"GitHub pull request review","limit":5,"detail_level":"name_description"}

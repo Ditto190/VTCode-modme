@@ -25,8 +25,8 @@ use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool, web_fetch_par
 use crate::tools::web_search::{WEB_SEARCH_DESCRIPTION, WebSearchTool};
 use serde_json::json;
 use vtcode_utility_tool_specs::{
-    agent_parameters, apply_patch_parameters, code_search_parameters, cron_parameters, exec_command_parameters,
-    list_files_parameters, mcp_parameters, search_tools_parameters, write_stdin_parameters,
+    SEARCH_TOOLS_DESCRIPTION, agent_parameters, apply_patch_parameters, code_search_parameters, cron_parameters,
+    exec_command_parameters, list_files_parameters, mcp_parameters, search_tools_parameters, write_stdin_parameters,
 };
 
 use super::distributed::{BUILTIN_TOOLS, tool_config};
@@ -324,17 +324,10 @@ fn register_mcp(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration
 
 #[distributed_slice(BUILTIN_TOOLS)]
 fn register_search_tools(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
-    ToolRegistration::new(
-        tools::SEARCH_TOOLS,
-        CapabilityLevel::Basic,
-        false,
-        ToolRegistry::search_tools_executor,
-    )
-    .with_description(
-        "Search the deferred local tool catalog by capability. Matching definitions are expanded deterministically for the next request segment.",
-    )
-    .with_parameter_schema(search_tools_parameters())
-    .with_permission(ToolPolicy::Allow)
+    ToolRegistration::new(tools::SEARCH_TOOLS, CapabilityLevel::Basic, false, ToolRegistry::search_tools_executor)
+        .with_description(SEARCH_TOOLS_DESCRIPTION)
+        .with_parameter_schema(search_tools_parameters())
+        .with_permission(ToolPolicy::Allow)
 }
 
 // ---------------------------------------------------------------------------
