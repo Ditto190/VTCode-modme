@@ -504,10 +504,24 @@ async fn evaluator_request_includes_verification_results() {
     assert!(evaluator_prompt.contains("[PASS] pwd (exit 0)"));
     assert!(evaluator_prompt.contains("contract_fidelity"));
     assert!(evaluator_request.system_prompt.as_deref().is_some_and(|prompt| {
-        prompt.contains("2301.12987")
-            && prompt.contains("weakest sufficient hypothesis")
+        prompt.contains("smallest claim the evidence supports")
+            && prompt.contains("falsifier")
             && prompt.contains("generalization_notes")
+            && !prompt.contains("arXiv")
     }));
+
+    let planner_request = requests
+        .iter()
+        .find(|request| harness_role_of(request) == HarnessRole::Planner)
+        .expect("planner request");
+    let planner_system = planner_request.system_prompt.as_deref().expect("planner system prompt");
+    assert_eq!(planner_system.matches("JSON only").count(), 1);
+    let planner_prompt = planner_request
+        .messages
+        .first()
+        .map(|message| message.content.as_text().into_owned())
+        .expect("planner prompt");
+    assert!(!planner_prompt.contains("JSON only"));
 }
 
 #[tokio::test]
@@ -586,11 +600,9 @@ async fn evaluator_notes_render_and_replan_adds_falsifier_tracker_steps() {
         .expect("replanner prompt");
     assert!(replan_prompt.contains("Only code-search changes in this task"));
     assert!(replan_prompt.contains("A regression test returns a result outside the requested scope"));
-    assert!(
-        replan_request.system_prompt.as_deref().is_some_and(|prompt| {
-            prompt.contains("2301.12987") && prompt.contains("weakest sufficient hypothesis")
-        })
-    );
+    assert!(replan_request.system_prompt.as_deref().is_some_and(|prompt| {
+        prompt.contains("smallest claim the evidence supports") && !prompt.contains("arXiv")
+    }));
     let tracker = fs::read_to_string(workspace.join(".vtcode/tasks/current_task.md")).expect("tracker file");
     assert!(tracker.contains("Falsify task-scoped claim: The changed code-search scope remains bounded"));
     assert!(tracker.contains("A regression test returns a result outside the requested scope"));
