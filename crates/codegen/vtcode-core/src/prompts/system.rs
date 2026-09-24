@@ -149,7 +149,7 @@ pub const SPECIALIZED_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 - Use `task_tracker` for multi-step work, and Planning workflow while scope or verification is still open.
 - Stop only when the tracker state, verification results, and resumable state agree.
 - End plan work with one `<proposed_plan>` block. During execution, re-plan only when the approved plan is stale; the runtime persists the new plan and continues.
-- When repo-wide invariants matter, also read the architecture documents the instruction map points to, such as `docs/harness/ARCHITECTURAL_INVARIANTS.md` when it exists."#;
+- When repo-wide invariants matter, also read the architecture documents the instruction map points to."#;
 
 const STRUCTURED_REASONING_INSTRUCTIONS: &str = r#"
 ## Structured Reasoning
@@ -968,7 +968,11 @@ mod tests {
         );
         assert!(result.contains("task_tracker"));
         assert!(result.contains("<proposed_plan>"));
-        assert!(result.contains("ARCHITECTURAL_INVARIANTS"));
+        assert!(result.contains(
+            "- When repo-wide invariants matter, also read the architecture documents the instruction map points to."
+        ));
+        // Shipped prompts serve any repository, so they name no VT Code-specific doc.
+        assert!(!result.contains("ARCHITECTURAL_INVARIANTS"));
     }
 
     #[test]
@@ -1251,8 +1255,8 @@ mod tests {
     fn test_harness_awareness_in_prompts() {
         assert!(default_system_prompt().contains("AGENTS.md"), "Default prompt should reference AGENTS.md as map");
         assert!(
-            specialized_instruction_text().contains("ARCHITECTURAL_INVARIANTS"),
-            "Specialized prompt should reference architectural invariants"
+            specialized_instruction_text().contains("the architecture documents the instruction map points to"),
+            "Specialized prompt should point at the repo's architecture documents"
         );
         assert!(minimal_system_prompt().contains("AGENTS.md"), "Minimal prompt should still reference AGENTS.md");
     }
