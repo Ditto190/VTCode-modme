@@ -839,6 +839,24 @@ fn subagent_instruction_composition_uses_shared_runtime_prompt_and_skill_appendi
 }
 
 #[test]
+fn final_response_contract_yields_to_agent_defined_format() {
+    // The verifier's own format ends with a `Decision:` line the harness
+    // parses; the generic contract must not compete with it.
+    let mut spec = vtcode_config::builtin_subagents()
+        .into_iter()
+        .find(|spec| spec.name == "explorer")
+        .expect("explorer");
+    spec.name = "verifier".to_string();
+    spec.prompt = "End with exactly one line, `Decision: APPROVED` or `Decision: REJECTED`.".to_string();
+
+    let instructions = compose_subagent_instructions(&spec, None);
+
+    assert!(instructions.contains(
+        "If your agent instructions or the task define their own response format, follow that format instead."
+    ));
+}
+
+#[test]
 fn build_child_config_preserves_matching_rule_and_exact_tool_ids() {
     let mut parent = VTCodeConfig::default();
     parent.permissions.allow = vec![

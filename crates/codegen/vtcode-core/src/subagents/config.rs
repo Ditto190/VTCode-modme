@@ -457,7 +457,8 @@ const FINAL_RESPONSE_CONTRACT: &str = "Return your final response using this exa
 - [Check performed or still needed]\n\n\
 ## Open Questions\n\
 - [Any unresolved question]\n\n\
-Use `- None` for empty sections. Keep it concise and grounded in the work you actually performed.";
+Use `- None` for empty sections. Keep it concise and grounded in the work you actually performed. \
+If your agent instructions or the task define their own response format, follow that format instead.";
 
 const READ_ONLY_TOOL_REMINDER: &str = "Tool reminder: this child has a read-only tool set, and calls outside it are \
 denied. Use advanced `code_search` for a focused literal query with bounded filters, and `list_skills` / \
