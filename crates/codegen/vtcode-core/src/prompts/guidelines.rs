@@ -101,8 +101,8 @@ pub fn generate_tool_guidelines_with_capabilities(
                     "- `write_stdin` needs an active `session_id`; prefer returned `next_wait_args` and repeat wait after an in-progress deadline{CROSS_TURN_RESUME_HINT_CLAUSE}"
                 ));
             }
-            // Safeguard and verification rules already ship in Runtime Guidance.
-            lines.push("- Do not repeat calls to recover suppressed previews.".to_owned());
+            // Safeguard, verification, and spool/preview rules already ship in
+            // Runtime Guidance.
             if has(TOOL_START_PLANNING) {
                 lines.push("- Use `start_planning` for demanding or ambiguous work; it asks before entering read-only planning.".to_owned());
             }
@@ -180,9 +180,10 @@ pub fn generate_tool_guidelines_for_profile(
         // in every stack (`cargo check`, `tsc --noEmit`, `pytest --collect-only`).
         lines.push("- Run fast checks before full builds.".to_string());
     }
-    // Tool-failure diagnosis, the safeguard rule, and the verification outcome
-    // rule (report completion only after a check you ran) each have one home in
-    // Runtime Guidance, which every profile includes; do not restate them here.
+    // Tool-failure diagnosis, the safeguard rule, the verification outcome rule
+    // (report completion only after a check you ran), and spool paging with
+    // `preview_budget_exhausted` handling each have one home in Runtime
+    // Guidance, which every profile includes; do not restate them here.
     if has_stdin {
         lines.push(format!(
             "- `write_stdin`: reuse the existing `session_id` of an active exec session; prefer the pre-filled `next_wait_args` over `next_continue_args` polling; `spool_complete: false` marks readable partial output; an exited pending spool arrives on a later wait{CROSS_TURN_RESUME_HINT_CLAUSE}"
@@ -195,10 +196,6 @@ pub fn generate_tool_guidelines_for_profile(
     if has_apply_patch || has_exec {
         lines.push(
             "- Build and Auto share tools and safety gates; Auto changes confirmation behavior only after explicit approval or full-auto policy."
-                .to_string(),
-        );
-        lines.push(
-            "- On `preview_budget_exhausted`, trust the preserved outcome metadata; do not repeat the call."
                 .to_string(),
         );
     }
@@ -629,7 +626,7 @@ mod tests {
         );
         assert_eq!(
             minimal,
-            "\n\n## Active Tools\n- Capabilities: read-only. Analyze and search, but do not modify files or run shell commands.\n- Use available read-only repository tools for browsing; do not modify files.\n- Do not repeat calls to recover suppressed previews."
+            "\n\n## Active Tools\n- Capabilities: read-only. Analyze and search, but do not modify files or run shell commands.\n- Use available read-only repository tools for browsing; do not modify files."
         );
         let default = generate_tool_guidelines_with_capabilities(
             &tools,
