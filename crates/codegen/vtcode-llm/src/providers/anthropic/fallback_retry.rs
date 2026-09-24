@@ -10,9 +10,10 @@
 //! (system, messages, tools, tool_choice, thinking) unchanged.
 //!
 //! VT Code retries at most once, and only when the refusal arrived before any
-//! assistant text or tool call: partial output would require echoing a
-//! prefill claim, and a streamed partial answer has already been shown.
-//! `reasoning_extraction` declines are never retried.
+//! assistant text or tool call and carries no prefill claim: a claim requires
+//! echoing the refused response's raw content as an assistant message, which
+//! the universal response does not keep, and a streamed partial answer has
+//! already been shown. `reasoning_extraction` declines are never retried.
 
 use serde_json::Value;
 
@@ -24,6 +25,7 @@ use super::request_builder::rewrite_thinking_for_model;
 /// Refusal category that server-side fallbacks never retry.
 const REASONING_EXTRACTION_CATEGORY: &str = "reasoning_extraction";
 const CREDIT_TOKEN_FIELD: &str = "fallback_credit_token";
+const PREFILL_CLAIM_FIELD: &str = "fallback_has_prefill_claim";
 
 /// A single retry on the model the refused response recommended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +50,12 @@ impl RefusalRetryPlan {
         let detail = stop_details(response)?;
         let category = detail.get("category").and_then(Value::as_str).unwrap_or_default();
         if category == REASONING_EXTRACTION_CATEGORY {
+            return None;
+        }
+        // A prefill claim means the retry must append the refused content
+        // (for example a thinking-only partial) as an assistant message.
+        // That content is not kept, and a retry without it would not match.
+        if detail.get(PREFILL_CLAIM_FIELD).and_then(Value::as_bool) == Some(true) {
             return None;
         }
         let model = detail.get("recommended_model").and_then(Value::as_str)?.trim();
@@ -185,6 +193,14 @@ mod tests {
         let mut partial = refusal(detail("cyber", Some("claude-opus-4-8"), Some("tok")));
         partial.content = Some("Here is".to_string());
         assert_eq!(RefusalRetryPlan::for_response(&partial, "claude-opus-5-5"), None);
+
+        let mut claimed = detail("cyber", Some("claude-opus-4-8"), Some("tok"));
+        claimed["fallback_has_prefill_claim"] = json!(true);
+        assert_eq!(RefusalRetryPlan::for_response(&refusal(claimed), "claude-opus-5-5"), None);
+
+        let mut unclaimed = detail("cyber", Some("claude-opus-4-8"), Some("tok"));
+        unclaimed["fallback_has_prefill_claim"] = json!(false);
+        assert!(RefusalRetryPlan::for_response(&refusal(unclaimed), "claude-opus-5-5").is_some());
 
         let mut stopped = refusal(detail("cyber", Some("claude-opus-4-8"), Some("tok")));
         stopped.finish_reason = FinishReason::Stop;
