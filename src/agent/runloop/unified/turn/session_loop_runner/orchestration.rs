@@ -343,6 +343,22 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let mut ui_setup = harness_try!(ui_setup);
         vtcode_commons::startup_trace::record_phase("session_setup_ui", session_ui_phase);
 
+        // Registry-light critical path: ToolRegistry + discovery run after the
+        // typeable shell / ready wiring so first paint never waits on them.
+        harness_try!(
+            crate::agent::runloop::unified::session_setup::complete_session_registry(
+                &mut session_state,
+                &config,
+                vt_cfg.as_ref(),
+                full_auto,
+                primary_agent_explicitly_configured,
+                resume_ref,
+                thread_handle.thread_id().as_str(),
+                session_primary_agent_override.as_deref(),
+            )
+            .await
+        );
+
         // Retention walks the session store and may rmtree dozens of dirs.
         // Scheduled only after first paint is available so a large archive
         // cannot delay the first frame; still best-effort background.
@@ -430,7 +446,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let SessionState {
             session_bootstrap,
             mut provider_client,
-            mut tool_registry,
+            tool_registry: tool_registry_opt,
             tools,
             tool_catalog,
             conversation_history,
@@ -442,6 +458,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             mut active_primary_agent,
             ..
         } = session_state;
+        // `complete_session_registry` already ran after first paint; the
+        // interaction loop requires the concrete registry.
+        let mut tool_registry = tool_registry_opt.expect("tool registry completed before interaction");
         // `initialize_session_ui` may move the archive through setup. Persist
         // again after extracting the live state so every subsequent switch is
         // anchored to the same archive metadata instance.
