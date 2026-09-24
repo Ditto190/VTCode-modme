@@ -309,15 +309,15 @@ fn normalize_turn_balancer_tool_name(name: &str) -> Cow<'_, str> {
 /// they must instruct the same `<proposed_plan>` contract. Without the format
 /// the model emits research prose that fails validation and the turn ends
 /// `Blocked` even though the evidence was present.
-const PLANNING_SYNTHESIS_FORMAT_HINT: &str = "Synthesize exactly one complete `<proposed_plan>` NOW from the evidence already gathered: include Summary, numbered steps as `Action -> files: [path] -> verify: [command]`, Validation, and Assumptions. Every implementation step must name a concrete file, symbol, or behavior target and a concrete `verify:` command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, `verify: [grep -n 'symbol' src/file.rs]`, or `verify: [git show --stat HEAD]` for a targeted review. Reuse visible evidence and keep output focused. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; vague prose and generic VCS-only checks fail validation. If a list has multiple comma-separated checks, every item must independently be concrete. Do not emit tool calls or tool-call markup.";
+const PLANNING_SYNTHESIS_FORMAT_HINT: &str = "Synthesize exactly one complete `<proposed_plan>` from the evidence already gathered: include Summary, numbered steps as `Action -> files: [path] -> verify: [command]`, Validation, and Assumptions. Every implementation step must name a concrete file, symbol, or behavior target and a concrete `verify:` command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, `verify: [grep -n 'symbol' src/file.rs]`, or `verify: [git show --stat HEAD]` for a targeted review. Reuse visible evidence and keep output focused. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; vague prose and generic VCS-only checks fail validation. If a list has multiple comma-separated checks, every item must independently be concrete. Do not emit tool calls or tool-call markup.";
 
 fn navigation_loop_guidance(planning_active: bool, repetition: usize) -> &'static str {
     if repetition >= 2 {
-        "CRITICAL: You have triggered the navigation-loop guard repeatedly. STOP all read/search operations immediately. DO NOT browse or explore further. Provide a direct synthesis with the next action or ask one blocking question, and nothing else."
+        "The navigation-loop guard has fired again this turn, so more read/search steps are unlikely to change the answer. Reply with only a direct synthesis and the next action, or one blocking question."
     } else if planning_active {
-        "WARNING: Too many read/search steps in Planning workflow without an actionable output. Stop browsing, summarize key findings, then update `task_tracker` with concrete steps (files + outcome + verification), or ask one blocking question."
+        "Planning has taken many read/search steps without an actionable output. Summarize key findings, then update `task_tracker` with concrete steps (files + outcome + verification), or ask one blocking question."
     } else {
-        "WARNING: Too many read/search steps without edits or execution. Summarize findings and propose the next concrete edit/action, or explain the blocker."
+        "Many read/search steps have run without edits or execution. Summarize findings and propose the next concrete edit/action, or explain the blocker."
     }
 }
 
@@ -450,7 +450,7 @@ pub(crate) async fn handle_turn_balancer(
         && ctx.harness_state.model_visible_preview_budget_exhausted()
     {
         let recovery_reason = format!(
-            "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass. Trust preserved outcome metadata (tool, spool_path, byte_count, completion_state), do NOT re-read or repeat exhausted calls. Verification, task_tracker, session polling, spool paging, and plan-draft re-reads stay open until the synthesis pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
+            "Planning tool preview budget exhausted the model-visible allowance; further inspection returns metadata stubs without content. Tools are disabled on the next pass. Trust preserved outcome metadata (tool, spool_path, byte_count, completion_state); re-reading or repeating exhausted calls only returns more stubs. Verification, task_tracker, session polling, spool paging, and plan-draft re-reads stay open until the synthesis pass. {PLANNING_SYNTHESIS_FORMAT_HINT}"
         );
         if ctx.activate_recovery(recovery_reason.clone()) {
             repeated_tool_attempts.planning_low_signal_synthesis_triggered = true;
@@ -730,7 +730,9 @@ mod tests {
     #[test]
     fn navigation_loop_guidance_escalates_on_repetition() {
         let guidance = navigation_loop_guidance(false, 2);
-        assert!(guidance.contains("CRITICAL: You have triggered the navigation-loop guard repeatedly"));
+        assert!(guidance.contains("navigation-loop guard has fired again"));
+        assert!(guidance.contains("one blocking question"));
+        assert_ne!(guidance, navigation_loop_guidance(false, 1));
     }
 
     #[test]
