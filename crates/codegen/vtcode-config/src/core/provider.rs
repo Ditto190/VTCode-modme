@@ -474,7 +474,8 @@ pub struct AnthropicConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffortLevel>,
 
-    /// Optional Anthropic task budget token total for Claude Opus 4.7.
+    /// Optional Anthropic task budget token total for Claude Fable 5/5.1, Opus 5,
+    /// and Opus 5.5 (not sent for other models).
     /// When set, VT Code sends `output_config.task_budget = { type = "tokens", total = N }`
     /// and the required beta header.
     /// Anthropic currently requires a minimum of 20,000 tokens.

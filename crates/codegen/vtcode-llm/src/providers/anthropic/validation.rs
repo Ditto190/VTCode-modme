@@ -94,7 +94,7 @@ pub fn validate_request(
     {
         let formatted_error = error_display::format_llm_error(
             provider_name,
-            "Claude Opus 5, Opus 5.5, Sonnet 5, Fable 5, Mythos 5, and Opus 4.8 reject explicit temperature, top_p, and top_k values; omit sampling parameters entirely.",
+            "Claude Sonnet 5, Fable 5/5.1, Opus 5, and Opus 5.5 reject explicit temperature, top_p, and top_k values; omit sampling parameters entirely.",
         );
         return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
     }
@@ -147,7 +147,7 @@ pub fn validate_request(
         let formatted_error = error_display::format_llm_error(
             provider_name,
             &format!(
-                "task_budget_tokens ({task_budget}) must be at least 20000 for Claude Opus 4.7/4.8, Fable 5, and Mythos 5."
+                "task_budget_tokens ({task_budget}) must be at least 20000 for Claude Fable 5/5.1, Opus 5, and Opus 5.5."
             ),
         );
         return Err(LLMError::InvalidRequest { message: formatted_error, metadata: None });
