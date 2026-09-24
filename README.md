@@ -225,6 +225,7 @@ For session lifecycle and day-to-day operations:
 | `vtcode schedule`                    | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts   |
 | `vtcode secret`                      | Store provider API keys in your OS keyring, never in shell history or workspace files |
 | `vtcode login`                       | OAuth sign-in for ChatGPT and GitHub Copilot; see [OAuth authentication](./docs/guides/oauth-authentication.md) |
+| `vtcode auth`                        | Show authentication status for one provider or all supported providers               |
 | `vtcode models`                      | Inspect, test, and compare providers and models                                       |
 | `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots                                             |
 | `vtcode tool-policy`                 | Allow or deny specific tools per workspace                                            |
@@ -233,7 +234,10 @@ For session lifecycle and day-to-day operations:
 | `vtcode mcp`                         | Connect and manage MCP servers                                                        |
 
 More: `vtcode config`, `vtcode dependencies`, `vtcode acp`, `vtcode a2a`,
-`vtcode webmcp`, `vtcode session-store`. Full list: `vtcode --help` or the
+`vtcode webmcp`, `vtcode session-store`, `vtcode schema` (built-in tool
+schemas), `vtcode analyze` (workspace structure/security/performance),
+`vtcode check` (built-in repository checks), and `vtcode man` (man pages).
+Full list: `vtcode --help` or the
 [command reference](./docs/user-guide/commands.md).
 
 ### Everyday recipes
