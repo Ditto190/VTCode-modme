@@ -657,6 +657,34 @@ mod tests {
         assert_eq!(payload["max_tokens"], 4096, "payload: {payload}");
     }
 
+    #[test]
+    fn coding_agent_settings_never_inject_prompt_scaffolding() {
+        // Settings serialized by older builds still deserialize; the removed
+        // role / XML-tag / <thinking>-<answer> scaffolding fields are ignored.
+        let settings: crate::provider::CodingAgentSettings = serde_json::from_value(json!({
+            "force_xml_tags": true,
+            "role_specialization": "Senior Software Architect",
+            "enforce_structured_thought": true,
+            "long_context_optimization": false
+        }))
+        .expect("legacy settings deserialize");
+        let mut request = plain_request(anthropic::CLAUDE_SONNET_5);
+        request.system_prompt = Some(std::sync::Arc::from("Base prompt"));
+        request.coding_agent_settings = Some(Box::new(settings));
+        let payload = convert(&request);
+
+        let system = payload["system"].to_string();
+        assert!(system.contains("Base prompt"), "system: {system}");
+        for scaffold in [
+            "You are Senior Software Architect",
+            "XML tags",
+            "<thinking>",
+            "<answer>",
+        ] {
+            assert!(!system.contains(scaffold), "unexpected {scaffold:?} in system: {system}");
+        }
+    }
+
     fn forced_tool_request(model: &str, disable_thinking: bool) -> LLMRequest {
         let mut request = plain_request(model);
         request.tool_choice = Some(ToolChoice::any());
