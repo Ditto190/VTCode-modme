@@ -261,6 +261,28 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         }
         let session_setup_phase = vtcode_commons::startup_trace::phase_started();
         let session_primary_agent_override = next_session_primary_agent.take();
+        // Static-first paint: typeable shell before ToolRegistry/discovery.
+        let steering_sender_for_shell = if steering_receiver.is_none() {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            *steering_receiver = Some(receiver);
+            Some(sender)
+        } else {
+            None
+        };
+        let (settings_sender, shell_settings_receiver) = mpsc::unbounded_channel();
+        let shell = crate::agent::runloop::unified::session_setup::initialize_session_shell(
+            &config,
+            vt_cfg.as_ref(),
+            crate::agent::runloop::unified::session_setup::SessionUiLaunchOptions {
+                session_archive: None,
+                full_auto,
+                skip_confirmations,
+                steering_sender: steering_sender_for_shell,
+                settings_sender: settings_sender.clone(),
+            },
+        )
+        .await?;
+        let mut settings_receiver = shell_settings_receiver;
         let session_critical_phase = vtcode_commons::startup_trace::phase_started();
         let mut session_state = initialize_session_critical(
             &config,
@@ -300,14 +322,6 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             }};
         }
 
-        let steering_sender = if steering_receiver.is_none() {
-            let (sender, receiver) = mpsc::unbounded_channel();
-            *steering_receiver = Some(receiver);
-            Some(sender)
-        } else {
-            None
-        };
-        let (settings_sender, mut settings_receiver) = mpsc::unbounded_channel();
         let session_ui_phase = vtcode_commons::startup_trace::phase_started();
         let ui_setup = initialize_session_ui(
             &config,
@@ -316,12 +330,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             &mut session_state,
             session_trigger,
             resume_ref,
+            shell,
             crate::agent::runloop::unified::session_setup::SessionUiLaunchOptions {
                 session_archive,
                 full_auto,
                 skip_confirmations,
-                steering_sender,
-                settings_sender,
+                steering_sender: None,
+                settings_sender: settings_sender.clone(),
             },
         )
         .await;
