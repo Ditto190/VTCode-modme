@@ -3,7 +3,7 @@ feature: static-first-paint
 status: delivered
 updated: 2026-09-24
 branch: feat/static-first-paint
-commits: f4863b9d6cfc975d442782e5104232285f1f4453..working-tree
+commits: f4863b9d6cfc975d442782e5104232285f1f4453..fd52538c584398196acbbc6caaede11d68649b4e
 ---
 
 # Static First Paint
