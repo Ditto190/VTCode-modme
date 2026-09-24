@@ -328,6 +328,18 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         let mut ui_setup = harness_try!(ui_setup);
         vtcode_commons::startup_trace::record_phase("session_setup_ui", session_ui_phase);
 
+        // Retention walks the session store and may rmtree dozens of dirs.
+        // Scheduled only after first paint is available so a large archive
+        // cannot delay the first frame; still best-effort background.
+        {
+            let workspace = config.workspace.clone();
+            let vt_cfg = vt_cfg.clone();
+            let turn_run_id = turn_run_id.clone();
+            tokio::spawn(async move {
+                super::harness::run_harness_retention(&workspace, vt_cfg.as_ref(), &turn_run_id).await;
+            });
+        }
+
         // Deferred hydration runs after the TUI first frame is available.
         // The interaction loop must not dispatch a model turn until this
         // completes; setup failures abort with the historical setup error.

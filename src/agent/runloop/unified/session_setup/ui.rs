@@ -309,6 +309,12 @@ pub(crate) async fn initialize_session_ui(
         Some(_) => Ok(()),
     });
 
+    // Never await the palette probe here: a silent terminal's 50 ms timeout
+    // must not delay first paint. Mark crossterm as raw-mode owner so a late
+    // probe RawModeGuard restore cannot undo terminal setup; the probe is
+    // drained after spawn so theme settles before the first model turn.
+    vtcode_core::utils::terminal_color_probe::note_crossterm_raw_mode();
+
     let mut session = spawn_session_with_options(
         theme_spec.clone(),
         SessionOptions {
@@ -340,6 +346,10 @@ pub(crate) async fn initialize_session_ui(
         },
     )
     .context("failed to launch inline session")?;
+    // Drain the palette probe after spawn so a silent terminal cannot delay
+    // the first frame. Theme/palette settle here before the first model turn.
+    crate::agent::probe::await_terminal_palette_probe().await;
+
     set_global_terminal_focused(true);
     if skip_confirmations {
         session.set_skip_confirmations(true);

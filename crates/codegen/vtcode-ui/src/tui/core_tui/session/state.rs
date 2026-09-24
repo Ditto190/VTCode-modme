@@ -477,10 +477,9 @@ impl Session {
             return false;
         }
         let status = self.animation_status_text();
-        let running_status = self.appearance.should_animate_progress_status()
+        self.appearance.should_animate_progress_status()
             && status != ACTIVE_PTY_STATUS_TEXT
-            && status_requires_shimmer(status);
-        running_status
+            && status_requires_shimmer(status)
     }
 
     pub(crate) fn active_pty_session_count(&self) -> usize {

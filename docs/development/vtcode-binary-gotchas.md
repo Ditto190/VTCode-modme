@@ -115,6 +115,13 @@ full agent runtime:
 
 Hydration and post-hydration hook execution are awaited before the interaction
 loop dispatches the first model turn. Setup failures still abort the session.
+Maintenance never sits on first paint: interactive legacy path migration is
+fire-and-forget `spawn_blocking` before dispatch, harness session-store
+retention runs in `run_harness_retention` spawned after `initialize_session_ui`,
+and the palette probe is *not* awaited before TUI spawn — `note_crossterm_raw_mode`
+makes a late `RawModeGuard` restore a no-op, and `await_terminal_palette_probe`
+drains after spawn (probe timeout 50 ms).
+
 Trace phases: `session_setup_critical`, `session_setup_ui`,
 `session_setup_hydrate`, `session_setup`, `first_ui_render`.
 
