@@ -199,8 +199,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/tool-summary-display.md`
   - **Content**: Tool Summary Display
-  - **Topics**: Model-visible tool output budget, Guardrails quick reference
-  - **User Questions**: "What can you tell me about Tool Summary Display?", "How does Model-visible tool output budget work?", "How does Guardrails quick reference work?"
+  - **Topics**: Exec-session calls (`write_stdin` and the session readers), Model-visible tool output budget, Guardrails quick reference
+  - **User Questions**: "What can you tell me about Tool Summary Display?", "How does Exec-session calls (`write_stdin` and the session readers) work?", "How does Model-visible tool output budget work?"
 
 - **File**: `docs/development/async-performance-audit.md`
   - **Content**: VT Code Async Performance Audit
