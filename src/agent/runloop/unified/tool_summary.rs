@@ -1364,25 +1364,27 @@ mod tests {
         // Screenshot 2026-09-24: the expanded `• Ran` headline must carry the
         // complete pipeline so TUI wrapping (not `…`) owns the overflow.
         // `display_command_text` normalizes quoting (double to single), so
-        // assert token completeness rather than byte equality.
-        let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+        // assert token completeness rather than byte equality. Exact
+        // screenshot bytes: `||` in the pattern (3 pattern pipes + 3 shell
+        // pipes = 6) and the backslash-escaped `\.backup` must survive.
+        let command = "grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \"\\.backup\"";
         let data =
             prepare_summary_data(tool_names::UNIFIED_EXEC, &json!({"action": "run", "command": command}), None, None);
         assert!(!data.summary.contains('…'), "got: {:?}", data.summary);
         for fragment in [
             "grep",
             "-rn",
-            "@vinhnx/vtcode|npm install -g|npx @vinhnx",
+            "@vinhnx/vtcode|npm install -g||npx @vinhnx",
             "docs",
             "node_modules",
             "package-lock",
-            ".backup",
+            "\\.backup",
         ] {
             assert!(data.summary.contains(fragment), "missing {fragment:?} in {:?}", data.summary);
         }
         assert_eq!(
             data.summary.matches('|').count(),
-            5,
+            6,
             "pattern pipes + shell pipes must survive: {:?}",
             data.summary
         );

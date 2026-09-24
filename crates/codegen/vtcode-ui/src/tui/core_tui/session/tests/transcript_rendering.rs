@@ -1836,7 +1836,9 @@ fn tool_command_header_wraps_in_full_without_truncation() {
     // header must wrap across lines with every segment intact and no `…`.
     // Wrapping may only insert whitespace (hanging indent); comparing with
     // whitespace stripped proves no characters are lost or truncated.
-    let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+    // Fixture uses the exact screenshot bytes: `||` inside the quoted pattern
+    // and the backslash-escaped `\.backup` must both survive wrapping.
+    let command = "grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \"\\.backup\"";
     let expected_flat: String = format!("• Ran {command}").chars().filter(|c| !c.is_whitespace()).collect();
     for width in [80u16, 50, 40] {
         let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
@@ -1850,15 +1852,36 @@ fn tool_command_header_wraps_in_full_without_truncation() {
         assert!(!joined.contains('…'), "width {width}: header must not truncate, got: {joined:?}");
         let flat: String = joined.chars().filter(|c| !c.is_whitespace()).collect();
         assert_eq!(flat, expected_flat, "width {width}: wrapped header lost content, got: {joined:?}");
+        // Proper line wrapping shape: the header must actually wrap at narrow
+        // widths, the first content row keeps the bullet+verb, continuations
+        // hang under it (gutter + hanging indent, never a mid-token restart),
+        // and no row overflows the viewport. Spacing blanks are skipped.
+        let content_rows: Vec<String> = rows
+            .iter()
+            .map(|row| row.spans.iter().map(|span| span.content.as_ref()).collect())
+            .filter(|text: &String| !text.trim().is_empty())
+            .collect();
+        assert!(content_rows.len() > 1, "width {width}: long header must wrap, got: {joined:?}");
+        assert!(
+            content_rows[0].starts_with("• Ran "),
+            "width {width}: first row keeps bullet+verb, got: {:?}",
+            content_rows[0]
+        );
+        for text in content_rows.iter().skip(1) {
+            assert!(text.starts_with("  "), "width {width}: continuation hangs under the header, got: {text:?}");
+            assert!(text.chars().count() <= usize::from(width), "width {width}: row overflows viewport, got: {text:?}");
+        }
     }
 }
 
 #[test]
 fn pty_command_header_wraps_in_full_without_truncation() {
     // Same screenshot command through the live PTY path: `• Ran` plus its
-    // `  │ ` continuations must keep every pipe segment with no `…`.
-    let header = "• Ran grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs |";
-    let continuation = "  │ grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+    // `  │ ` continuations must keep every pipe segment with no `…`. Exact
+    // screenshot bytes (`||`, `\.backup`); the `│` stream glyphs are content
+    // and must survive reflow rather than being stripped or truncated.
+    let header = "• Ran grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs |";
+    let continuation = "  │ grep -v node_modules | grep -v package-lock | grep -v \"\\.backup\"";
     let expected_flat: String = format!("{header}{continuation}")
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -1878,5 +1901,11 @@ fn pty_command_header_wraps_in_full_without_truncation() {
         assert!(!joined.contains('…'), "width {width}: PTY header must not truncate, got: {joined:?}");
         let flat: String = joined.chars().filter(|c| !c.is_whitespace()).collect();
         assert_eq!(flat, expected_flat, "width {width}: PTY header lost content, got: {joined:?}");
+        // Stream `│` glyphs survive reflow and no row overflows the viewport.
+        assert!(joined.contains('│'), "width {width}: continuation glyph lost, got: {joined:?}");
+        for line in first.iter().chain(second.iter()) {
+            let text: String = line.line.spans.iter().map(|span| span.content.as_ref()).collect();
+            assert!(text.chars().count() <= usize::from(width), "width {width}: row overflows viewport, got: {text:?}");
+        }
     }
 }

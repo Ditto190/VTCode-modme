@@ -931,8 +931,9 @@ mod tests {
     #[test]
     fn preview_full_command_never_truncates() {
         // Transcript surfaces (expanded `• Ran`, live PTY headers) show the
-        // command in full; only compact previews truncate.
-        let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+        // command in full; only compact previews truncate. Exact screenshot
+        // bytes (`||`, `\.backup`) round-trip unchanged.
+        let command = "grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \"\\.backup\"";
         let full = preview_full_command(command);
         assert_eq!(full, command);
         assert!(!full.contains('…'));
