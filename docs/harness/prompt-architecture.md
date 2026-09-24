@@ -140,16 +140,18 @@ include:
 
 - A **verb cue** — `Use `, `Create `, `List `, `Fetch `, etc. — so the
   model recognizes the action the tool performs.
-- An **anti-pattern cue** OR a **constraint cue** — e.g. `Do NOT ...`,
-  `Avoid ...`, `sparely`, or `max ...`, `rate-limit`, `session`,
-  `Prompt`, `timeout`, `inherits` — so the model knows the limits and
-  side effects.
+- A **constraint cue** — e.g. `max ...`, `rate-limit`, `session`,
+  `timeout`, `requires approval`, `inherits` — so the model knows the
+  limits and side effects. Prohibition phrasing such as `Do NOT ...` or
+  `Avoid ...` does not satisfy the rule; models that follow tool
+  descriptions literally over-apply it, so state the concrete limit instead.
 
-Tools exempted from the anti-pattern/constraint requirement are
-single-action or read-only helpers (`cron` action=`list`/`delete`,
-`mcp` action=`list_servers`, etc.) where the model can safely call them without
-explicit guard-rails. See the test for the full allowlist and cue
-vocabularies.
+Descriptions must be 40-1500 characters. Tools exempted from the constraint
+requirement are single-action or read-only helpers (`request_user_input`,
+`search_tools`, `code_search`, etc.) where the model can safely call them
+without explicit guard-rails. The allowlist holds registration names only;
+aliases such as `cron_list` are never checked. See the test for the full
+allowlist and cue vocabulary.
 
 Run `cargo test -p vtcode-core tools::registry::builtins::tests::tool_descriptions_satisfy_documented_contract`
 to validate any description change before merging.

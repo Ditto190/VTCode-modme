@@ -724,16 +724,17 @@ mod tests {
     /// agent misbehavior.
     ///
     /// Every LLM-visible tool with a description must satisfy:
-    /// 1. Length is between 40 and 1200 characters.
+    /// 1. Length is between 40 and 1500 characters.
     /// 2. Contains at least one verb cue ("Use", "Create", "List", "Fetch",
     ///    "Search", "Send", "Apply", "Read", "Edit", etc.) so the model can
     ///    recognize the action the tool performs.
     /// 3. For tools that mutate state, network-call, schedule work, or
-    ///    require confirmation, the description must contain either an
-    ///    anti-pattern cue ("Do NOT", "Avoid", "sparely", "Don't", etc.) OR
-    ///    a constraint cue ("max", "rate-limit", "session", "Prompt",
-    ///    "blocks", "timeout", etc.) so the model knows the limits and side
-    ///    effects.
+    ///    require confirmation, the description must contain a constraint cue
+    ///    ("max ", "rate-limit", "session", "blocks", "timeout",
+    ///    "requires approval", etc.) so the model knows the limits and side
+    ///    effects. Prohibition phrasing ("Do NOT", "Avoid", "never") does not
+    ///    satisfy this rule: models that follow descriptions literally
+    ///    over-apply it, so descriptions state the concrete limit instead.
     ///
     /// Tools exempted from rule 3 are simple read-only helpers where the
     /// model can safely call them without explicit guard-rails.
@@ -774,71 +775,48 @@ mod tests {
             "Track ",
             "Update ",
         ];
-        let anti_pattern_cues = [
-            "Do NOT",
-            "Do not",
-            "Don't",
-            "Avoid ",
-            "sparely",
-            "spareingly",
-            "must not",
-            "must only",
-            "never",
-            "refuse",
-            "Refuse ",
-            "Limit use",
-            "limit use",
-            "no need",
-            "Do not call",
-            "do not call",
-            "not for",
-            "not to be used",
-        ];
         let constraint_cues = [
             "max ",
             "rate-limit",
             "rate limit",
             "session",
-            "Prompt",
             "blocks",
             "timeout",
             "cap ",
             "outlives",
             "inherits",
             "expires",
-            "Limited",
             "limited to",
             "max_bytes",
             "max_results",
             "max_lines",
             "max chars",
             "max size",
-            "Once per",
             "once per",
             "requires ",
-            "Permission",
+            "requires approval",
             "permission",
             "approval",
-            "Prompt ",
-            "spareingly",
             "exceeds",
-            "EXCLUSIVE",
             "scoped",
         ];
-        // Read-only / single-action helpers where explicit anti-pattern and
-        // constraint cues are not strictly required.
+        // Read-only / single-action helpers where a constraint cue is not
+        // strictly required. Entries are registration names; aliases such as
+        // cron_list or mcp_search_tools never reach this check.
         let rule3_allowlist: &[&str] = &[
             tools::REQUEST_USER_INPUT,
-            tools::CRON_LIST,
-            tools::CRON_DELETE,
-            tools::MCP_LIST_SERVERS,
-            tools::MCP_GET_TOOL_DETAILS,
-            tools::MCP_SEARCH_TOOLS,
             tools::SEARCH_TOOLS,
             tools::TASK_TRACKER,
             tools::START_PLANNING,
             tools::CODE_SEARCH,
         ];
+
+        for allowed in rule3_allowlist {
+            assert!(
+                registrations.iter().any(|registration| registration.name() == *allowed),
+                "rule3 allowlist entry {allowed} is not a builtin registration name"
+            );
+        }
 
         for registration in &registrations {
             if !registration.expose_in_llm() {
@@ -860,16 +838,15 @@ mod tests {
                 "{tool_name}: description must contain a verb cue like 'Use ', 'Create ', 'Fetch ', etc.\nDescription: {description}"
             );
 
-            // Rule 3: anti-pattern OR constraint cue for side-effect tools.
+            // Rule 3: constraint cue for side-effect tools.
             if rule3_allowlist.contains(&tool_name) {
                 continue;
             }
-            let has_anti = anti_pattern_cues.iter().any(|cue| description.contains(cue));
             let has_constraint = constraint_cues.iter().any(|cue| description.contains(cue));
             assert!(
-                has_anti || has_constraint,
-                "{tool_name}: side-effect description must contain an anti-pattern cue ('Do NOT', 'Avoid ', 'sparely', ...) \
-                 OR a constraint cue ('max ', 'rate-limit', 'session', 'Prompt', 'timeout', 'inherits', ...).\nDescription: {description}"
+                has_constraint,
+                "{tool_name}: side-effect description must state a concrete constraint cue ('max ', 'rate-limit', \
+                 'session', 'timeout', 'requires approval', 'inherits', ...).\nDescription: {description}"
             );
         }
     }
