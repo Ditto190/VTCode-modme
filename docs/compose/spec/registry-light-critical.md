@@ -3,7 +3,7 @@ feature: registry-light-critical
 status: delivered
 updated: 2026-09-24
 branch: feat/registry-light-critical
-commits: 0fdd25b7e2794cc27db878166821160636921a46..working-tree
+commits: 0fdd25b7e2794cc27db878166821160636921a46..a9eb97929f5d0e2edf555dd512fd7abcafaeb9bf
 ---
 
 # Registry-Light Critical Path
