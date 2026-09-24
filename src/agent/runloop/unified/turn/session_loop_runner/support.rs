@@ -166,6 +166,39 @@ pub(super) fn build_tracked_file_freshness_note(
     ))
 }
 
+/// Upper bound on paths listed in [`build_withdrawn_turn_changes_note`].
+const MAX_WITHDRAWN_TURN_PATHS: usize = 20;
+
+/// Model-visible note for file changes made by a refused turn.
+///
+/// Rolling back a refused turn removes its tool calls and results from
+/// history, but the edits those calls made stay on disk. Without this note the
+/// next turn reasons from file contents that no longer match. The note names
+/// only paths, never content from the refused turn.
+pub(super) fn build_withdrawn_turn_changes_note(
+    workspace: &std::path::Path,
+    modified_paths: &std::collections::BTreeSet<std::path::PathBuf>,
+) -> Option<String> {
+    if modified_paths.is_empty() {
+        return None;
+    }
+
+    let mut display_paths = modified_paths
+        .iter()
+        .take(MAX_WITHDRAWN_TURN_PATHS)
+        .map(|path| format!("- {}", workspace_relative_display(workspace, path)))
+        .collect::<Vec<_>>();
+    let omitted = modified_paths.len().saturating_sub(MAX_WITHDRAWN_TURN_PATHS);
+    if omitted > 0 {
+        display_paths.push(format!("- and {omitted} more"));
+    }
+
+    Some(format!(
+        "The previous request was declined and removed from this conversation, but before that it modified these files:\n{}\nTheir contents may differ from what earlier messages show; read them again before relying on or editing them.",
+        display_paths.join("\n")
+    ))
+}
+
 pub(super) fn format_workspace_relative_paths<I>(workspace: &std::path::Path, paths: I) -> String
 where
     I: IntoIterator,
@@ -1037,6 +1070,22 @@ mod tests {
 
         assert!(!rollback.apply(&mut history));
         assert_eq!(history, unchanged);
+    }
+
+    #[test]
+    fn withdrawn_turn_changes_note_lists_bounded_relative_paths() {
+        let workspace = std::path::Path::new("/workspace");
+        assert!(super::build_withdrawn_turn_changes_note(workspace, &Default::default()).is_none());
+
+        let paths: std::collections::BTreeSet<std::path::PathBuf> = (0..super::MAX_WITHDRAWN_TURN_PATHS + 3)
+            .map(|i| workspace.join(format!("src/f{i:02}.rs")))
+            .collect();
+        let note = super::build_withdrawn_turn_changes_note(workspace, &paths).expect("note");
+        assert!(note.contains("- src/f00.rs\n"), "{note}");
+        assert!(!note.contains("/workspace/"), "paths must be workspace-relative: {note}");
+        assert_eq!(note.matches("\n- src/").count(), super::MAX_WITHDRAWN_TURN_PATHS);
+        assert!(note.contains("- and 3 more\n"), "{note}");
+        assert!(note.contains("read them again"), "{note}");
     }
 
     #[test]

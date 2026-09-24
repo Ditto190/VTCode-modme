@@ -64,7 +64,11 @@ pub(crate) async fn apply_turn_outcome(outcome: TurnLoopOutcome, ctx: TurnOutcom
             Ok(())
         }
         TurnLoopResult::Blocked { reason } => {
-            if let Some(reason) = reason.as_deref() {
+            // A refusal notice is already the turn's final response; printing
+            // the same reason again would duplicate it.
+            if !outcome.refused
+                && let Some(reason) = reason.as_deref()
+            {
                 let _ = ctx.renderer.line(MessageStyle::Info, reason);
             }
             reset_inline_input(ctx.handle, ctx.default_placeholder.clone());

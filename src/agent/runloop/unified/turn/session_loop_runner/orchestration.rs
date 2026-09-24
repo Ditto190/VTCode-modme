@@ -37,9 +37,10 @@ use super::metrics::{
 use super::plan_seed::load_active_plan_seed;
 use super::support::{
     ExecutionSummaryStatus, RefusedTurnRollback, append_transient_turn_notes, approved_plan_execution_summary,
-    build_unrelated_dirty_worktree_note, checkpoint_session_archive_start, force_reload_workspace_config_for_execution,
-    format_workspace_relative_paths, latest_assistant_result_text, prepare_resume_bootstrap_without_archive,
-    prompt_startup_planning_workflow, remove_transient_system_notes, take_pending_resumed_user_prompt,
+    build_unrelated_dirty_worktree_note, build_withdrawn_turn_changes_note, checkpoint_session_archive_start,
+    force_reload_workspace_config_for_execution, format_workspace_relative_paths, latest_assistant_result_text,
+    prepare_resume_bootstrap_without_archive, prompt_startup_planning_workflow, remove_transient_system_notes,
+    take_pending_resumed_user_prompt,
 };
 use crate::agent::runloop::ResumeSession;
 use crate::agent::runloop::git::{compute_session_code_change_delta, normalize_workspace_path};
@@ -1465,8 +1466,18 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // back before any post-turn history edits, checkpointing, or
                 // persistence; the refusal notice already reached the
                 // transcript and the harness event stream.
-                let refused_turn_rolled_back = outcome.refused && refused_turn_rollback.apply(working_history);
-                if !refused_turn_rolled_back {
+                let turn_refused = outcome.refused;
+                let refused_turn_rolled_back = turn_refused && refused_turn_rollback.apply(working_history);
+                if refused_turn_rolled_back {
+                    // The rollback removed the turn's tool calls, not their
+                    // effects on disk; name the files it changed so the next
+                    // turn does not reason from stale contents.
+                    if let Some(note) =
+                        build_withdrawn_turn_changes_note(config.workspace.as_path(), &outcome.turn_modified_files)
+                    {
+                        working_history.push(vtcode_core::llm::provider::Message::system(note));
+                    }
+                } else {
                     remove_transient_system_notes(working_history, &transient_system_notes);
                 }
 
@@ -2006,7 +2017,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         session_stats.reset_plan_continuation_budget();
                     }
                 }
-                if let RunLoopTurnLoopResult::Blocked { reason } = &outcome_result {
+                // A refusal is terminal for its request, not a stall to resume:
+                // no blocked handoff, no stall reason for `continue` to replay.
+                if let RunLoopTurnLoopResult::Blocked { reason } = &outcome_result
+                    && !turn_refused
+                {
                     use crate::agent::runloop::unified::turn::tool_outcomes::helpers as verification_gate;
 
                     let base = reason.as_deref().unwrap_or("Turn blocked due to repeated failing behavior.");
@@ -2162,6 +2177,15 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     RunLoopTurnLoopResult::Aborted => {
                         session_stats
                             .mark_turn_stalled(true, Some("Turn aborted due to an execution error.".to_string()));
+                    }
+                    RunLoopTurnLoopResult::Blocked { .. } if turn_refused => {
+                        handle.set_placeholder(Some(
+                            "Request declined · Rephrase it, or use /model to switch models...".to_string(),
+                        ));
+                        // Blocked status makes the next input restore the
+                        // default placeholder.
+                        input_status_state.is_blocked = true;
+                        session_stats.mark_turn_stalled(false, None);
                     }
                     RunLoopTurnLoopResult::Blocked { reason } => {
                         // Plan-mode QoL: a blocked placeholder that still says
