@@ -63,4 +63,8 @@ for multi agent or multi background queue/process handling and UI in TUI.
 
 reference:
 
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 15.57.29.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 15.56.47.png'
+1. running state '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 15.56.47.png'
+2. click on the background task indicator or relevant UI element. '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 15.57.29.png'
+3. finished state: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.06.19.png'
+4. show messages '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.06.23.png'
+5. expanded 1 of the message '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.06.32.png'
