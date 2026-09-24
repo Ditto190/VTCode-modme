@@ -24,7 +24,7 @@ use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
     default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, preserves_thinking_across_turns,
-    rejects_forced_tool_choice, rejects_sampling, resolve_model_name, supports_effort,
+    rejects_forced_tool_choice, rejects_sampling, resolve_model_name, supports_assistant_prefill, supports_effort,
     supports_mid_conversation_system_messages, supports_server_side_fallback, supports_task_budget, thinking_is_on,
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
@@ -347,7 +347,10 @@ pub(crate) fn convert_to_anthropic_format(
     hardening::strip_globally_orphaned_tool_blocks(&mut anthropic_request.messages);
     hardening::enforce_tool_use_result_adjacency(&mut anthropic_request.messages);
     hardening::hoist_tool_results_to_front(&mut anthropic_request.messages);
-    hardening::guard_trailing_assistant_message(&mut anthropic_request.messages);
+    hardening::guard_trailing_assistant_message(
+        &mut anthropic_request.messages,
+        supports_assistant_prefill(resolved_model, ctx.model),
+    );
 
     serde_json::to_value(anthropic_request).map_err(|e| LLMError::Provider {
         message: format!("Serialization error: {e}"),

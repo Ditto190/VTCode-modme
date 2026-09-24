@@ -484,7 +484,7 @@ mod request_builder_tests {
     use crate::providers::anthropic::request_builder::{
         RequestBuilderContext, convert_to_anthropic_format, tool_result_blocks,
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::sync::Arc;
     use vtcode_config::constants::models;
     use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings};
@@ -1045,7 +1045,7 @@ mod request_builder_tests {
         assert!(payload["system"][1].get("cache_control").is_none());
     }
 
-    fn mid_conversation_payload(messages: Vec<Message>) -> serde_json::Value {
+    fn mid_conversation_payload(messages: Vec<Message>) -> Value {
         let request = LLMRequest {
             model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
             system_prompt: Some(Arc::from("stable system instructions")),
@@ -1118,7 +1118,7 @@ mod request_builder_tests {
         assert_eq!(system_text.matches(summary).count(), 1, "summary folded exactly once: {system_text}");
     }
 
-    fn long_context_payload(model: &str) -> serde_json::Value {
+    fn long_context_payload(model: &str) -> Value {
         let request = LLMRequest {
             model: model.to_string(),
             messages: vec![
@@ -1288,7 +1288,7 @@ mod request_builder_tests {
         model: &str,
         reasoning_effort: Option<vtcode_config::types::ReasoningEffortLevel>,
         configured_effort: Option<vtcode_config::types::ReasoningEffortLevel>,
-    ) -> serde_json::Value {
+    ) -> Value {
         let request = LLMRequest {
             model: model.to_string(),
             messages: vec![Message::user("solve this carefully".to_string())].into(),
@@ -1356,7 +1356,7 @@ mod request_builder_tests {
         assert_eq!(payload["output_config"]["effort"], "xhigh");
     }
 
-    fn assert_trailing_assistant_is_followed_by_user_sentinel(model: &str) {
+    fn convert_ending_on_assistant(model: &str) -> Vec<Value> {
         let request = LLMRequest {
             model: model.to_string(),
             messages: vec![
@@ -1377,7 +1377,11 @@ mod request_builder_tests {
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
-        let messages = payload["messages"].as_array().expect("messages array");
+        payload["messages"].as_array().expect("messages array").clone()
+    }
+
+    fn assert_trailing_assistant_is_followed_by_user_sentinel(model: &str) {
+        let messages = convert_ending_on_assistant(model);
 
         assert_eq!(messages.len(), 3, "model {model}: {messages:?}");
         assert_eq!(messages[1]["role"], "assistant");
@@ -1398,6 +1402,28 @@ mod request_builder_tests {
     #[test]
     fn test_convert_to_anthropic_format_never_ends_on_assistant_for_unknown_model() {
         assert_trailing_assistant_is_followed_by_user_sentinel("claude-unlisted-model");
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_never_ends_on_assistant_for_claude_4_6_and_later() {
+        for model in ["claude-opus-4-8", "claude-opus-4-6", "claude-sonnet-4-6"] {
+            assert_trailing_assistant_is_followed_by_user_sentinel(model);
+        }
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_keeps_trailing_assistant_for_prefill_backends() {
+        for model in [
+            models::minimax::MINIMAX_M3,
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5-20250929",
+        ] {
+            let messages = convert_ending_on_assistant(model);
+
+            assert_eq!(messages.len(), 2, "model {model}: {messages:?}");
+            assert_eq!(messages[1]["role"], "assistant", "model {model} continues from the trailing turn");
+            assert_eq!(messages[1]["content"][0]["text"], "partial answer");
+        }
     }
 
     #[test]

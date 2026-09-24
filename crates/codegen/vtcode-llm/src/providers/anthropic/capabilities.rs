@@ -224,6 +224,47 @@ pub(crate) fn supports_manual_interleaved_beta(model: &str, default_model: &str)
     claude_thinking_profile(model, default_model).is_some_and(|profile| profile.manual_interleaved_beta)
 }
 
+/// Whether the model accepts a request whose last message is an assistant
+/// turn (assistant-message prefill). A trailing assistant turn returns 400 on
+/// Claude Opus/Sonnet 4.6 and later, which covers every profiled Claude 5.x
+/// model. Older Claude models and non-Claude Anthropic-compatible backends
+/// (MiniMax and similar) accept it, so their history is sent unchanged. A
+/// Claude id without a recognizable version is treated as a current model.
+pub(crate) fn supports_assistant_prefill(model: &str, default_model: &str) -> bool {
+    let requested = resolve_model_name(model, default_model);
+    if claude_thinking_profile(requested, default_model).is_some() {
+        return false;
+    }
+
+    let lowered = requested.to_ascii_lowercase();
+    let Some(start) = lowered.find("claude") else {
+        return true;
+    };
+    claude_version(&lowered[start..]).is_some_and(|version| version < (4, 6))
+}
+
+/// Extracts `(major, minor)` from a Claude model id such as
+/// `claude-opus-4-1`, `claude-3-5-sonnet-20240620`, `claude-sonnet-4@20250514`
+/// or `claude-2.1`. The first short numeric segment is the major version and a
+/// directly following short numeric segment is the minor version; eight-digit
+/// date snapshots are not version segments.
+fn claude_version(id: &str) -> Option<(u32, u32)> {
+    let mut segments = id
+        .split(|c: char| matches!(c, '-' | '.' | '@' | ':' | '_'))
+        .skip_while(|segment| !is_version_segment(segment));
+    let major = segments.next()?.parse().ok()?;
+    let minor = segments
+        .next()
+        .filter(|segment| is_version_segment(segment))
+        .and_then(|segment| segment.parse().ok())
+        .unwrap_or(0);
+    Some((major, minor))
+}
+
+fn is_version_segment(segment: &str) -> bool {
+    (1..=2).contains(&segment.len()) && segment.bytes().all(|b| b.is_ascii_digit())
+}
+
 pub(crate) fn supports_mid_conversation_system_messages(model: &str, default_model: &str) -> bool {
     supports_turn_scoped_system_messages(model, default_model)
 }
@@ -549,5 +590,43 @@ mod tests {
         assert_eq!(default_thinking_display(models::anthropic::CLAUDE_OPUS_5_5, ""), Some(ThinkingDisplay::Updates));
         assert_eq!(default_thinking_display(models::anthropic::CLAUDE_OPUS_5, ""), None);
         assert_eq!(default_thinking_display(models::anthropic::CLAUDE_SONNET_5, ""), None);
+    }
+
+    #[test]
+    fn assistant_prefill_is_rejected_by_claude_4_6_and_later() {
+        for model in [
+            models::anthropic::CLAUDE_SONNET_5,
+            models::anthropic::CLAUDE_FABLE_5,
+            models::anthropic::CLAUDE_FABLE_5_1,
+            models::anthropic::CLAUDE_OPUS_5,
+            models::anthropic::CLAUDE_OPUS_5_5,
+            CLAUDE_OPUS_4_8,
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-6@20260101",
+            "anthropic.claude-opus-4-6-v1:0",
+            "claude-mythos-preview",
+            "claude-unlisted-model",
+        ] {
+            assert!(!supports_assistant_prefill(model, ""), "{model}");
+        }
+        assert!(!supports_assistant_prefill("", models::anthropic::CLAUDE_OPUS_5_5));
+    }
+
+    #[test]
+    fn assistant_prefill_is_kept_for_older_claude_and_non_claude_backends() {
+        for model in [
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5-20250929",
+            "claude-opus-4-1",
+            "claude-sonnet-4-20250514",
+            "claude-3-7-sonnet-20250219",
+            "claude-2.1",
+            models::minimax::MINIMAX_M3,
+            "glm-4.6",
+        ] {
+            assert!(supports_assistant_prefill(model, ""), "{model}");
+        }
     }
 }
