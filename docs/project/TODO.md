@@ -68,3 +68,9 @@ reference:
 3. finished state: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.06.19.png'
 4. show messages '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.06.23.png'
 5. expanded 1 of the message '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.06.32.png'
+
+===
+
+audit and make sure command are displayed correctly in full in the TUI with proper line wrapping and no truncation.
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.37.35.png'
