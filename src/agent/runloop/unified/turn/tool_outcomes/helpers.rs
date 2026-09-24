@@ -16,7 +16,7 @@ use crate::agent::runloop::unified::turn::tool_outcomes::{is_grep_style_no_match
 /// warning fires. NL2Repo-Bench recommends verifying after every few edits.
 pub(crate) const BLIND_EDITING_THRESHOLD: usize = 6;
 pub(crate) const ANTI_BLIND_EDITING_WARNING: &str = "[!] Anti-Blind-Editing: run a verifier (build/test/lint — e.g. `cargo check`, `go test`, or `pytest`) and let it exit 0 before further edits.";
-pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "CRITICAL: Multiple edits were made without verification. Stop editing and run one verifier with `exec_command` — your project's build/test/lint tool, e.g. `cargo check`, `go test`, `npm test`, or `pytest` — standalone or as a pure `&&` chain (no `|`, `;`, or `||`; cap output with `max_output_tokens`), and let it exit 0 before another mutation. Piped checks do not clear the gate.";
+pub(crate) const ANTI_BLIND_EDITING_DIRECTIVE: &str = "Several edits have landed without a build/test/lint run since the last check, so further code mutations are blocked until a verifier exits 0 (docs-only edits stay allowed). Run your project's build/test/lint tool with `exec_command` (e.g. `cargo check`, `go test`, `npm test`, or `pytest`), standalone or as a pure `&&` chain. A `|`, `;`, or `||` makes the exit status belong to another command, so it does not clear the gate; cap output with `max_output_tokens` instead.";
 /// Fix-up window granted after a failed verification attempt. A failed
 /// `cargo check` / `cargo nextest run` must not deadlock the turn: the agent
 /// needs a bounded number of edits to address the reported failure before
