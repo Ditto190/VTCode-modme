@@ -183,7 +183,14 @@ pub struct SubagentThreadSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubagentInputItem {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional label from the model-visible `type` field of a structured item.
+    /// `item_type` is accepted for payloads persisted before the rename.
+    #[serde(
+        default,
+        rename = "type",
+        alias = "item_type",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub item_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,

@@ -1030,6 +1030,28 @@ fn sanitize_subagent_input_items_drops_empty_fields() {
     assert!(items[0].name.is_none());
 }
 
+#[test]
+fn subagent_input_item_reads_schema_type_field() {
+    let item: SubagentInputItem =
+        serde_json::from_value(serde_json::json!({"type": "path", "path": "src/lib.rs"})).expect("item");
+    assert_eq!(item.item_type.as_deref(), Some("path"));
+    assert_eq!(serde_json::to_value(&item).expect("serialize")["type"], serde_json::json!("path"));
+
+    let legacy: SubagentInputItem =
+        serde_json::from_value(serde_json::json!({"item_type": "text", "text": "x"})).expect("legacy item");
+    assert_eq!(legacy.item_type.as_deref(), Some("text"));
+}
+
+#[test]
+fn agent_schema_reasoning_effort_enum_matches_parser() {
+    for value in vtcode_utility_tool_specs::SUBAGENT_REASONING_EFFORT_VALUES {
+        assert!(ReasoningEffortLevel::parse(value).is_some(), "schema value {value} must parse");
+    }
+    let schema = vtcode_utility_tool_specs::agent_parameters();
+    let listed = schema["properties"]["reasoning_effort"]["enum"].as_array().expect("enum").len();
+    assert_eq!(listed, vtcode_utility_tool_specs::SUBAGENT_REASONING_EFFORT_VALUES.len());
+}
+
 #[tokio::test]
 async fn controller_exposes_builtin_specs() {
     let temp = TempDir::new().expect("tempdir");
