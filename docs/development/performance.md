@@ -215,9 +215,15 @@ early startup work is observable without adding work to normal launches.
   (`cleanup_old_temp_spools`) runs in `spawn_blocking` so a cold user-cache
   `large-output/` directory
   never blocks first user I/O.
+- **Static-first typeable shell.** `initialize_session_shell` paints a typeable
+  TUI (bootstrap placeholder + built-in slash commands) *before*
+  `initialize_session_critical` builds `ToolRegistry`, discovers subagents, or
+  constructs the provider client. Keystrokes typed into the shell survive the
+  ready re-drive (no respawn). Structural ratchet: `shell::tests::shell_module_avoids_heavy_init_before_paint`.
 - **Interactive first frame uses a critical/hydrate split.** `initialize_session_critical`
-  builds only what the TUI needs to paint (provider client, one primary-agent
-  discovery pass, lightweight tool registry, resume history, cheap bootstrap).
+  builds the heavy session runtime (provider client, primary-agent discovery,
+  lightweight tool registry, resume history, cheap bootstrap) **after** the
+  typeable shell is painted.
   `initialize_session_ui` spawns the session; `hydrate_session_runtime` then
   finishes tool-catalog projection, system-prompt composition, CGP wiring,
   subagent controller creation, trajectory, dynamic context, and MCP reconfigure

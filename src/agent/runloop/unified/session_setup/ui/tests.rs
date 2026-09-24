@@ -1,20 +1,18 @@
 use super::super::{EditorOpenDispatcher, EditorOpenRequest};
 use super::*;
+use crate::agent::runloop::unified::session_setup::shell::{SharedExecSessions, build_session_event_callback};
+use crate::agent::runloop::unified::state;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::Notify;
-use vtcode_core::persistent_memory::MemoryCleanupStatus;
+use vtcode_core::llm::provider as uni;
+use vtcode_core::persistent_memory::{MemoryCleanupStatus, PersistentMemoryStatus};
+use vtcode_ui::tui::app::InlineEvent;
 
-fn test_exec_sessions() -> ExecSessionManager {
-    ExecSessionManager::new(
-        PathBuf::from("/tmp"),
-        vtcode_core::tools::registry::PtySessionManager::new(
-            PathBuf::from("/tmp"),
-            vtcode_core::config::PtyConfig::default(),
-        ),
-    )
+fn test_exec_sessions() -> SharedExecSessions {
+    Arc::new(std::sync::OnceLock::new())
 }
 
 fn sample_memory_status() -> PersistentMemoryStatus {

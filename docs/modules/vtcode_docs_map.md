@@ -1033,6 +1033,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Discovery Queries, Prompt Integration, Resource Loading, Storage Locations
   - **User Questions**: "What can you tell me about Skill Tool Usage?", "How does Discovery Queries work?", "How does Prompt Integration work?"
 
+- **File**: `docs/compose/spec/static-first-paint.md`
+  - **Content**: Static First Paint
+  - **Topics**: Report, [S1] Problem, [S2] Design, Tasks
+  - **User Questions**: "What can you tell me about Static First Paint?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/styling/styling_integration.md`
   - **Content**: Styling Integration: anstyle-crossterm
   - **Topics**: Overview, Architecture, Components, Usage Examples, Benefits

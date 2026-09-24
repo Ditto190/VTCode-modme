@@ -115,6 +115,10 @@ full agent runtime:
 
 Hydration and post-hydration hook execution are awaited before the interaction
 loop dispatches the first model turn. Setup failures still abort the session.
+Static-first typeable shell: `initialize_session_shell` spawns a typeable TUI
+before ToolRegistry/discovery/provider construction. Do not move heavy init
+back before `spawn_session_with_options` (see shell ratchet test).
+
 Maintenance never sits on first paint: interactive legacy path migration is
 fire-and-forget `spawn_blocking` before dispatch, harness session-store
 retention runs in `run_harness_retention` spawned after `initialize_session_ui`,
