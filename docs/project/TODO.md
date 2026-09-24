@@ -48,3 +48,19 @@ current status:
 allow changing /model and /effort mid-session without having to restart the session or wait for turns end.
 Ensure that the changes take effect immediately and that the system correctly reflects the updated settings.
 research how openai/codex implement it (use deepwiki mcp)
+
+===
+
+try to implement loading icon on terminal title: reference Claude Code implementation for guidance.
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 14.05.42.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 14.05.39.png'
+
+===
+
+for multi agent or multi background queue/process handling and UI in TUI.
+
+--> also consider implement a and more expanded background window for better visibility and management of multiple agents and background processes in the TUI when click/ on the background task indicator or relevant UI element.
+
+reference:
+
+'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 15.57.29.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 15.56.47.png'
