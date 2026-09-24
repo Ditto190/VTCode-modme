@@ -23,12 +23,12 @@
 <summary><strong>Contents</strong></summary>
 
 - [Overview](#overview)
-- [Why VT Code](#why-vt-code)
-- [Architecture](#architecture)
 - [Quick start](#quick-start)
   - [1. Install](#1-install)
   - [2. Configure](#2-configure)
   - [3. Run](#3-run)
+- [Why VT Code](#why-vt-code)
+- [Architecture](#architecture)
 - [What's inside](#whats-inside)
   - [Commands](#commands)
   - [Everyday recipes](#everyday-recipes)
@@ -80,6 +80,53 @@ Full docs catalog: [docs overview](./docs/README.md).
   [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o)
 
 </details>
+
+## Quick start
+
+### 1. Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
+```
+
+The installer also sets up `ripgrep` and `ast-grep` on macOS/Linux. Other
+methods from the [installation guide](./docs/installation/README.md):
+
+```bash
+brew trust vinhnx/tap
+brew install vinhnx/tap/vtcode
+# or, if you have Rust: cargo install vtcode
+```
+
+> [!NOTE]
+> Windows artifacts are best-effort and may lag behind macOS/Linux; see the
+> [installation guide](./docs/installation/README.md).
+
+### 2. Configure
+
+In your project, initialize workspace instructions and add a provider key:
+
+```bash
+cd path/to/your/project
+vtcode init                # scaffolds config + AGENTS.md; review before committing
+vtcode secret add openai   # stores an OpenAI API key in your OS keyring
+```
+
+Any provider works in place of `openai`. Env vars or a workspace `.env` also
+work; `vtcode login` covers supported OAuth providers. Credential options:
+[Getting started](./docs/user-guide/getting-started.md).
+
+> [!CAUTION]
+> Never commit API keys or put them in `vtcode.toml`.
+
+### 3. Run
+
+```bash
+vtcode   # open the interactive TUI in your project
+```
+
+Ask for a change, inspect the result, keep or discard it. For headless tasks
+and sessions, see [Commands](#commands).
 
 ## Why VT Code
 
@@ -148,53 +195,6 @@ sandboxing in `vtcode-safety`); the `ThreadEvent` contract in
 `vtcode-agent-plugins`; provider clients in `vtcode-llm`.
 
 Layer-by-layer details: [Architecture guide](./docs/ARCHITECTURE.md).
-
-## Quick start
-
-### 1. Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
-```
-
-The installer also sets up `ripgrep` and `ast-grep` on macOS/Linux. Other
-methods from the [installation guide](./docs/installation/README.md):
-
-```bash
-brew trust vinhnx/tap
-brew install vinhnx/tap/vtcode
-# or, if you have Rust: cargo install vtcode
-```
-
-> [!NOTE]
-> Windows artifacts are best-effort and may lag behind macOS/Linux; see the
-> [installation guide](./docs/installation/README.md).
-
-### 2. Configure
-
-In your project, initialize workspace instructions and add a provider key:
-
-```bash
-cd path/to/your/project
-vtcode init                # scaffolds config + AGENTS.md; review before committing
-vtcode secret add openai   # stores an OpenAI API key in your OS keyring
-```
-
-Any provider works in place of `openai`. Env vars or a workspace `.env` also
-work; `vtcode login` covers supported OAuth providers. Credential options:
-[Getting started](./docs/user-guide/getting-started.md).
-
-> [!CAUTION]
-> Never commit API keys or put them in `vtcode.toml`.
-
-### 3. Run
-
-```bash
-vtcode   # open the interactive TUI in your project
-```
-
-Ask for a change, inspect the result, keep or discard it. For headless tasks
-and sessions, see [Commands](#commands).
 
 ## What's inside
 
@@ -275,9 +275,8 @@ Hosts and deployment: [WebMCP user guide](./docs/user-guide/webmcp.md).
 
 ## Documentation
 
-Start with [Installation](./docs/installation/README.md) and
-[Getting Started](./docs/user-guide/getting-started.md); per-subcommand
-details are in the [command reference](./docs/user-guide/commands.md).
+Per-subcommand details are in the
+[command reference](./docs/user-guide/commands.md).
 
 | Layer   | Guides                                                                                                                                                                                                                                                                                   |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
