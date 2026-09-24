@@ -494,10 +494,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     crate::agent::runloop::unified::planning_workflow::persisted_plan_is_ready(&plan_state).await;
                 if !plan_ready {
                     let follow_up = tracker_continue::plan_mode_continue_follow_up();
-                    let directive = "Resume continuation: planning remains active via recoverable blocked handoff. \
-                         Continue read-only research/synthesis toward one compact `<proposed_plan>` now; \
-                         do not ask the user to resume and do not implement."
-                        .to_string();
+                    let directive = tracker_continue::plan_mode_resume_directive();
                     {
                         let messages = std::sync::Arc::make_mut(&mut runtime.state.messages);
                         messages.push(vtcode_core::llm::provider::Message::system(directive));
@@ -526,10 +523,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // Resume with open TODO/tracker steps: auto-queue one continuation
                 // turn instead of waiting for the user to type continue.
                 let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
-                let directive = format!(
-                    "Resume continuation: task_tracker still has incomplete steps: {}. \
-                     Execute the next concrete tracker step now; do not ask the user to resume.",
-                    incomplete.join(", ")
+                let directive = tracker_continue::tracker_continue_directive(
+                    tracker_continue::TRACKER_RESUME_DIRECTIVE_LABEL,
+                    &incomplete,
                 );
                 {
                     let messages = std::sync::Arc::make_mut(&mut runtime.state.messages);
@@ -1884,12 +1880,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     );
                     if should_queue_plan {
                         let follow_up = tracker_continue::plan_mode_continue_follow_up();
-                        let directive = format!(
-                            "{} planning remains active and no validated plan is ready for approval. \
-                             Continue read-only research/synthesis toward one compact `<proposed_plan>` now; \
-                             do not ask the user to resume and do not implement.",
-                            tracker_continue::PLAN_MODE_AUTO_CONTINUE_MARKER
-                        );
+                        let directive = tracker_continue::plan_mode_auto_continue_directive();
                         let budget_remaining = session_stats.plan_continuation_turns() < max_turns;
                         let queued = budget_remaining
                             && match runtime.try_queue_follow_up_input(follow_up) {
@@ -1940,11 +1931,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     } else if should_queue {
                         let incomplete = incomplete.unwrap_or_default();
                         let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
-                        let directive = format!(
-                            "Tracker auto-continue: incomplete steps remain: {}. \
-                             Execute the next concrete step now; do not ask the user to resume \
-                             and do not end with a status-only recap while work remains.",
-                            incomplete.join(", ")
+                        let directive = tracker_continue::tracker_continue_directive(
+                            tracker_continue::TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL,
+                            &incomplete,
                         );
                         let budget_remaining = session_stats.tracker_continuation_turns() < max_turns;
                         let queued = budget_remaining

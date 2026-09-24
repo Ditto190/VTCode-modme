@@ -79,6 +79,7 @@ use usage_accounting::{accumulate_turn_usage, estimate_session_costs, has_turn_u
 use vtcode_core::config::types::AgentConfig;
 use vtcode_core::core::agent::error_recovery::ErrorType;
 use vtcode_core::primary_agent::ActivePrimaryAgentState;
+use vtcode_core::tools::tool_intent::{GENERIC_VERIFIER_DESCRIPTION, VERIFIER_SHELL_FORM_NOTE};
 
 use crate::agent::runloop::mcp_events;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
@@ -126,17 +127,18 @@ pub(crate) const ASSISTANT_TEXT_RESPONSE_CAP_REASON: &str =
     "Turn blocked after repeated assistant responses reached the safety cap; the latest response was preserved.";
 pub(crate) const PENDING_VERIFICATION_BLOCK_REASON: &str =
     "Turn blocked after repeated unverified assistant responses; verification is still pending.";
-const PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX: &str = "The turn is blocked because verification is still pending \
-    after bounded autonomous recovery (harness auto-verification already tried). \
-    Inspection-only checks do not clear the verification gate; run your project's verifier standalone — e.g. \
-    `cargo check --locked`, `go test`, or `cargo nextest run` — or as a pure `&&` chain (no `|`, `;`, `||`; \
-    cap output with `max_output_tokens`) and let it exit 0, then type `continue` to resume with the gate preserved. \
-    A failed verifier grants ";
-const PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX: &str = " fix-up edits before re-verify is required.";
-
+/// Final response for a turn blocked on the verification gate. The block
+/// happens after bounded autonomous recovery whether or not a project verifier
+/// was detected, so it states only that recovery ran and names the verifier
+/// generically; the shell-form rule comes from [`VERIFIER_SHELL_FORM_NOTE`] so
+/// it cannot drift from the classifier.
 fn pending_verification_final_response() -> String {
     format!(
-        "{PENDING_VERIFICATION_FINAL_RESPONSE_PREFIX}{FAILED_VERIFICATION_FIX_ALLOWANCE}{PENDING_VERIFICATION_FINAL_RESPONSE_SUFFIX}"
+        "The turn is blocked because verification is still pending after bounded autonomous recovery. \
+         Inspection-only checks do not clear the verification gate. To clear it, run \
+         {GENERIC_VERIFIER_DESCRIPTION} with `exec_command`, standalone or as a pure `&&` chain of verifiers, \
+         and let it exit 0. {VERIFIER_SHELL_FORM_NOTE} Then type `continue` to resume with the gate preserved. \
+         A failed verifier grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits before the next verification."
     )
 }
 const CONTEXT_CAPACITY_FINAL_RESPONSE: &str = "The turn is blocked because context capacity or compaction failed. \
@@ -232,7 +234,7 @@ pub(crate) const COMPLETED_TURN_FALLBACK_RESPONSE: &str = "The turn stopped befo
 /// `<proposed_plan>` contract in `break_planning_recovery_with_handoff`
 /// without duplicating its detail (that path knows the synthesis failed;
 /// this path only knows no final was produced).
-pub(crate) const PLANNING_COMPLETED_FALLBACK_RESPONSE: &str = "Planning remains active, but this turn ended without a final plan synthesis. The research gathered above is preserved; do NOT re-read files already read this turn. Type `keep planning` (or re-state the request) and emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Each `verify:` must be a concrete command or observable check; valid examples are `verify: [cargo nextest run -p vtcode]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, and `verify: [grep -n 'symbol' src/file.rs]`, while `verify: [run checks]` and `verify: [git diff --check]` are invalid. No changes were applied.";
+pub(crate) const PLANNING_COMPLETED_FALLBACK_RESPONSE: &str = "Planning remains active, but this turn ended without a final plan synthesis. The research gathered above is preserved, so the next turn can reuse it without re-reading files. Type `keep planning` (or re-state the request) to continue; the next turn should emit one complete `<proposed_plan>` with `Action -> files: [path] -> verify: [command]` steps. Each `verify:` must be a concrete command or observable check; valid examples are `verify: [cargo nextest run -p vtcode]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, and `verify: [grep -n 'symbol' src/file.rs]`, while `verify: [run checks]` and `verify: [git diff --check]` are invalid. No changes were applied.";
 const COMPLETED_TURN_FALLBACK_REASON: &str = "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained.";
 /// Planning-specific variant of [`COMPLETED_TURN_FALLBACK_REASON`]. When a
 /// plan-mode turn ends via the generic fallback path, the generic reason hides
@@ -270,13 +272,13 @@ const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE: &str = "Recovery: tools are disabled, 
 /// Without this, the model treats the tool-free recovery pass as another
 /// research step and emits `<invoke>`/`<tool_call>` markup instead of a plan
 /// (observed in checkpoints turn_648 and turn_650).
-pub(crate) const POST_TOOL_RECOVERY_REASON_PLAN_MODE: &str = "Planning research completed, but final plan synthesis needs recovery. Tools are disabled. Produce the `<proposed_plan>` NOW from the context and tool outputs already in this conversation: include Summary, numbered Implementation Steps (one line each: `Action -> files: [src/parser.rs] -> verify: [cargo check --locked]`), Test Cases and Validation, and Assumptions and Defaults. Every step must name a concrete file, symbol, or behavior target and one concrete `verify:` command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, `verify: [grep -n 'symbol' src/file.rs]`, or `verify: [after launch confirm startup timing is reported]`. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; vague prose and generic VCS-only checks are rejected. Each comma-separated verify item must independently be concrete. Prefer file:symbol references, and do NOT emit any tool calls or tool-call markup. Keep any text outside the block to one line or omit it; it is ignored.";
+pub(crate) const POST_TOOL_RECOVERY_REASON_PLAN_MODE: &str = "Planning research completed, but final plan synthesis needs recovery. Tools are disabled for this pass. Produce the `<proposed_plan>` from the context and tool outputs already in this conversation: include Summary, numbered Implementation Steps (one line each: `Action -> files: [src/parser.rs] -> verify: [cargo check --locked]`), Test Cases and Validation, and Assumptions and Defaults. Every step must name a concrete file, symbol, or behavior target and one concrete `verify:` command or observable check. Valid examples: `verify: [cargo nextest run -p vtcode]`, `verify: [cargo check --locked]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, `verify: [grep -n 'symbol' src/file.rs]`, or `verify: [after launch confirm startup timing is reported]`. Invalid examples: `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`; vague prose and generic VCS-only checks are rejected. Each comma-separated verify item must independently be concrete. Prefer file:symbol references. Tool calls and tool-call markup are discarded in this pass, so the response should contain none. Keep any text outside the block to one line or omit it; it is ignored.";
 /// Plan-mode variant of [`RECOVERY_TOOL_CALL_RETRY_DIRECTIVE`]. The generic
 /// directive only says \"respond with plain text\"; in plan mode the agent must
 /// instead finalize the `<proposed_plan>` from gathered research, otherwise it
 /// loops emitting `<invoke>` research calls during the tool-free recovery pass.
-pub(crate) const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE_PLAN_MODE: &str = "Recovery: in plan mode, tools are disabled and you must finalize the plan. Emit the `<proposed_plan>` now from the research already gathered in this conversation — Summary, numbered steps on single lines (`Action -> files: [src/parser.rs] -> verify: [cargo check --locked]`), Validation, Assumptions — every step with a concrete file, symbol, or behavior target and one concrete `verify:` command or observable check. Valid examples are `verify: [cargo nextest run -p vtcode]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, and `verify: [grep -n 'symbol' src/file.rs]`; invalid examples are `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`. Each comma-separated verify item must independently be concrete. At most one intro line may appear outside the block; emit no tool calls and no `<tool_call>`/`<invoke>`/`<function=...>` markup.";
-const APPROVED_PLAN_STALE_PAUSE_RECOVERY_DIRECTIVE: &str = "Approved-plan execution recovery: the previous response incorrectly claimed that tools were disabled or implementation was paused. The planning approval is complete and the write-capable build agent is active. Continue with the next concrete implementation action now; use task_tracker and execute an edit or verification command. Do not respond with a pause/status message and do not ask for another confirmation.";
+pub(crate) const RECOVERY_TOOL_CALL_RETRY_DIRECTIVE_PLAN_MODE: &str = "Recovery: in plan mode, tools are disabled for this pass, so the next step is to finalize the plan. Emit the `<proposed_plan>` from the research already gathered in this conversation — Summary, numbered steps on single lines (`Action -> files: [src/parser.rs] -> verify: [cargo check --locked]`), Validation, Assumptions — every step with a concrete file, symbol, or behavior target and one concrete `verify:` command or observable check. Valid examples are `verify: [cargo nextest run -p vtcode]`, `verify: [rg -n 'symbol' src/file.rs]`, `verify: [sed -n '1,40p' docs/file.md]`, and `verify: [grep -n 'symbol' src/file.rs]`; invalid examples are `verify: [run checks]`, `verify: [check later]`, and `verify: [git diff --check]`. Each comma-separated verify item must independently be concrete. At most one intro line may appear outside the block; tool calls and `<tool_call>`/`<invoke>`/`<function=...>` markup are discarded, so the response should contain none.";
+const APPROVED_PLAN_STALE_PAUSE_RECOVERY_DIRECTIVE: &str = "Approved-plan execution recovery: the previous response stated that tools were disabled or implementation was paused, but the planning approval is complete and the write-capable build agent is active. The next step is the next concrete implementation action: use task_tracker and run an edit or verification command. No further confirmation is needed, and a pause or status-only message does not advance the approved plan.";
 
 fn latest_final_assistant_response(history: &[uni::Message], turn_history_start_len: usize) -> Option<String> {
     history
@@ -794,7 +796,7 @@ impl<'a> TurnLoopContext<'a> {
     }
 }
 
-pub(crate) const POST_TOOL_RESUME_DIRECTIVE: &str = "Previous turn already completed tool execution. Reuse the latest tool outputs in history instead of rerunning the same exploration. If those tool outputs include `critical_note`, `hint`, `next_action`, `fallback_tool`, `fallback_tool_args`, or `rerun_hint`, follow that guidance first. Do NOT re-read files that were already read in the previous turn — their content is in the conversation history above. Synthesize a plan or answer from what is already gathered.";
+pub(crate) const POST_TOOL_RESUME_DIRECTIVE: &str = "Previous turn already completed tool execution. Reuse the latest tool outputs in history instead of rerunning the same exploration. If those tool outputs include `critical_note`, `hint`, `next_action`, `fallback_tool`, `fallback_tool_args`, or `rerun_hint`, follow that guidance first. Files read in the previous turn are already in the conversation history above, so re-reading them adds no information. Synthesize a plan or answer from what is already gathered.";
 pub(crate) const POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE: &str = "The previous model follow-up failed after tool execution. The older context will be compacted before this retry. Reuse the completed tool outputs above, do not repeat read-only exploration, and continue the user's request with any required write or verification tools. Only finish after the requested work is confirmed; do not claim success from an unverified plan.";
 
 // For `TurnLoopContext`, we will reuse the generic `handle_pipeline_output` via an adapter below.

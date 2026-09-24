@@ -634,10 +634,16 @@ fn blocked_turn_final_response_explains_pending_verification() {
 
     assert!(response.contains("Inspection-only checks do not clear the verification gate"));
     assert!(response.contains("cargo check --locked"));
-    assert!(response.contains("cargo nextest run"));
+    assert!(response.contains(vtcode_core::tools::tool_intent::GENERIC_VERIFIER_DESCRIPTION));
+    assert!(response.contains(vtcode_core::tools::tool_intent::VERIFIER_SHELL_FORM_NOTE));
     assert!(response.contains("autonomous recovery"));
     assert!(response.contains("max_output_tokens"));
     assert!(response.contains("continue"));
+    // The block fires whether or not a project verifier was detected, so the
+    // notice must not claim the harness already ran one, and must not restate
+    // a stricter pipe rule than the classifier applies.
+    assert!(!response.contains("already tried"), "{response}");
+    assert!(!response.contains("no `|`"), "{response}");
 }
 
 #[test]

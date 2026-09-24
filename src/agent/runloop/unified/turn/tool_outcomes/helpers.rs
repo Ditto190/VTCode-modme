@@ -275,9 +275,28 @@ pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
     let joined = incomplete.join(", ");
     format!(
         "The task tracker still has incomplete steps: {joined}. This follow-up is the harness resuming \
-         the work, so do not ask the user to resume; continue with the next step using tools and update \
-         task_tracker as steps complete. A status-only recap does not advance the tracker. End the turn \
-         when the tracker is complete, or when a user decision or a permission/policy block stops progress."
+         the work, so no user reply is needed. The next step is to continue with the next incomplete step \
+         using tools and update task_tracker as steps complete. A status-only recap does not advance the \
+         tracker. The turn can end when the tracker is complete, or when a user decision or a \
+         permission/policy block stops progress."
+    )
+}
+
+/// Label of the system directive paired with a session-resume tracker continuation.
+pub(crate) const TRACKER_RESUME_DIRECTIVE_LABEL: &str = "Resume continuation";
+/// Label of the system directive paired with an in-session tracker auto-continue.
+pub(crate) const TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL: &str = "Tracker auto-continue";
+
+/// System directive paired with a queued tracker continuation. Both the
+/// session-resume and in-session paths share this wording so the stated
+/// consequence (the harness resumed; a recap does not advance the tracker)
+/// cannot drift between them.
+pub(crate) fn tracker_continue_directive(label: &str, incomplete: &[String]) -> String {
+    format!(
+        "{label}: task_tracker still has incomplete steps: {}. The harness queued this continuation, so no \
+         user reply is needed. The next step is the next concrete tracker step; a status-only recap does not \
+         advance the tracker while work remains.",
+        incomplete.join(", ")
     )
 }
 
@@ -421,7 +440,8 @@ pub(crate) const MAX_PLAN_EMPTY_FALLBACK_AUTO_CONTINUE: u8 = 2;
 /// the gate stays pure (no cross-module constant import) and robust to
 /// surrounding file-list appends.
 pub(crate) fn is_plan_empty_fallback_text(text: &str) -> bool {
-    text.contains("without a final plan synthesis") && text.contains("do NOT re-read files already read this turn")
+    text.contains("without a final plan synthesis")
+        && text.contains("the next turn can reuse it without re-reading files")
 }
 
 pub(crate) fn should_queue_plan_mode_auto_continue(
@@ -537,12 +557,38 @@ pub(crate) fn plan_progress_line(
 /// must share one literal instead of drifting.
 pub(crate) const PLAN_MODE_AUTO_CONTINUE_MARKER: &str = "Plan-mode auto-continue:";
 
+/// Shared tail of every plan-mode continuation message. States the
+/// consequence (planning stays read-only, the harness resumed the turn, code
+/// changes wait for approval) and the next step. It deliberately contains the
+/// stay phrase `continue planning` and no implementation cue, so even without
+/// the [`PLAN_MODE_AUTO_CONTINUE_MARKER`] guard it could never read as an
+/// exit-and-implement intent.
+const PLAN_MODE_CONTINUE_DIRECTIVE_TAIL: &str = "Planning stays active and read-only, so the next step is to continue \
+planning: read-only research and synthesis toward one compact `<proposed_plan>`. The harness queued this \
+continuation, so no user reply is needed, and code changes wait for plan approval.";
+
 /// Follow-up prompt for plan-mode auto-continue turns.
 pub(crate) fn plan_mode_continue_follow_up() -> String {
     format!(
-        "{PLAN_MODE_AUTO_CONTINUE_MARKER} planning is still active and no validated persisted plan is ready for approval. \
-Continue read-only research/synthesis toward one compact `<proposed_plan>` now. \
-Do not ask the user to resume, do not implement, and do not auto-exit planning."
+        "{PLAN_MODE_AUTO_CONTINUE_MARKER} no validated persisted plan is ready for approval yet. \
+{PLAN_MODE_CONTINUE_DIRECTIVE_TAIL}"
+    )
+}
+
+/// System directive paired with an in-session plan-mode auto-continue.
+pub(crate) fn plan_mode_auto_continue_directive() -> String {
+    format!(
+        "{PLAN_MODE_AUTO_CONTINUE_MARKER} planning remains active and no validated plan is ready for approval. \
+{PLAN_MODE_CONTINUE_DIRECTIVE_TAIL}"
+    )
+}
+
+/// System directive paired with a plan-mode continuation queued on session
+/// resume after a recoverable blocked handoff.
+pub(crate) fn plan_mode_resume_directive() -> String {
+    format!(
+        "Resume continuation: planning remains active after a recoverable blocked handoff. \
+{PLAN_MODE_CONTINUE_DIRECTIVE_TAIL}"
     )
 }
 
@@ -576,7 +622,21 @@ mod tracker_continue_tests {
             tracker_continue_follow_up(&["#2 change (pending)".to_string(), "#3 verify (blocked)".to_string()]);
         assert!(prompt.contains("#2 change (pending)"));
         assert!(prompt.contains("#3 verify (blocked)"));
-        assert!(prompt.contains("do not ask the user to resume"));
+        assert!(prompt.contains("no user reply is needed"));
+        assert!(prompt.contains("A status-only recap does not advance the tracker"));
+    }
+
+    #[test]
+    fn tracker_continue_directive_is_shared_calm_prose() {
+        let incomplete = ["#2 change (pending)".to_string(), "#3 verify (pending)".to_string()];
+        for label in [TRACKER_RESUME_DIRECTIVE_LABEL, TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL] {
+            let directive = tracker_continue_directive(label, &incomplete);
+            assert!(directive.starts_with(&format!("{label}: task_tracker still has incomplete steps:")));
+            assert!(directive.contains("#2 change (pending), #3 verify (pending)"));
+            assert!(directive.contains("no user reply is needed"));
+            assert!(directive.contains("status-only recap does not advance the tracker"));
+            assert!(!directive.contains("do not"), "directive states consequences, not prohibitions: {directive}");
+        }
     }
 
     #[test]
@@ -661,8 +721,12 @@ mod tracker_continue_tests {
 
     #[test]
     fn detects_plan_empty_fallback_text() {
-        let empty = "Planning remains active, but this turn ended without a final plan synthesis. The research gathered above is preserved; do NOT re-read files already read this turn. Type `keep planning`.";
+        let empty = "Planning remains active, but this turn ended without a final plan synthesis. The research gathered above is preserved, so the next turn can reuse it without re-reading files. Type `keep planning`.";
         assert!(is_plan_empty_fallback_text(empty));
+        // The gate must recognize the production fallback text, not only the fixture.
+        assert!(is_plan_empty_fallback_text(
+            crate::agent::runloop::unified::turn::turn_loop::PLANNING_COMPLETED_FALLBACK_RESPONSE
+        ));
         assert!(!is_plan_empty_fallback_text("Planning turn ended via recovery fallback without confirming plan."));
         assert!(!is_plan_empty_fallback_text(""));
     }
@@ -706,11 +770,22 @@ mod tracker_continue_tests {
     }
 
     #[test]
-    fn plan_mode_continue_follow_up_forbids_resume_and_implement() {
-        let prompt = plan_mode_continue_follow_up();
-        assert!(prompt.contains("Do not ask the user to resume"));
-        assert!(prompt.contains("do not implement"));
-        assert!(prompt.contains("<proposed_plan>"));
+    fn plan_mode_continue_messages_keep_planning_read_only_without_a_user_nudge() {
+        for prompt in [
+            plan_mode_continue_follow_up(),
+            plan_mode_auto_continue_directive(),
+            plan_mode_resume_directive(),
+        ] {
+            assert!(prompt.contains("no user reply is needed"), "{prompt}");
+            assert!(prompt.contains("read-only"), "{prompt}");
+            assert!(prompt.contains("code changes wait for plan approval"), "{prompt}");
+            assert!(prompt.contains("<proposed_plan>"), "{prompt}");
+            let normalized = vtcode_core::planning::normalize_plan_intent(&prompt);
+            assert!(vtcode_core::planning::matches_stay_intent(&normalized), "{prompt}");
+            assert!(!vtcode_core::planning::contains_implementation_cue(&normalized), "{prompt}");
+        }
+        assert!(plan_mode_continue_follow_up().starts_with(PLAN_MODE_AUTO_CONTINUE_MARKER));
+        assert!(plan_mode_auto_continue_directive().starts_with(PLAN_MODE_AUTO_CONTINUE_MARKER));
     }
 
     #[test]
