@@ -86,6 +86,12 @@ pub(crate) fn build_thinking_config(
                 return Ok((Some(ThinkingConfig::Adaptive { display }), None));
             }
             AnthropicThinkingModeOverride::ManualBudget(budget) => {
+                // Profiled models without manual-budget support (every
+                // current Claude 5.x model) reject `budget_tokens` with a
+                // 400, so an explicit budget is served as adaptive thinking.
+                if profile.is_some_and(|p| !p.supports_manual_budget) {
+                    return Ok((Some(ThinkingConfig::Adaptive { display }), None));
+                }
                 return Ok((manual_thinking_config(budget, request.max_tokens, display), None));
             }
             AnthropicThinkingModeOverride::Inherit => {}
@@ -172,6 +178,77 @@ mod tests {
             build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
 
         assert!(matches!(thinking, Some(ThinkingConfig::Adaptive { .. })));
+    }
+
+    fn manual_budget_override_request(model: &str, budget: u32) -> LLMRequest {
+        LLMRequest {
+            model: model.to_string(),
+            anthropic_request_overrides: Some(crate::provider::AnthropicRequestOverrides {
+                thinking_mode: AnthropicThinkingModeOverride::ManualBudget(budget),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn manual_budget_override_becomes_adaptive_for_opus_5_5() {
+        let request = manual_budget_override_request(anthropic::CLAUDE_OPUS_5_5, 4096);
+        let config = AnthropicConfig::default();
+        let (thinking, reasoning) =
+            build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+
+        assert!(matches!(thinking, Some(ThinkingConfig::Adaptive { display: None })), "got {thinking:?}");
+        assert!(reasoning.is_none());
+    }
+
+    #[test]
+    fn manual_budget_override_becomes_adaptive_for_every_profiled_model() {
+        let config = AnthropicConfig::default();
+        for model in [
+            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
+            anthropic::CLAUDE_OPUS_5_5,
+            anthropic::CLAUDE_FABLE_5,
+            anthropic::CLAUDE_FABLE_5_1,
+        ] {
+            let request = manual_budget_override_request(model, 8192);
+            let (thinking, _) =
+                build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+            assert!(
+                matches!(thinking, Some(ThinkingConfig::Adaptive { .. })),
+                "{model} must not receive budget_tokens, got {thinking:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn manual_budget_override_keeps_display_when_downgraded_to_adaptive() {
+        let mut request = manual_budget_override_request(anthropic::CLAUDE_OPUS_5_5, 4096);
+        if let Some(overrides) = request.anthropic_request_overrides.as_mut() {
+            overrides.thinking_display = AnthropicThinkingDisplayOverride::Summarized;
+        }
+        let config = AnthropicConfig::default();
+        let (thinking, _) =
+            build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+
+        assert!(
+            matches!(thinking, Some(ThinkingConfig::Adaptive { display: Some(ThinkingDisplay::Summarized) })),
+            "got {thinking:?}"
+        );
+    }
+
+    #[test]
+    fn manual_budget_override_is_kept_for_unprofiled_models() {
+        let request = manual_budget_override_request("claude-unlisted-model", 4096);
+        let config = AnthropicConfig::default();
+        let (thinking, _) =
+            build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
+
+        assert!(
+            matches!(thinking, Some(ThinkingConfig::Enabled { budget_tokens: 4096, .. })),
+            "got {thinking:?}"
+        );
     }
 
     #[test]
