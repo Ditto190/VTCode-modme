@@ -1129,7 +1129,6 @@ mod request_builder_tests {
             .into(),
             coding_agent_settings: Some(Box::new(crate::provider::CodingAgentSettings {
                 long_context_optimization: true,
-                ..Default::default()
             })),
             ..Default::default()
         };
