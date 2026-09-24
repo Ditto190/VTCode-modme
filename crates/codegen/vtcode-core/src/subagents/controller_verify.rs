@@ -111,29 +111,12 @@ impl SubagentController {
             Some(entry) if entry.status == SubagentStatus::Completed => {
                 let summary = entry.summary.unwrap_or_default();
                 let issues = extract_issues_from_summary(&summary);
-                let lower = summary.to_lowercase();
-
-                // Positive approval: verifier must explicitly state approval.
-                // Ambiguous or unclear results default to rejected (fail-closed).
-                let explicitly_approved = lower.contains("approved")
-                    || lower.contains("safe to merge")
-                    || lower.contains("no issues found")
-                    || lower.contains("looks correct")
-                    || lower.contains("verification passed");
-                let explicitly_rejected = lower.contains("reject")
-                    || lower.contains("denied")
-                    || lower.contains("unsafe")
-                    || lower.contains("blocked")
-                    || lower.contains("dangerous")
-                    || lower.contains("malicious")
-                    || lower.contains("vulnerability");
-
-                // An explicit decision line wins; keyword heuristics cover
-                // verifiers that do not follow the requested format.
+                // An explicit decision line wins (a non-clean value fails
+                // closed); keyword heuristics cover verifiers that do not follow
+                // the requested format. Any ISSUE line blocks approval.
                 let approved = match parse_verifier_decision(&summary) {
                     Some(decision) => decision && issues.is_empty(),
-                    None if explicitly_rejected => false,
-                    None => explicitly_approved && issues.is_empty(),
+                    None => heuristic_verifier_approval(&summary, &issues),
                 };
 
                 Ok(VerificationResult { approved, issues, reasoning: summary })

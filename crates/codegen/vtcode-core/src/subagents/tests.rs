@@ -3230,5 +3230,35 @@ fn parse_verifier_decision_reads_explicit_decision_line() {
         "prose keywords must not override the decision line"
     );
     assert_eq!(parse_verifier_decision("approved, no issues found"), None);
-    assert_eq!(parse_verifier_decision("Decision: pending"), None);
+    assert_eq!(parse_verifier_decision("Decision: APPROVED."), Some(true));
+}
+
+#[test]
+fn parse_verifier_decision_fails_closed_on_unclear_or_negated_value() {
+    for summary in [
+        "Decision: NOT APPROVED",
+        "Decision: not approve",
+        "**Decision:** Not Approved",
+        "Decision: approved? no",
+        "Decision: can't approve",
+        "Decision: pending",
+        "Decision:",
+        "Decision: disapproved",
+    ] {
+        assert_eq!(parse_verifier_decision(summary), Some(false), "{summary:?}");
+    }
+    assert_eq!(
+        parse_verifier_decision("Decision: APPROVED\nDecision: NOT APPROVED"),
+        Some(false),
+        "the last decision line wins"
+    );
+}
+
+#[test]
+fn heuristic_verifier_approval_rejects_negated_approval() {
+    assert!(!heuristic_verifier_approval("The change is not approved.", &[]));
+    assert!(!heuristic_verifier_approval("I do not approve this change", &[]));
+    assert!(!heuristic_verifier_approval("Approved.", &["ISSUE: a.rs:1 bug".to_string()]));
+    assert!(!heuristic_verifier_approval("Unclear; could not inspect the files.", &[]));
+    assert!(heuristic_verifier_approval("Approved, no issues found.", &[]));
 }
