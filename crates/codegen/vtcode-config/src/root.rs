@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow, bail};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
+use crate::accessibility::reduce_motion_preference;
 use crate::status_line::StatusLineConfig;
 use crate::terminal_title::TerminalTitleConfig;
 use vtcode_commons::ui_protocol::DiffPreviewMode;
@@ -603,7 +604,10 @@ fn default_screen_reader_mode() -> bool {
 }
 
 fn default_reduce_motion_mode() -> bool {
-    env_bool_var("VTCODE_REDUCE_MOTION").unwrap_or(false)
+    crate::accessibility::resolve_reduce_motion_default(
+        env_bool_var("VTCODE_REDUCE_MOTION"),
+        reduce_motion_preference(),
+    )
 }
 
 fn default_reduce_motion_keep_progress_animation() -> bool {
@@ -743,10 +747,13 @@ mod tests {
             assert!(!explicit_false.reduce_motion_mode);
         });
 
-        let ui: UiConfig = toml::from_str("reduce_motion_mode = true\nreduce_motion_keep_progress_animation = true")
-            .expect("explicit reduce-motion settings should parse");
-        assert!(ui.reduce_motion_mode);
-        assert!(ui.reduce_motion_keep_progress_animation);
+        with_env_var("VTCODE_REDUCE_MOTION", Some("0"), || {
+            let explicit_true: UiConfig =
+                toml::from_str("reduce_motion_mode = true\nreduce_motion_keep_progress_animation = true")
+                    .expect("explicit true should parse while the environment default is disabled");
+            assert!(explicit_true.reduce_motion_mode);
+            assert!(explicit_true.reduce_motion_keep_progress_animation);
+        });
     }
 
     #[test]

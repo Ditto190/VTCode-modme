@@ -32,7 +32,11 @@ Composer triggers (`#`, `/`, `!`, `@`, `@agent-<name>`, `Alt+P`) are tabulated i
 Set `ui.reduce_motion_mode = true` to keep progress labels visible while
 stopping shimmer and spinner animation. You can also enable it for a run with
 `VTCODE_REDUCE_MOTION=1 vtcode` when `ui.reduce_motion_mode` is omitted from
-the configuration. An explicit setting takes precedence. Background-task and
+the configuration. If the variable is unset, VT Code uses the operating
+system's accessibility preference when supported: Windows and macOS system
+settings, plus best-effort GNOME, KDE Plasma, and XFCE settings on Linux. An
+explicit `true` or `false` setting takes precedence over both. Unknown or
+unavailable system settings default to `false`. Background-task and
 local-agent status labels remain visible as static text, and transcript
 file-operation markers remain static.
 
