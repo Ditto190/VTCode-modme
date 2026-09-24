@@ -880,8 +880,8 @@ impl ToolRegistry {
             Err(violation) => {
                 let reentry_count = violation.tool_reentry_count + 1;
                 let error_message = format!(
-                    "REENTRANCY GUARD: Tool '{}' was blocked to prevent recursive execution.\n\n\
-                     ACTION REQUIRED: DO NOT retry this same tool call without changing control flow.\n\
+                    "Reentrancy guard: tool '{}' is already running in this call stack, so this recursive call was blocked. \
+                     Repeating the same call is blocked the same way; change the control flow or use a different tool.\n\
                      Current stack depth: {}. Re-entry count for this tool in the current task: {}.\n\
                      Stack trace: {}",
                     display_name, violation.stack_depth, reentry_count, violation.stack_trace
@@ -1204,9 +1204,9 @@ impl ToolRegistry {
                             obj.insert("tool".into(), json!(display_name));
                             let reused_spooled = obj.get("spool_path").and_then(|v| v.as_str()).is_some();
                             let note = if reused_spooled {
-                                "Loop detected: this identical read-only call has been repeated. The full output is in the spool file. STOP making this same tool call -- use the spool file or conversation history. Calling this tool again will be blocked."
+                                "Loop detected: this identical read-only call has been repeated, so the earlier result was reused. The full output is in the spool file and the conversation history; further repeats return an error instead."
                             } else {
-                                "Loop detected: this identical read-only call has been repeated with no new information. STOP -- the result is already available in your conversation history. Do NOT call this tool again with the same arguments."
+                                "Loop detected: this identical read-only call has been repeated with no new information, so the earlier result was reused. It is already in the conversation history; further repeats return an error instead."
                             };
                             obj.insert("loop_detected_note".into(), json!(note));
                         }
@@ -1233,7 +1233,7 @@ impl ToolRegistry {
                     obj.insert("tool".into(), json!(display_name));
                     obj.insert(
                         "next_action".into(),
-                        json!("STOP calling this tool. Use the data already in your conversation history. If you need different information, use a DIFFERENT tool or approach."),
+                        json!("Identical calls to this tool are blocked. Use the data already in the conversation history; for different information, change the arguments or use another tool."),
                     );
                 }
 

@@ -52,8 +52,8 @@ pub(crate) fn tool_denial_diagnostic(tool_name: &str) -> Option<serde_json::Valu
         // `request_user_input` is permanently unavailable in non-interactive
         // runtimes (e.g. headless sessions). Without this directive, the model
         // sees a generic "execution denied by policy" and retries the call
-        // across turns — checkpoint turn_724 shows 7 retries. The explicit
-        // STOP instruction tells the model to proceed without asking the user.
+        // across turns — checkpoint turn_724 shows 7 retries. Stating that the
+        // denial is permanent tells the model to proceed without asking the user.
         // The `present_plan` directive tells the model to surface the plan it
         // has gathered and offer a simple yes/no/edit HITL choice in plain text
         // — the user replies in the next turn and `detect_planning_intent`
@@ -62,7 +62,7 @@ pub(crate) fn tool_denial_diagnostic(tool_name: &str) -> Option<serde_json::Valu
         "request_user_input" => Some(serde_json::json!({
             "cause": "The 'request_user_input' tool is permanently unavailable in this runtime (non-interactive session or the inline UI is not supported).",
             "impact": "You cannot ask the user clarifying questions via a modal in this session.",
-            "directive": "STOP calling request_user_input. Do not retry it — the denial is permanent for this session.",
+            "directive": "request_user_input is unavailable for the rest of this session; every further call returns the same denial.",
             "present_plan": "If you have a clarifying question, present it to the user in plain text and end your turn — the user's next message will answer it. Otherwise, finalize the plan from the evidence already gathered and present it to the user in plain text. End your message by offering a simple choice: type `yes` (or `implement`) to start implementation, `no` to abandon, or `edit` (or `keep planning`) to refine — if the user picks edit, they will describe what to revise in their next message."
         })),
         _ => None,
@@ -121,6 +121,10 @@ fn fallback_args_preview_and_inline(fallback_tool_args: &Option<serde_json::Valu
     (Some(preview), should_inline_fallback_args(&serialized))
 }
 
+/// Shared by the unstructured and structured `preview_exhaustion_gate` arms.
+const PREVIEW_EXHAUSTION_NEXT_ACTION: &str = "Inspections return hidden stubs for the rest of this turn, so a retry at any scope returns another stub. \
+Edit from visible evidence, run one verifier, page a spool in small ranges, or synthesize.";
+
 fn failure_guidance(error_msg: &str, failure_kind: &'static str) -> (&'static str, bool, &'static str) {
     if failure_kind == "timeout" {
         return ("timeout", true, "Retry with smaller scope or higher timeout.");
@@ -130,7 +134,7 @@ fn failure_guidance(error_msg: &str, failure_kind: &'static str) -> (&'static st
         return (
             "repeated_read_family",
             false,
-            "STOP: You already have this content in your conversation history. Synthesize an answer from the data above. Do NOT call any more tools.",
+            "Further reads of this content are blocked for the rest of this turn; it is already in the conversation history. Continue from that output: edit, run a verifier, or answer.",
         );
     }
 
@@ -146,7 +150,7 @@ fn failure_guidance(error_msg: &str, failure_kind: &'static str) -> (&'static st
         return (
             "execution_failure",
             true,
-            "STOP: further inspections return hidden stubs this turn. Do NOT retry or narrow the scope. Edit from visible evidence, run one verifier, page a spool in small ranges, or synthesize.",
+            PREVIEW_EXHAUSTION_NEXT_ACTION,
         );
     }
 
@@ -179,7 +183,7 @@ fn structured_failure_guidance(
         return (
             "execution_failure",
             error.is_recoverable,
-            "STOP: further inspections return hidden stubs this turn. Do NOT retry or narrow the scope. Edit from visible evidence, run one verifier, page a spool in small ranges, or synthesize.",
+            PREVIEW_EXHAUSTION_NEXT_ACTION,
         );
     }
 
@@ -493,8 +497,8 @@ mod tests {
             .and_then(serde_json::Value::as_str)
             .expect("diagnostic should have a directive field");
         assert!(
-            directive.contains("STOP") && directive.contains("Do not retry"),
-            "directive must explicitly tell the model to stop retrying: {directive}"
+            directive.contains("rest of this session") && directive.contains("same denial"),
+            "directive must state that the denial is permanent: {directive}"
         );
         let present_plan = diagnostic
             .get("present_plan")

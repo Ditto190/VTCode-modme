@@ -6,6 +6,7 @@ use vtcode_core::exec_policy::AskForApproval;
 use vtcode_core::primary_agent::primary_agent_allows_tool;
 use vtcode_core::tools::registry::ToolExecutionError;
 use vtcode_core::tools::registry::labels::tool_action_label;
+use vtcode_core::tools::tool_intent::VERIFIER_SHELL_FORM_NOTE;
 use vtcode_core::utils::ansi::MessageStyle;
 
 use super::error_handling::tool_denial_diagnostic;
@@ -391,17 +392,17 @@ pub(super) fn apply_reused_read_only_loop_metadata(obj: &mut serde_json::Map<Str
     let (note, next_action) = if has_meaningful_content {
         (
             "Loop detected: same result returned. The content is in the result above \u{2014} use it directly.",
-            "The tool result content is already in this response. Synthesize your answer from the available data.",
+            "The tool result content is already in this response. Continue from the available data.",
         )
     } else if has_spool_path {
         (
-            "Loop detected: same result returned. The full output was previously spooled to disk. Read the spool_path file if you need the content, or use data from your conversation history. Do NOT retry the same tool call.",
-            "Read the spool_path file for the full output, or use data from conversation history. Do not make more tool calls.",
+            "Loop detected: same result returned. The full output was previously spooled to disk; repeating the call returns it again.",
+            "Read the spool_path file for the full output, or use data already in the conversation history.",
         )
     } else {
         (
-            "Loop detected: same result returned. The previous execution produced no output. Use the data already in your conversation. Do NOT retry.",
-            "Use data from conversation history. Do not make more tool calls.",
+            "Loop detected: same result returned. The previous execution produced no output, and repeating it will not change that.",
+            "Use data already in the conversation history, or change the approach.",
         )
     };
 
@@ -671,6 +672,35 @@ async fn handle_tool_call_inner<'a, 'b, 'tool>(
     Ok(None)
 }
 
+/// Model-facing rejection for a mutation attempted while the
+/// anti-blind-editing gate is pending. Shared by the guard-response and the
+/// direct-rejection paths so both carry the same gate description.
+fn verification_required_payload(
+    tool_name: &str,
+    pending_mutations: Option<usize>,
+    fix_edits_remaining: u8,
+    message: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "success": false,
+        "blocked": true,
+        "tool_name": tool_name,
+        "failure_kind": "anti_blind_editing_verification_required",
+        "verification_required": true,
+        "pending_mutations": pending_mutations,
+        "pending_mutation_count_known": pending_mutations.is_some(),
+        "fix_edits_remaining": fix_edits_remaining,
+        "error": message,
+        "next_action": format!(
+            "Workspace mutations are blocked until a verifier exits 0. Run your project's build/test/lint command \
+             (e.g. `cargo check --locked`, `go test ./...`, `npm test`, or `pytest -q`) with `exec_command`, standalone or as a \
+             pure `&&` chain of verifiers. {VERIFIER_SHELL_FORM_NOTE} A failed check grants \
+             {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation before the next verification is required."
+        ),
+        "retryable": true,
+    })
+}
+
 pub(crate) fn block_mutation_until_verification(
     ctx: &mut TurnProcessingContext<'_>,
     repeated_tool_attempts: &mut super::helpers::LoopTracker,
@@ -737,19 +767,12 @@ pub(crate) fn block_mutation_until_verification(
                 tool_call_id,
                 Some(tool_name),
                 Some(args_val),
-                serde_json::json!({
-            "success": false,
-            "blocked": true,
-            "tool_name": tool_name,
-            "failure_kind": "anti_blind_editing_verification_required",
-            "verification_required": true,
-            "pending_mutations": pending_mutations,
-            "pending_mutation_count_known": pending_mutations.is_some(),
-            "fix_edits_remaining": repeated_tool_attempts.fix_edits_remaining,
-            "error": message,
-            "next_action": format!("Run one verification command with exec_command to exit 0 before another workspace mutation: your project's build/test/lint tool (e.g. `cargo check --locked`, `go test`, `npm test`, or `pytest`). A pure `&&` chain of verifiers also clears the gate. Do not pipe verifiers through `| head` and do not join with `;`/`||`/`|`; use `max_output_tokens` instead of pipes. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation, then requires re-verify."),
-            "retryable": true,
-                })
+                verification_required_payload(
+                    tool_name,
+                    pending_mutations,
+                    repeated_tool_attempts.fix_edits_remaining,
+                    &message,
+                )
                 .to_string(),
             );
         }
@@ -760,20 +783,8 @@ pub(crate) fn block_mutation_until_verification(
         tool_call_id,
         Some(tool_name),
         Some(args_val),
-        serde_json::json!({
-            "success": false,
-            "blocked": true,
-            "tool_name": tool_name,
-            "failure_kind": "anti_blind_editing_verification_required",
-            "verification_required": true,
-            "pending_mutations": pending_mutations,
-            "pending_mutation_count_known": pending_mutations.is_some(),
-            "fix_edits_remaining": repeated_tool_attempts.fix_edits_remaining,
-            "error": message,
-            "next_action": format!("Run one verification command with exec_command to exit 0 before another workspace mutation: your project's build/test/lint tool (e.g. `cargo check --locked`, `go test`, `npm test`, or `pytest`). A pure `&&` chain of verifiers also clears the gate. Do not pipe verifiers through `| head` and do not join with `;`/`||`/`|`; use `max_output_tokens` instead of pipes. Failed or piped checks do not clear the gate; a failed check grants {FAILED_VERIFICATION_FIX_ALLOWANCE} fix-up edits plus one diagnostic explanation, then requires re-verify."),
-            "retryable": true,
-        })
-        .to_string(),
+        verification_required_payload(tool_name, pending_mutations, repeated_tool_attempts.fix_edits_remaining, &message)
+            .to_string(),
     );
     Ok(MutationVerificationResult::Blocked)
 }

@@ -1935,7 +1935,7 @@ async fn preview_exhaustion_guidance_names_open_channels_without_inviting_retry(
         .join("\n");
     assert!(planning_text.contains("<proposed_plan>"));
     assert!(planning_text.contains("spool paging"));
-    assert!(planning_text.contains("do not repeat exhausted inspections"));
+    assert!(planning_text.contains("exhausted inspections are blocked"));
     assert!(!planning_text.contains("repeat the call"));
 
     // Execution: spool-paging recovery without a plan directive (asymmetric).

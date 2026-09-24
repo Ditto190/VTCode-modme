@@ -155,7 +155,7 @@ fn reused_read_only_result_uses_canonical_guidance() {
     assert_eq!(
         payload.get("next_action"),
         Some(&json!(
-            "The tool result content is already in this response. Synthesize your answer from the available data."
+            "The tool result content is already in this response. Continue from the available data."
         ))
     );
     assert_eq!(payload.get("output"), Some(&json!("preview")));
