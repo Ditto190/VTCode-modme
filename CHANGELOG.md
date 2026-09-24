@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to vtcode will be documented in this file.
+
+## Unreleased
+
+### Features
+
+- Add filesnap-backed prompt checkpoints for combined file and conversation rewind, with `/redo` and `/rewind-recover`. Track known file edits and literal Unix shell output redirects before mutation, and retain legacy snapshot compatibility.
+
 ## v0.73.2 - 2026-01-29
 ## 0.169.1 - 2026-09-23
 

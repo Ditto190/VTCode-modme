@@ -1,6 +1,6 @@
 use crate::agent::runloop::unified::reasoning::model_supports_reasoning;
 use crate::agent::runloop::unified::turn::session::slash_commands::{SlashCommandContext, SlashCommandControl};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use vtcode_core::core::agent::snapshots::{CheckpointRestore, RevertScope, SnapshotManager, SnapshotMetadata};
 use vtcode_core::llm::provider as uni;
@@ -76,7 +76,11 @@ pub(crate) async fn handle_open_rewind_picker(mut ctx: SlashCommandContext<'_>) 
     }
 
     let snapshots = match ctx.checkpoint_manager {
-        Some(manager) => manager.list_snapshots().await,
+        Some(manager) => {
+            manager
+                .rewind_points(&ctx.tool_registry.harness_context_snapshot().session_id)
+                .await
+        }
         None => {
             ctx.renderer
                 .line(MessageStyle::Info, "In-chat rewind requires access to the checkpoint manager.")?;
@@ -236,6 +240,7 @@ fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) 
         vec![
             rewind_checkpoint_title(snapshot),
             "Choose what to do with the selected checkpoint.".to_string(),
+            "/redo returns to the state before this rewind.".to_string(),
         ],
         items,
         Some(InlineListSelection::RewindAction(RewindAction::RestoreBoth)),
@@ -253,7 +258,10 @@ pub(crate) async fn handle_rewind_latest(
         return Ok(SlashCommandControl::Continue);
     };
 
-    let snapshots = match manager.list_snapshots().await {
+    let snapshots = match manager
+        .rewind_points(&ctx.tool_registry.harness_context_snapshot().session_id)
+        .await
+    {
         Ok(snapshots) => snapshots,
         Err(err) => {
             ctx.renderer
@@ -286,6 +294,7 @@ pub(crate) async fn handle_rewind_to_turn(
             turn,
             scope,
             supports_reasoning,
+            &ctx.tool_registry.harness_context_snapshot().session_id,
         )
         .await;
         if result.is_ok() {
@@ -307,6 +316,31 @@ pub(crate) async fn handle_rewind_to_turn(
     Ok(SlashCommandControl::Continue)
 }
 
+pub(crate) async fn handle_redo(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    let manager = ctx.checkpoint_manager.context("No checkpoint manager available")?;
+    let current: Vec<_> = ctx
+        .conversation_history
+        .iter()
+        .map(vtcode_core::utils::session_archive::SessionMessage::from)
+        .collect();
+    let restored = manager
+        .navigate_prompt(None, RevertScope::Both, &ctx.tool_registry.harness_context_snapshot().session_id, &current)
+        .await?;
+    let supports_reasoning = model_supports_reasoning(&**ctx.provider_client, &ctx.config.model);
+    render_rewind_restore_success(
+        ctx.renderer,
+        ctx.handle,
+        ctx.conversation_history,
+        restored.metadata.turn_number,
+        RevertScope::Both,
+        restored,
+        supports_reasoning,
+    )?;
+    ctx.renderer
+        .line(MessageStyle::Info, "Files and conversation restored from before rewind.")?;
+    Ok(SlashCommandControl::Continue)
+}
+
 async fn restore_rewind_from_checkpoint(
     renderer: &mut AnsiRenderer,
     handle: &InlineHandle,
@@ -315,9 +349,14 @@ async fn restore_rewind_from_checkpoint(
     turn: usize,
     scope: RevertScope,
     supports_reasoning: bool,
+    session_id: &str,
 ) -> Result<()> {
-    match manager.restore_snapshot(turn, scope).await {
-        Ok(Some(restored)) => render_rewind_restore_success(
+    let current: Vec<_> = conversation_history
+        .iter()
+        .map(vtcode_core::utils::session_archive::SessionMessage::from)
+        .collect();
+    match manager.navigate_prompt(Some(turn), scope, session_id, &current).await {
+        Ok(restored) => render_rewind_restore_success(
             renderer,
             handle,
             conversation_history,
@@ -326,8 +365,7 @@ async fn restore_rewind_from_checkpoint(
             restored,
             supports_reasoning,
         ),
-        Ok(None) => renderer.line(MessageStyle::Error, &format!("No checkpoint found for turn {turn}")),
-        Err(err) => renderer.line(MessageStyle::Error, &format!("Failed to restore checkpoint for turn {turn}: {err}")),
+        Err(err) => Err(err.context(format!("Failed to restore checkpoint for turn {turn}"))),
     }
 }
 

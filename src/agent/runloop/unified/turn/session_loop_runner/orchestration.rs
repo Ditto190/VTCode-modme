@@ -1227,6 +1227,31 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 }
                 let (session_state, runtime_steering) = runtime.split_mut();
                 let working_history = std::sync::Arc::make_mut(&mut session_state.messages);
+                let _prompt_checkpoint_lease = if let Some(manager) = checkpoint_manager.as_ref() {
+                    let prefix = completed_turn_prompt_message_index
+                        .unwrap_or(working_history.len())
+                        .min(working_history.len());
+                    let conversation: Vec<_> = working_history[..prefix].iter().map(SessionMessage::from).collect();
+                    let session_id = tool_registry.harness_context_snapshot().session_id;
+                    let lease = harness_try!(
+                        manager
+                            .begin_prompt(next_checkpoint_turn, &session_id, &next_turn_input, &conversation)
+                            .await
+                    );
+                    if let Some(emitter) = harness_emitter.as_ref() {
+                        let _ = emitter.emit(harness_event(
+                            vtcode_core::exec::events::HarnessEventKind::SnapshotCreated,
+                            Some(format!("Before prompt {next_checkpoint_turn} snapshot saved")),
+                            None,
+                            None,
+                            None,
+                        ));
+                    }
+                    next_checkpoint_turn = next_checkpoint_turn.saturating_add(1);
+                    Some(lease)
+                } else {
+                    None
+                };
                 // Pre-fetch the unrelated dirty worktree note off the async
                 // executor. `build_unrelated_dirty_worktree_note` spawns
                 // blocking `git` subprocesses — see the `# Blocking` docs in
@@ -1447,7 +1472,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         handle: &handle,
                         ctrl_c_state: &ctrl_c_state,
                         default_placeholder: &default_placeholder,
-                        checkpoint_manager: checkpoint_manager.as_ref(),
+                        checkpoint_manager: None,
                         next_checkpoint_turn: &mut next_checkpoint_turn,
                         session_end_reason: &mut session_end_reason,
                         turn_elapsed,

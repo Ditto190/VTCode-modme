@@ -56,3 +56,5 @@ Entry point for VT Code contributor workflows.
 - [Documentation Hub](../README.md)
 - [Docs Index](../INDEX.md)
 - [Contributing](../CONTRIBUTING.md)
+
+- [Checkpoint file storage](filesnap-checkpoints.md): filesnap storage, legacy compatibility, and restore boundaries.

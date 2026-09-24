@@ -65,6 +65,7 @@ pub(super) async fn route_outcome(
         | SlashCommandOutcome::ManageAgents { .. }
         | SlashCommandOutcome::ManageSubprocesses { .. }
         | SlashCommandOutcome::OpenRewindPicker
+        | SlashCommandOutcome::Redo
         | SlashCommandOutcome::RewindToTurn { .. }
         | SlashCommandOutcome::RewindLatest { .. }
         | SlashCommandOutcome::ShareLog { .. }
@@ -173,6 +174,7 @@ async fn route_navigation_outcome(
         SlashCommandOutcome::ManageAgents { action } => handlers::handle_manage_agents(ctx, action).await,
         SlashCommandOutcome::ManageSubprocesses { action } => handlers::handle_manage_subprocesses(ctx, action).await,
         SlashCommandOutcome::OpenRewindPicker => handlers::handle_open_rewind_picker(ctx).await,
+        SlashCommandOutcome::Redo => handlers::handle_redo(ctx).await,
         SlashCommandOutcome::RewindToTurn { turn, scope } => handlers::handle_rewind_to_turn(ctx, turn, scope).await,
         SlashCommandOutcome::RewindLatest { scope } => handlers::handle_rewind_latest(ctx, scope).await,
         SlashCommandOutcome::ShareLog { format } => handlers::handle_share_log(ctx, format).await,

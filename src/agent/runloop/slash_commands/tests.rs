@@ -72,6 +72,24 @@ fn parse_effort_rejects_multiple_levels() {
 }
 
 #[tokio::test]
+async fn checkpoint_navigation_commands_dispatch_locally() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let mut renderer = renderer_for_tests();
+
+    for command in ["redo", "rewind-recover"] {
+        let outcome = handle_slash_command(command, &mut renderer, workspace.path())
+            .await
+            .expect("checkpoint command should parse");
+        assert!(matches!(outcome, SlashCommandOutcome::Redo), "{command} must dispatch locally");
+    }
+
+    let outcome = handle_slash_command("rewind", &mut renderer, workspace.path())
+        .await
+        .expect("rewind command should parse");
+    assert!(matches!(outcome, SlashCommandOutcome::OpenRewindPicker));
+}
+
+#[tokio::test]
 async fn stop_command_returns_local_stop_outcome() {
     let workspace = std::env::current_dir().expect("workspace");
     let mut renderer = renderer_for_tests();
