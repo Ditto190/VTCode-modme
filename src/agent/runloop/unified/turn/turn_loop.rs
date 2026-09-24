@@ -382,21 +382,7 @@ pub(crate) fn format_blocked_turn_final_response(reason: &str) -> String {
 /// and a leading capitalized plain word is lowercased. Acronyms and
 /// identifiers keep their case.
 fn reason_clause(reason: &str) -> String {
-    let trimmed = reason.trim().trim_end_matches(['.', '!', '?']).trim_end();
-    let mut chars = trimmed.chars();
-    let Some(first) = chars.next() else {
-        return String::new();
-    };
-    let second = chars.clone().next();
-    let plain_word =
-        first.is_uppercase() && first != 'I' && second.is_none_or(|c| c.is_lowercase() || c.is_whitespace());
-    if plain_word {
-        let mut clause: String = first.to_lowercase().collect();
-        clause.push_str(chars.as_str());
-        clause
-    } else {
-        trimmed.to_string()
-    }
+    vtcode_commons::formatting::lowercase_leading_word(reason.trim().trim_end_matches(['.', '!', '?']).trim_end())
 }
 
 #[cfg(test)]

@@ -73,7 +73,7 @@ pub fn refusal_reason(response: &LLMResponse) -> String {
     match explanation {
         Some(explanation) => {
             reason.push_str(": ");
-            reason.push_str(&lowercase_first(&explanation));
+            reason.push_str(&vtcode_commons::formatting::lowercase_leading_word(&explanation));
             if !ends_with_terminal_punctuation(&reason) {
                 reason.push('.');
             }
@@ -118,26 +118,6 @@ fn bounded_explanation(content: &str) -> String {
     // sentence inside the notice.
     let collapsed = content.split_whitespace().collect::<Vec<_>>().join(" ");
     vtcode_commons::formatting::truncate_within(&collapsed, MAX_EXPLANATION_CHARS, "...")
-}
-
-/// Lowercases the first character when the explanation starts with a plain
-/// capitalized word, so it reads as a continuation after the colon. Acronyms
-/// and identifiers (a second uppercase letter, a digit, or code) keep their
-/// case.
-fn lowercase_first(text: &str) -> String {
-    let mut chars = text.chars();
-    let Some(first) = chars.next() else {
-        return String::new();
-    };
-    let second = chars.clone().next();
-    let plain_word = first.is_uppercase() && second.is_none_or(|c| c.is_lowercase() || c.is_whitespace());
-    if plain_word && first != 'I' {
-        let mut lowered: String = first.to_lowercase().collect();
-        lowered.push_str(chars.as_str());
-        lowered
-    } else {
-        text.to_string()
-    }
 }
 
 fn ends_with_terminal_punctuation(text: &str) -> bool {
