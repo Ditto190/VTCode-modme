@@ -39,10 +39,11 @@ fn extract_command(args: &Value) -> Option<(String, &'static str)> {
     command_args::extract_command_text_with_key(args)
 }
 
-/// Shared preview budgets so expanded, compact, and PTY headers stay in sync.
-/// Expanded summaries fold to 70 chars (wrapping to at most two `│` lines at
-/// 62/58); compact and live PTY headers allow 120 chars (single row / wrapped
-/// `│` lines without premature `…` truncation).
+/// Shared preview budgets so compact previews stay in sync. Expanded `• Ran`
+/// headlines and live PTY headers show the command in full (TUI reflow owns
+/// viewport-aware wrapping); only compact/collapsed surfaces (`$` detail
+/// lines, viewer headers, `• Ran N commands` rows) head-truncate here:
+/// 70 chars for expanded non-run summaries, 120 chars for compact previews.
 pub(super) const SUMMARY_PREVIEW_LEN: usize = 70;
 pub(super) const COMPACT_PREVIEW_LEN: usize = 120;
 
@@ -237,6 +238,16 @@ pub(super) fn preview_command(command: &str, max_len: usize) -> String {
         }
     }
     format!("{}…", head.trim_end())
+}
+
+/// Full-command variant of [`preview_command`] for transcript surfaces.
+///
+/// Keeps the script-runner prefix folding (so `python3 -c "` still pulls in
+/// script content) but applies no length cap: expanded `• Ran` headlines and
+/// live PTY headers must show the command in full, with viewport-aware
+/// wrapping (TUI reflow) owning the overflow instead of a `…` truncation.
+pub(super) fn preview_full_command(command: &str) -> String {
+    preview_command(command, usize::MAX)
 }
 
 pub(super) fn describe_list_files(args: &Value, workspace_root: Option<&Path>) -> Option<(String, HashSet<String>)> {
@@ -915,6 +926,16 @@ mod tests {
         // space (index 27) is past half the budget, so it is honored.
         let command = "echo alpha beta gamma delta epsilon zeta eta theta iota";
         assert_eq!(preview_command(command, 30), "echo alpha beta gamma delta…");
+    }
+
+    #[test]
+    fn preview_full_command_never_truncates() {
+        // Transcript surfaces (expanded `• Ran`, live PTY headers) show the
+        // command in full; only compact previews truncate.
+        let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+        let full = preview_full_command(command);
+        assert_eq!(full, command);
+        assert!(!full.contains('…'));
     }
 
     #[test]

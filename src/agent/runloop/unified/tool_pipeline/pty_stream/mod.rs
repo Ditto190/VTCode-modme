@@ -168,6 +168,21 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_grep_pipeline_header_renders_in_full_without_truncation() {
+        // Screenshot 2026-09-24 16:37: `• Ran grep -rn "@vinhnx/..." docs`
+        // wrapped across `│` lines must keep every pipe segment with no `…`.
+        let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+        assert!(command.chars().count() > 120, "fixture must overflow the old preview cap");
+        let state = PtyStreamState::new(Some(command.to_string()), test_pty_config(), None);
+        let rendered = state.render_lines(8);
+        let joined = rendered.join("\n");
+        assert!(!joined.contains('…'), "command header must not truncate, got: {joined:?}");
+        assert!(joined.contains("node_modules"), "got: {joined:?}");
+        assert!(joined.contains("package-lock"), "got: {joined:?}");
+        assert!(joined.contains("\".backup\""), "final pipe arg must survive, got: {joined:?}");
+    }
+
+    #[test]
     fn pty_stream_state_uses_terminal_snapshot_for_screen_rewrites() {
         let mut state = PtyStreamState::new(None, test_pty_config(), None);
         state.apply_chunk("before\n\x1b[2J\x1b[Hmenu\nitem\n", 6);

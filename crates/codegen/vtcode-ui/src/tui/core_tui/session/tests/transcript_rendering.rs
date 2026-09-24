@@ -1829,3 +1829,54 @@ fn agent_prose_links_stay_aligned_when_rows_justify() {
     }
     assert_eq!(found, 1, "expected the inline path to stay linked");
 }
+
+#[test]
+fn tool_command_header_wraps_in_full_without_truncation() {
+    // Screenshot 2026-09-24 16:37: a piped `• Ran grep ... | grep -v ...`
+    // header must wrap across lines with every segment intact and no `…`.
+    // Wrapping may only insert whitespace (hanging indent); comparing with
+    // whitespace stripped proves no characters are lost or truncated.
+    let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+    let expected_flat: String = format!("• Ran {command}").chars().filter(|c| !c.is_whitespace()).collect();
+    for width in [80u16, 50, 40] {
+        let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+        session.push_line(InlineMessageKind::Tool, vec![make_segment(&format!("• Ran {command}"))]);
+        let rows = session.reflow_transcript_lines(width);
+        let joined: String = rows
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(!joined.contains('…'), "width {width}: header must not truncate, got: {joined:?}");
+        let flat: String = joined.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(flat, expected_flat, "width {width}: wrapped header lost content, got: {joined:?}");
+    }
+}
+
+#[test]
+fn pty_command_header_wraps_in_full_without_truncation() {
+    // Same screenshot command through the live PTY path: `• Ran` plus its
+    // `  │ ` continuations must keep every pipe segment with no `…`.
+    let header = "• Ran grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs |";
+    let continuation = "  │ grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+    let expected_flat: String = format!("{header}{continuation}")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    for width in [80u16, 50, 40] {
+        let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+        push_pty_line(&mut session, header);
+        push_pty_line(&mut session, continuation);
+        let first = session.reflow_pty_lines(0, width);
+        let second = session.reflow_pty_lines(1, width);
+        let joined: String = first
+            .iter()
+            .chain(second.iter())
+            .flat_map(|line| line.line.spans.iter().map(|span| span.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(!joined.contains('…'), "width {width}: PTY header must not truncate, got: {joined:?}");
+        let flat: String = joined.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(flat, expected_flat, "width {width}: PTY header lost content, got: {joined:?}");
+    }
+}

@@ -20,7 +20,7 @@ use vtcode_ui::tui::ui::syntax_highlight;
 use crate::agent::runloop::tool_output::render_tree_detail;
 use crate::agent::runloop::unified::tool_summary_helpers::{
     collect_param_details, command_line_for_args, describe_code_search, describe_fetch_action, describe_grep_file,
-    describe_list_files, describe_path_action, describe_shell_command, exec_session_param_detail,
+    describe_list_files, describe_path_action, describe_shell_command, display_command_text, exec_session_param_detail,
     highlight_texts_for_summary, is_exec_session_call, relativize_command_paths, relativize_to_workspace,
     should_render_command_line, truncate_path_middle,
 };
@@ -285,6 +285,13 @@ fn prepare_summary_data(
     let summary_highlights = highlight_texts_for_summary(args, &highlights, workspace_root);
     let action_label = tool_action_label(tool_name, args);
     let is_run_command = action_label == "Run command";
+    // Expanded `• Ran` headlines must show the command in full: the truncated
+    // preview stays on compact/collapsed surfaces and `$` detail lines, while
+    // the transcript headline wraps the complete command across `│` lines
+    // (screenshot 2026-09-24: `| grep -v ".backup"` must survive).
+    let full_run_command = is_run_command
+        .then(|| display_command_text(args).map(|cmd| relativize_command_paths(&cmd, workspace_root)))
+        .flatten();
     let is_exec_session = is_exec_session_call(tool_name, args);
 
     // Exec-session calls repeat on every poll/wait and carry plumbing the reader
@@ -300,7 +307,7 @@ fn prepare_summary_data(
 
     let mut summary = build_tool_summary(&action_label, &headline);
     if is_run_command {
-        summary = command_line_candidate
+        summary = full_run_command
             .as_ref()
             .map(|command| format!("Ran {command}"))
             .unwrap_or(summary);
@@ -1350,5 +1357,34 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(activities.len(), 2);
         assert!(activities.iter().all(|activity| activity.command_count == 1));
+    }
+
+    #[test]
+    fn prepare_summary_data_keeps_run_headline_in_full_without_truncation() {
+        // Screenshot 2026-09-24: the expanded `• Ran` headline must carry the
+        // complete pipeline so TUI wrapping (not `…`) owns the overflow.
+        // `display_command_text` normalizes quoting (double to single), so
+        // assert token completeness rather than byte equality.
+        let command = "grep -rn \"@vinhnx/vtcode|npm install -g|npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \".backup\"";
+        let data =
+            prepare_summary_data(tool_names::UNIFIED_EXEC, &json!({"action": "run", "command": command}), None, None);
+        assert!(!data.summary.contains('…'), "got: {:?}", data.summary);
+        for fragment in [
+            "grep",
+            "-rn",
+            "@vinhnx/vtcode|npm install -g|npx @vinhnx",
+            "docs",
+            "node_modules",
+            "package-lock",
+            ".backup",
+        ] {
+            assert!(data.summary.contains(fragment), "missing {fragment:?} in {:?}", data.summary);
+        }
+        assert_eq!(
+            data.summary.matches('|').count(),
+            5,
+            "pattern pipes + shell pipes must survive: {:?}",
+            data.summary
+        );
     }
 }
