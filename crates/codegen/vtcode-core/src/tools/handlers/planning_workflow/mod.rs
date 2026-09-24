@@ -353,6 +353,24 @@ Persist a concrete draft and seed tracker state.
         assert!(start_tool.description().contains("exec_command"));
         assert!(start_tool.description().contains("apply_patch"));
     }
+
+    #[test]
+    fn start_planning_description_states_effects_and_leaves_plan_steering_to_the_prompt() {
+        use crate::prompts::system::PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE;
+
+        let temp_dir = TempDir::new().unwrap();
+        let start_tool = StartPlanningTool::new(PlanningWorkflowState::new(temp_dir.path().to_path_buf()));
+        let description = start_tool.description();
+
+        assert!(description.starts_with("Request entry into the read-only Planning workflow"));
+        assert!(description.contains("requires user confirmation"));
+        assert!(description.contains("not needed for straightforward changes"));
+        // Post-call steering lives in the Planning workflow prompt that the
+        // runtime injects once the workflow is active.
+        assert!(!description.contains("<proposed_plan>"));
+        assert!(!description.contains("Do NOT"));
+        assert!(PLANNING_WORKFLOW_PLAN_PERSISTENCE_POLICY_LINE.contains("`<proposed_plan>`"));
+    }
 }
 #[cfg(test)]
 mod planning_artifact_regression_tests {
