@@ -181,6 +181,19 @@ impl StreamBlockOrder {
         }
     }
 
+    /// Drops the slots a mid-output fallback at `boundary` discards: thinking
+    /// and tool use before it, plus the given unpaired advisor blocks.
+    pub(crate) fn discard_declined_partial(&mut self, boundary: usize, unpaired_advisor_indices: &[usize]) {
+        self.slots.retain(|index, slot| {
+            *index >= boundary
+                || !(matches!(
+                    slot,
+                    StreamSlot::PendingThinking
+                        | StreamSlot::Recorded(BlockSlot::Reasoning | BlockSlot::ToolUse { .. })
+                ) || unpaired_advisor_indices.contains(index))
+        });
+    }
+
     pub(crate) fn into_detail(self) -> Option<String> {
         let mut recorder = BlockOrderRecorder::default();
         for slot in self.slots.into_values() {

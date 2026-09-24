@@ -1111,6 +1111,101 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn stream_mid_output_fallback_drops_declined_thinking_and_tool_use() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-fable-5-1\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Refused model reasoning.\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-1\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Checking. \"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_declined\",\"name\":\"read_file\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"src/\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"fallback\",\"from\":{\"model\":\"claude-fable-5-1\"},\"to\":{\"model\":\"claude-opus-4-8\"}}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":3}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":4,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":4,\"delta\":{\"type\":\"text_delta\",\"text\":\"Here is the answer.\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":4}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":12}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let model = models::anthropic::CLAUDE_OPUS_5_5;
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            model.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let mut stream = LLMProvider::stream(
+            &provider,
+            LLMRequest {
+                model: model.to_string(),
+                messages: vec![Message::user("fix the parser".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("stream request should succeed");
+
+        let mut completed = None;
+        while let Some(event) = stream.next().await {
+            if let LLMStreamEvent::Completed { response } = event.expect("stream event") {
+                completed = Some(*response);
+            }
+        }
+        let response = completed.expect("completed stream response");
+        assert!(response.tool_calls.is_none(), "declined tool_use must not run");
+        assert_eq!(response.content.as_deref(), Some("Checking. Here is the answer."));
+        let raw_details = response.reasoning_details.clone().expect("details");
+        let details: Vec<serde_json::Value> = raw_details
+            .iter()
+            .map(|detail| serde_json::from_str(detail).expect("detail json"))
+            .collect();
+        assert!(details.iter().all(|detail| detail["type"] != "thinking"));
+        assert!(details.iter().any(|detail| {
+            detail["type"] == "fallback"
+                && detail["from"]["model"] == "claude-fable-5-1"
+                && detail["to"]["model"] == "claude-opus-4-8"
+        }));
+
+        let assistant = Message::assistant(response.content.clone().expect("text content"))
+            .with_reasoning_details(Some(raw_details.into_iter().map(serde_json::Value::String).collect()));
+        let replay = LLMRequest {
+            model: model.to_string(),
+            messages: vec![
+                Message::user("fix the parser".to_string()),
+                assistant,
+                Message::user("thanks".to_string()),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        let payload = provider.convert_to_anthropic_format(&replay).expect("payload conversion");
+        assert_eq!(
+            payload["messages"][1]["content"],
+            json!([
+                { "type": "text", "text": "Checking. " },
+                { "type": "text", "text": "Here is the answer." }
+            ])
+        );
+    }
+
     #[test]
     fn non_streaming_capability_is_pinned_for_stream_timeout_fallback() {
         // Pinned true in the provider impl; MinimaxProvider's delegation and

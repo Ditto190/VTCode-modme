@@ -1629,6 +1629,54 @@ mod block_order_round_trip_tests {
     }
 
     #[test]
+    fn mid_output_fallback_drops_declined_thinking_and_tool_use_before_boundary() {
+        let response = parse_response(
+            json!({
+                "content": [
+                    { "type": "thinking", "thinking": "Refused model reasoning.", "signature": "sig-1" },
+                    { "type": "text", "text": "Checking. " },
+                    { "type": "tool_use", "id": "toolu_declined", "name": "read_file", "input": {} },
+                    { "type": "fallback", "from": { "model": "claude-fable-5-1" }, "to": { "model": "claude-opus-4-8" } },
+                    { "type": "text", "text": "Here is the answer." }
+                ],
+                "stop_reason": "end_turn"
+            }),
+            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+        )
+        .expect("parse");
+
+        assert!(response.tool_calls.is_none());
+        assert!(response.reasoning.is_none());
+        assert_eq!(response.content.as_deref(), Some("Checking. Here is the answer."));
+        let details: Vec<Value> = response
+            .reasoning_details
+            .clone()
+            .expect("details")
+            .iter()
+            .map(|detail| serde_json::from_str(detail).expect("detail json"))
+            .collect();
+        assert!(details.iter().all(|detail| detail["type"] != "thinking"));
+        assert!(details.iter().any(|detail| {
+            detail["type"] == "fallback"
+                && detail["from"]["model"] == "claude-fable-5-1"
+                && detail["to"]["model"] == "claude-opus-4-8"
+        }));
+
+        let content = replayed_assistant_content(vec![
+            Message::user("fix the parser".to_string()),
+            assistant_message(response),
+            Message::user("thanks".to_string()),
+        ]);
+        assert_eq!(
+            content,
+            vec![
+                json!({ "type": "text", "text": "Checking. " }),
+                json!({ "type": "text", "text": "Here is the answer." }),
+            ]
+        );
+    }
+
+    #[test]
     fn edited_assistant_text_falls_back_to_default_order() {
         let response = parse_response(
             json!({ "content": interleaved_content(), "stop_reason": "tool_use" }),

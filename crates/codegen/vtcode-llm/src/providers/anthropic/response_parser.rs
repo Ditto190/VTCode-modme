@@ -11,6 +11,7 @@
 use crate::error_display;
 use crate::provider::{FinishReason, LLMError, LLMResponse, ToolCall, Usage};
 use crate::providers::extract_reasoning_trace;
+use hashbrown::HashSet;
 use serde_json::{Value, json};
 
 use super::block_order::{BlockOrderRecorder, BlockSlot};
@@ -34,8 +35,12 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
     // Interleaved blocks (thinking between text and tool use) must be
     // replayed in this order; see `block_order`.
     let mut block_order = BlockOrderRecorder::default();
+    let declined = declined_partial_positions(content);
 
-    for block in content {
+    for (position, block) in content.iter().enumerate() {
+        if declined[position] {
+            continue;
+        }
         match block.get("type").and_then(|t| t.as_str()) {
             Some("text") => {
                 if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
@@ -204,6 +209,40 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
         organization_id: None,
         compaction,
     })
+}
+
+/// Marks the blocks a refused model produced before the final `fallback`
+/// block of a mid-output server-side fallback. Echoing them back is invalid:
+/// thinking, redacted thinking, tool use, a `server_tool_use` without its
+/// result, and unrecognized model-internal blocks are dropped, while text,
+/// compaction, paired server-tool blocks, and everything after the boundary
+/// are kept. The API already omits the declined partial from non-streaming
+/// responses, so this only enforces the echo rule if one ever appears.
+fn declined_partial_positions(content: &[Value]) -> Vec<bool> {
+    fn block_type(block: &Value) -> Option<&str> {
+        block.get("type").and_then(Value::as_str)
+    }
+    let mut declined = vec![false; content.len()];
+    let Some(boundary) = content.iter().rposition(|block| block_type(block) == Some("fallback")) else {
+        return declined;
+    };
+    let paired_tool_use_ids: HashSet<&str> = content
+        .iter()
+        .filter(|block| block_type(block).is_some_and(|kind| kind.ends_with("_tool_result")))
+        .filter_map(|block| block.get("tool_use_id").and_then(Value::as_str))
+        .collect();
+    for (flag, block) in declined.iter_mut().zip(&content[..boundary]) {
+        *flag = match block_type(block) {
+            Some("text" | "compaction" | "fallback") => false,
+            Some("server_tool_use") => !block
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| paired_tool_use_ids.contains(id)),
+            Some(kind) => !kind.ends_with("_tool_result"),
+            None => true,
+        };
+    }
+    declined
 }
 
 /// Serializes a response's `stop_details` (refusal category, explanation,
