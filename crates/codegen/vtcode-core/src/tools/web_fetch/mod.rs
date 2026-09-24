@@ -39,6 +39,43 @@ const TEMP_MAX_AGE_SECS: u64 = 3600;
 
 pub(crate) const WEB_FETCH_DESCRIPTION: &str = "Fetches content from a URL and returns an analyzed summary. Accepts: { url: string, prompt?: string, format?: 'summary'|'markdown', max_bytes?: number, timeout_secs?: number }. Set format='markdown' to get the page as cleaned markdown via the defuddle.md extraction service instead of a summary — that service is rate-limited to ONE call per session, so use it sparingly and only for remote http(s) URLs (never local files). Omit prompt for a default summary. For docs domains, try /llms.txt first: for 'abc.com', fetch https://abc.com/llms.txt before the homepage, then traverse linked URLs for relevant Markdown sources. Default max_bytes is 500KB (fits most pages). Do NOT set max_bytes without reason — the default is generous. Truncated responses include truncation metadata so you can retry with a higher budget. Prefer llms.txt over llms-full.txt (can be multi-megabyte). Returns a `temp_file` path to ephemeral fetched content. Read it to analyze. Temp files are auto-cleaned; do not persist elsewhere.";
 
+/// Parameter schema for `web_fetch`, shared by the distributed builtin
+/// registration and the web tool pack so the two surfaces cannot drift.
+///
+/// `format` must be declared here: argument validation rejects unknown
+/// properties (`additionalProperties: false`), so an undeclared `format`
+/// would make the markdown route in [`WebFetchTool::execute`] unreachable.
+pub(crate) fn web_fetch_parameter_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "URL to fetch (HTTPS required by default)"
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Question or instruction for analyzing the fetched content. Omit for a default summary."
+            },
+            "format": {
+                "type": "string",
+                "enum": ["summary", "markdown"],
+                "description": "Output mode (default: summary). summary fetches the page directly and returns a preview plus a temp_file path. markdown returns the page as cleaned markdown inline via the defuddle.md extraction service; it allows 1 call per session, accepts only remote http(s) URLs, caps max_bytes at 262144, and ignores prompt and timeout_secs."
+            },
+            "max_bytes": {
+                "type": "integer",
+                "description": "Maximum response body size in bytes (default: 500000). The default is generous — most pages including llms.txt fit easily. Only set this if you need to cap a very large page."
+            },
+            "timeout_secs": {
+                "type": "integer",
+                "description": "Request timeout in seconds (default: 30)"
+            }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct WebFetchArgs {
     url: String,

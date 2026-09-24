@@ -21,7 +21,7 @@ use crate::tools::handlers::{PlanningWorkflowState, StartPlanningTool, TaskTrack
 use crate::tools::native_memory;
 use crate::tools::request_user_input::RequestUserInputTool;
 use crate::tools::tool_intent::builtin_tool_behavior;
-use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool};
+use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool, web_fetch_parameter_schema};
 use crate::tools::web_search::{WEB_SEARCH_DESCRIPTION, WebSearchTool};
 use serde_json::json;
 use vtcode_utility_tool_specs::{
@@ -231,38 +231,12 @@ fn register_web_fetch(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegist
         .unwrap_or_default();
     let web_fetch_for_factory = web_fetch.clone();
     let web_fetch_factory = native_cgp_tool_factory(move || web_fetch_for_factory.clone());
-    ToolRegistration::from_tool_instance(
-        tools::WEB_FETCH,
-        CapabilityLevel::Basic,
-        web_fetch,
-    )
-    .with_native_cgp_factory(web_fetch_factory)
-    .with_description(WEB_FETCH_DESCRIPTION)
-    .with_parameter_schema(json!({
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "URL to fetch (HTTPS required by default)"
-            },
-            "prompt": {
-                "type": "string",
-                "description": "Question or instruction for analyzing the fetched content. Omit for a default summary."
-            },
-            "max_bytes": {
-                "type": "integer",
-                "description": "Maximum response body size in bytes (default: 500000). The default is generous — most pages including llms.txt fit easily. Only set this if you need to cap a very large page."
-            },
-            "timeout_secs": {
-                "type": "integer",
-                "description": "Request timeout in seconds (default: 30)"
-            }
-        },
-        "required": ["url"],
-        "additionalProperties": false
-    }))
-    .with_permission(ToolPolicy::Prompt)
-    .with_aliases(["fetch_url", "web"])
+    ToolRegistration::from_tool_instance(tools::WEB_FETCH, CapabilityLevel::Basic, web_fetch)
+        .with_native_cgp_factory(web_fetch_factory)
+        .with_description(WEB_FETCH_DESCRIPTION)
+        .with_parameter_schema(web_fetch_parameter_schema())
+        .with_permission(ToolPolicy::Prompt)
+        .with_aliases(["fetch_url", "web"])
 }
 
 // ---------------------------------------------------------------------------
@@ -744,6 +718,23 @@ mod tests {
         assert!(description.contains("abc.com"));
         assert!(description.contains("https://abc.com/llms.txt"));
         assert!(description.contains("traverse"));
+    }
+
+    #[test]
+    fn web_fetch_schema_accepts_markdown_format() {
+        let registrations = builtin_tool_registrations(None);
+        let web_fetch = registrations
+            .iter()
+            .find(|registration| registration.name() == tools::WEB_FETCH)
+            .expect("web_fetch registration should exist");
+        let schema = web_fetch.metadata().parameter_schema().expect("web_fetch schema");
+
+        assert_eq!(schema["properties"]["format"]["enum"], json!(["summary", "markdown"]));
+        assert_eq!(schema["additionalProperties"], json!(false));
+        let validator = jsonschema::validator_for(schema).expect("web_fetch schema should compile");
+        assert!(validator.is_valid(&json!({"url": "https://example.com", "format": "markdown"})));
+        assert!(validator.is_valid(&json!({"url": "https://example.com", "format": "summary"})));
+        assert!(!validator.is_valid(&json!({"url": "https://example.com", "format": "html"})));
     }
 
     /// Tool descriptions are part of the prompt and directly drive tool
