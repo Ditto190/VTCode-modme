@@ -12,8 +12,8 @@ use vtcode_config::types::ReasoningEffortLevel;
 use vtcode_config::constants::models::anthropic;
 
 use super::super::capabilities::{
-    ClaudeThinkingProfile, claude_thinking_profile, effort_is_at_most_high, effort_str_is_at_most_high, matches_model,
-    resolve_model_name, supports_reasoning_effort,
+    ClaudeThinkingProfile, claude_thinking_profile, default_max_tokens_for_model, effort_is_at_most_high,
+    effort_str_is_at_most_high, matches_model, resolve_model_name, supports_reasoning_effort,
 };
 
 fn resolve_configured_thinking_display(anthropic_config: &AnthropicConfig) -> Option<ThinkingDisplay> {
@@ -36,16 +36,13 @@ fn resolve_thinking_display(request: &LLMRequest, anthropic_config: &AnthropicCo
     resolve_configured_thinking_display(anthropic_config)
 }
 
-fn manual_thinking_config(
-    budget: u32,
-    max_tokens: Option<u32>,
-    display: Option<ThinkingDisplay>,
-) -> Option<ThinkingConfig> {
+/// Builds a manual `budget_tokens` config clamped below `max_tokens`, which
+/// must be the value the request will actually send.
+fn manual_thinking_config(budget: u32, max_tokens: u32, display: Option<ThinkingDisplay>) -> Option<ThinkingConfig> {
     if budget < 1024 {
         return None;
     }
 
-    let max_tokens = max_tokens.unwrap_or(16000);
     let effective_budget = budget.min(max_tokens.saturating_sub(100)).max(1024);
     Some(ThinkingConfig::Enabled { budget_tokens: effective_budget, display })
 }
@@ -110,6 +107,11 @@ pub(crate) fn build_thinking_config(
     let profile = claude_thinking_profile(resolved_model, default_model);
     let display = resolve_thinking_display(request, anthropic_config);
     let default_thinking = profile.is_some_and(|p| p.default_thinking_enabled);
+    // The request builder sends this same default whenever thinking is on, so
+    // manual budgets are clamped against the real `max_tokens`.
+    let thinking_max_tokens = request
+        .max_tokens
+        .unwrap_or_else(|| default_max_tokens_for_model(resolved_model, default_model, true));
 
     if let Some(overrides) = request.anthropic_request_overrides.as_ref() {
         match overrides.thinking_mode {
@@ -136,7 +138,7 @@ pub(crate) fn build_thinking_config(
                 if profile.is_some_and(|p| !p.supports_manual_budget) {
                     return Ok((Some(ThinkingConfig::Adaptive { display }), None));
                 }
-                return Ok((manual_thinking_config(budget, request.max_tokens, display), None));
+                return Ok((manual_thinking_config(budget, thinking_max_tokens, display), None));
             }
             AnthropicThinkingModeOverride::Inherit => {}
         }
@@ -159,7 +161,7 @@ pub(crate) fn build_thinking_config(
             if profile.is_some_and(|p| p.supports_manual_budget)
                 && let Some(explicit_budget) = request.thinking_budget
             {
-                return Ok((manual_thinking_config(explicit_budget, request.max_tokens, display), None));
+                return Ok((manual_thinking_config(explicit_budget, thinking_max_tokens, display), None));
             }
             return Ok((Some(ThinkingConfig::Adaptive { display }), None));
         }
@@ -185,7 +187,7 @@ pub(crate) fn build_thinking_config(
             anthropic_config.interleaved_thinking_budget_tokens
         };
 
-        if let Some(thinking) = manual_thinking_config(budget, request.max_tokens, display) {
+        if let Some(thinking) = manual_thinking_config(budget, thinking_max_tokens, display) {
             return Ok((Some(thinking), None));
         }
     } else if let Some(effort) = request.reasoning_effort {

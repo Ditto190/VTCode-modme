@@ -15,9 +15,9 @@ use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
     adaptive_thinking_always_on, allowed_efforts_for_model, claude_thinking_profile, default_effort_for_model,
-    effort_allowed_for_model, effort_is_at_most_high, matches_model, rejects_sampling, resolve_model_name,
-    supports_effort, supports_manual_interleaved_beta, supports_manual_thinking_budget, supports_structured_output,
-    supports_task_budget,
+    default_max_tokens_for_model, effort_allowed_for_model, effort_is_at_most_high, matches_model, rejects_sampling,
+    resolve_model_name, supports_effort, supports_manual_interleaved_beta, supports_manual_thinking_budget,
+    supports_structured_output, supports_task_budget,
 };
 
 pub fn validate_request(
@@ -401,7 +401,10 @@ fn validate_reasoning_constraints(
     if let EffectiveThinkingMode::ManualBudget(budget) =
         resolve_effective_thinking_mode(request, default_model, anthropic_config)
     {
-        let max_tokens = request.max_tokens.unwrap_or(4096);
+        // Manual budgets imply thinking, so this matches what the builder sends.
+        let max_tokens = request
+            .max_tokens
+            .unwrap_or_else(|| default_max_tokens_for_model(&request.model, default_model, true));
         if supports_manual_thinking_budget(&request.model, default_model)
             && budget >= max_tokens
             && !supports_manual_interleaved_beta(&request.model, default_model)

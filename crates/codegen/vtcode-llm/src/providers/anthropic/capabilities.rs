@@ -31,7 +31,19 @@ pub(crate) struct ClaudeThinkingProfile {
     pub default_effort: &'static str,
     pub supports_xhigh_effort: bool,
     pub supports_max_effort: bool,
+    /// `max_tokens` sent when the caller does not set one. It caps thinking
+    /// plus response text together, so it must leave room for adaptive
+    /// thinking on agentic turns while staying within the model's output limit.
+    pub default_max_tokens: u32,
 }
+
+/// Default `max_tokens` for Claude 5.x models: a starting point for agentic
+/// coding that stays within their 128K output limit.
+const CLAUDE_5_DEFAULT_MAX_TOKENS: u32 = 64_000;
+/// Default `max_tokens` for unprofiled models when thinking is enabled.
+const LEGACY_THINKING_DEFAULT_MAX_TOKENS: u32 = 16_000;
+/// Default `max_tokens` for unprofiled models when thinking is disabled.
+const LEGACY_DEFAULT_MAX_TOKENS: u32 = 4_096;
 
 const ANTHROPIC_EFFORTS_UP_TO_HIGH: &[&str] = &[reasoning::LOW, reasoning::MEDIUM, reasoning::HIGH];
 const ANTHROPIC_EFFORTS_UP_TO_MAX: &[&str] = &[reasoning::LOW, reasoning::MEDIUM, reasoning::HIGH, reasoning::MAX];
@@ -70,6 +82,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             default_effort: reasoning::HIGH,
             supports_xhigh_effort: true,
             supports_max_effort: true,
+            default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
         });
     }
 
@@ -86,6 +99,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             default_effort: reasoning::HIGH,
             supports_xhigh_effort: true,
             supports_max_effort: true,
+            default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
         });
     }
 
@@ -102,6 +116,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             default_effort: reasoning::HIGH,
             supports_xhigh_effort: true,
             supports_max_effort: true,
+            default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
         });
     }
 
@@ -121,6 +136,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             default_effort: reasoning::MEDIUM,
             supports_xhigh_effort: true,
             supports_max_effort: true,
+            default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
         });
     }
 
@@ -137,6 +153,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             default_effort: reasoning::HIGH,
             supports_xhigh_effort: true,
             supports_max_effort: true,
+            default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
         });
     }
 
@@ -207,6 +224,18 @@ pub(crate) fn supports_turn_scoped_system_messages(model: &str, default_model: &
 
 pub(crate) fn adaptive_thinking_always_on(model: &str, default_model: &str) -> bool {
     claude_thinking_profile(model, default_model).is_some_and(|profile| profile.adaptive_only)
+}
+
+/// The `max_tokens` to send when the request does not set one. Profiled
+/// models use their profile default regardless of the thinking field, since
+/// they think adaptively even when it is omitted; other models fall back to
+/// the legacy defaults.
+pub(crate) fn default_max_tokens_for_model(model: &str, default_model: &str, thinking_enabled: bool) -> u32 {
+    match claude_thinking_profile(model, default_model) {
+        Some(profile) => profile.default_max_tokens,
+        None if thinking_enabled => LEGACY_THINKING_DEFAULT_MAX_TOKENS,
+        None => LEGACY_DEFAULT_MAX_TOKENS,
+    }
 }
 
 pub(crate) fn default_effort_for_model(model: &str, default_model: &str) -> Option<&'static str> {
@@ -369,5 +398,32 @@ mod tests {
         assert!(!profile.adaptive_only);
         assert_eq!(profile.default_effort, reasoning::HIGH);
         assert!(!adaptive_thinking_always_on(models::anthropic::CLAUDE_OPUS_5, ""));
+    }
+
+    #[test]
+    fn claude_5_models_default_to_64k_max_tokens_regardless_of_thinking() {
+        for model in [
+            models::anthropic::CLAUDE_FABLE_5_1,
+            models::anthropic::CLAUDE_SONNET_5,
+            models::anthropic::CLAUDE_FABLE_5,
+            models::anthropic::CLAUDE_OPUS_5_5,
+            models::anthropic::CLAUDE_OPUS_5,
+        ] {
+            let profile = claude_thinking_profile(model, "").expect("claude 5.x profile");
+            assert_eq!(profile.default_max_tokens, 64_000, "{model}");
+            assert_eq!(default_max_tokens_for_model(model, "", true), 64_000, "{model}");
+            assert_eq!(default_max_tokens_for_model(model, "", false), 64_000, "{model}");
+        }
+    }
+
+    #[test]
+    fn unprofiled_models_keep_legacy_max_tokens_defaults() {
+        assert_eq!(default_max_tokens_for_model("claude-unlisted-model", "", true), 16_000);
+        assert_eq!(default_max_tokens_for_model("claude-unlisted-model", "", false), 4_096);
+    }
+
+    #[test]
+    fn empty_model_uses_the_default_model_max_tokens() {
+        assert_eq!(default_max_tokens_for_model("", models::anthropic::CLAUDE_SONNET_5, false), 64_000);
     }
 }

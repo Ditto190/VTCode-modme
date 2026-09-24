@@ -21,8 +21,8 @@ use vtcode_config::core::{AdvisorConfig, AnthropicConfig, AnthropicPromptCacheSe
 use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
-    default_effort_for_model, effort_allowed_for_model, rejects_sampling, resolve_model_name, supports_effort,
-    supports_mid_conversation_system_messages, supports_task_budget,
+    default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, rejects_sampling,
+    resolve_model_name, supports_effort, supports_mid_conversation_system_messages, supports_task_budget,
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
@@ -292,7 +292,9 @@ pub(crate) fn convert_to_anthropic_format(
 
     let mut anthropic_request = AnthropicRequest {
         model: resolved_model.to_string(),
-        max_tokens: request.max_tokens.unwrap_or(if thinking_val.is_some() { 16000 } else { 4096 }),
+        max_tokens: request
+            .max_tokens
+            .unwrap_or_else(|| default_max_tokens_for_model(resolved_model, ctx.model, thinking_val.is_some())),
         cache_control: top_level_cache_control,
         messages,
         system: system_value,
@@ -586,6 +588,58 @@ mod tests {
         let payload = convert(&request);
 
         assert!(payload["temperature"].as_f64().is_some_and(|t| (t - 0.2).abs() < 1e-6), "payload: {payload}");
+    }
+
+    fn plain_request(model: &str) -> LLMRequest {
+        LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn claude_5_models_default_to_64k_max_tokens() {
+        for model in [
+            anthropic::CLAUDE_OPUS_5_5,
+            anthropic::CLAUDE_SONNET_5,
+            anthropic::CLAUDE_OPUS_5,
+        ] {
+            let payload = convert(&plain_request(model));
+            assert_eq!(payload["max_tokens"], 64_000, "{model}: {payload}");
+        }
+    }
+
+    #[test]
+    fn opus_5_5_keeps_64k_max_tokens_when_thinking_field_is_omitted() {
+        // Opus 5.5 rejects `disabled`, so a Disabled override omits the field;
+        // the model still thinks adaptively and needs the full default budget.
+        let mut request = plain_request(anthropic::CLAUDE_OPUS_5_5);
+        request.anthropic_request_overrides = Some(AnthropicRequestOverrides {
+            thinking_mode: AnthropicThinkingModeOverride::Disabled,
+            ..Default::default()
+        });
+        let payload = convert(&request);
+
+        assert!(payload.get("thinking").is_none(), "payload: {payload}");
+        assert_eq!(payload["max_tokens"], 64_000, "payload: {payload}");
+    }
+
+    #[test]
+    fn explicit_max_tokens_is_kept_for_claude_5_models() {
+        let mut request = plain_request(anthropic::CLAUDE_OPUS_5_5);
+        request.max_tokens = Some(2048);
+        let payload = convert(&request);
+
+        assert_eq!(payload["max_tokens"], 2048, "payload: {payload}");
+    }
+
+    #[test]
+    fn unprofiled_model_without_thinking_keeps_legacy_max_tokens_default() {
+        let payload = convert(&plain_request("claude-unlisted-model"));
+
+        assert!(payload.get("thinking").is_none(), "payload: {payload}");
+        assert_eq!(payload["max_tokens"], 4096, "payload: {payload}");
     }
 
     fn advisor_config(enabled: bool, model: &str, max_uses: Option<u32>) -> AdvisorConfig {
