@@ -3218,3 +3218,17 @@ async fn wait_for_exec_exit(exec_sessions: &ExecSessionManager, session_id: &str
     .await
     .expect("exec session should exit");
 }
+
+#[test]
+fn parse_verifier_decision_reads_explicit_decision_line() {
+    assert_eq!(parse_verifier_decision("Looks fine.\nDecision: APPROVED"), Some(true));
+    assert_eq!(parse_verifier_decision("**Decision:** REJECT\n"), Some(false));
+    assert_eq!(parse_verifier_decision("- Decision: `approve`"), Some(true));
+    assert_eq!(
+        parse_verifier_decision("Decision: APPROVED\nno unsafe code was blocked"),
+        Some(true),
+        "prose keywords must not override the decision line"
+    );
+    assert_eq!(parse_verifier_decision("approved, no issues found"), None);
+    assert_eq!(parse_verifier_decision("Decision: pending"), None);
+}

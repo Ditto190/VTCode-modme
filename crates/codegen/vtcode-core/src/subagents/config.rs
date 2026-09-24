@@ -459,14 +459,14 @@ const FINAL_RESPONSE_CONTRACT: &str = "Return your final response using this exa
 - [Any unresolved question]\n\n\
 Use `- None` for empty sections. Keep it concise and grounded in the work you actually performed.";
 
-const READ_ONLY_TOOL_REMINDER: &str = "Tool reminder: stay inside the exposed read-only tool set for this child. \
-Use advanced `code_search` for a focused literal query with bounded filters. Use `list_skills` and \
-`load_skill_resource` for already-loaded repository skills when needed. If these tools are insufficient, report the \
-blocker instead of retrying denied calls.";
+const READ_ONLY_TOOL_REMINDER: &str = "Tool reminder: this child has a read-only tool set, and calls outside it are \
+denied. Use advanced `code_search` for a focused literal query with bounded filters, and `list_skills` / \
+`load_skill_resource` for repository skills that are already loaded. If these tools cannot answer the task, report what \
+is missing in your final response.";
 
-const READ_ONLY_PLANNING_WORKFLOW_REMINDER: &str = "This delegated agent already runs with a read-only tool surface. \
-Do not try to enter or exit planning workflow, do not call hidden mutating tools, and do not retry the same denied tool \
-call; adjust strategy or report the blocker instead.";
+const READ_ONLY_PLANNING_WORKFLOW_REMINDER: &str = "Planning workflow tools and mutating tools are not exposed to this \
+child, and a denied call returns the same denial on retry. When a call is denied, change approach or report the \
+blocker.";
 
 const WRITE_TOOL_REMINDER: &str = "Tool reminder: use `exec_command` with targeted commands for workspace discovery \
 and file reading. Use advanced `code_search` for definitions, syntactic usages, text, or matching paths. When `exec_command` returns a live session, \

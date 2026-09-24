@@ -579,7 +579,7 @@ impl SubagentController {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| {
                 format!(
-                    "You are the VT Code background subagent `{}`. Summarize readiness briefly, inspect the workspace at a high level, then remain idle until the process is terminated.",
+                    "You are the VT Code background subagent `{}`, started without a specific task. Inspect the workspace at a high level, reply with a short readiness summary (what the project is and what you are set up to do), then end your turn; the process keeps running until it is stopped.",
                     spec.name
                 )
             });

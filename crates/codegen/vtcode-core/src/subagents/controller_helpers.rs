@@ -108,6 +108,26 @@ fn transcript_line_from_message(message: &Message) -> Option<String> {
     Some(format!("{role}: {content}"))
 }
 
+/// Parse an explicit `Decision: APPROVED` / `Decision: REJECTED` line from a
+/// verifier summary. Markdown emphasis around the label is ignored. Returns
+/// `None` when no decision line is present or the line names neither outcome,
+/// so the caller can fall back to keyword heuristics.
+pub(super) fn parse_verifier_decision(summary: &str) -> Option<bool> {
+    summary.lines().rev().find_map(|line| {
+        let lower = line.trim().trim_start_matches(['-', '*', '#', ' ']).to_ascii_lowercase();
+        let rest = lower.strip_prefix("decision")?;
+        let value = rest.trim_start_matches(['*', ' ']).strip_prefix(':')?;
+        let value = value.trim_start_matches(['*', ' ', '`']);
+        if value.starts_with("reject") {
+            Some(false)
+        } else if value.starts_with("approve") {
+            Some(true)
+        } else {
+            None
+        }
+    })
+}
+
 /// Extract issue descriptions from a verifier sub-agent's summary text.
 ///
 /// Looks for lines starting with common issue markers (e.g. "- ISSUE:",
