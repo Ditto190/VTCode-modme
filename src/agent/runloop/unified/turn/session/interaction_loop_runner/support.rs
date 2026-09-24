@@ -18,6 +18,7 @@ use vtcode_core::llm::provider as uni;
 use vtcode_core::scheduler::{DurableTaskStore, SchedulerDaemon};
 use vtcode_core::tools::continuation::{PtyContinuationArgs, ReadChunkContinuationArgs};
 use vtcode_core::tools::terminal_app::{EditorLaunchConfig, TerminalAppLauncher};
+use vtcode_core::tools::tool_intent::VERIFIER_SHELL_FORM_NOTE;
 use vtcode_core::ui::theme;
 use vtcode_core::ui::{inline_theme_from_core_styles, to_tui_appearance};
 use vtcode_core::utils::ansi::MessageStyle;
@@ -338,11 +339,11 @@ pub(super) fn stalled_follow_up_recovery_prompt(stall_reason: &str, has_fallback
 pub(super) fn stalled_verification_resume_directive(default_verifier: Option<&str>) -> String {
     let command = default_verifier.unwrap_or("cargo check --locked");
     format!(
-        "Previous turn stalled with edits still awaiting verification: run `{command}` with exec_command \
-        standalone or as a pure `&&` chain (no pipes, no `;`/`||`; cap output with `max_output_tokens`) \
-        and let it exit 0 first, then resume the original request from where it stalled. Do not conclude, \
-        summarize, or claim completion until the verification gate clears; a failed verifier grants bounded \
-        fix-up edits before re-verify is required."
+        "Previous turn stalled with edits still awaiting verification. Run `{command}` with `exec_command`, \
+        standalone or as a pure `&&` chain of verifiers, and once it exits 0 resume the original request from where \
+        it stalled. {VERIFIER_SHELL_FORM_NOTE} Do not conclude or claim completion while the gate is pending: the turn \
+        cannot complete until a verifier passes, and a failed verifier grants a bounded number of fix-up edits before \
+        the next verification."
     )
 }
 

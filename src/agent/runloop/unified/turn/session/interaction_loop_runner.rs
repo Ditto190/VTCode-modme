@@ -39,8 +39,23 @@ use support::{
 pub(crate) use support::{handle_select_primary_agent, try_resume_latest_session};
 use vtcode_config::loader::SimpleConfigWatcher;
 
-const REPEATED_FOLLOW_UP_DIRECTIVE: &str = "User has asked to continue repeatedly. Do not keep exploring silently. In your next assistant response, provide a concrete status update: completed work, current blocker, and the exact next action. If a recent tool result or tool error already provides `fallback_tool`, `fallback_tool_args`, `hint`, or `next_action`, use that guidance directly instead of retrying the same failing call or asking for more follow-up.";
-const REPEATED_FOLLOW_UP_STALLED_DIRECTIVE: &str = "Previous turn stalled or aborted and the user asked to continue repeatedly. Recover autonomously without asking for more user prompts: identify the likely root cause from recent errors, execute exactly one adjusted strategy, and then provide either a completion summary or a final blocker review with specific next action. If the last tool result or tool error includes `fallback_tool`, `fallback_tool_args`, `hint`, or `next_action`, use that guidance first. Do not repeat a failing tool call when the tool already provided the next step.";
+/// Shared by both repeated-follow-up directives: structured next-step fields
+/// from tool results are the cheapest recovery path.
+const REPEATED_FOLLOW_UP_TOOL_GUIDANCE: &str = "If a recent tool result or tool error provides `fallback_tool`, \
+`fallback_tool_args`, `hint`, or `next_action`, start from that guidance; repeating the failing call returns the same \
+failure.";
+
+fn repeated_follow_up_directive(stalled: bool) -> String {
+    let situation = if stalled {
+        "The previous turn stalled or aborted, and the user has asked to continue more than once. Identify the likely \
+         cause from recent errors, try one adjusted approach, then end with either a completion summary or a blocker \
+         report naming the specific next action; asking the user to continue again would repeat the stall."
+    } else {
+        "The user has asked to continue more than once without a visible update. Make your next response a concrete \
+         status update: completed work, current blocker, and the exact next action."
+    };
+    format!("{situation} {REPEATED_FOLLOW_UP_TOOL_GUIDANCE}")
+}
 const SCHEDULED_PROMPT_INACTIVITY_GRACE: Duration = Duration::from_secs(2);
 const DURABLE_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -604,7 +619,7 @@ pub(super) async fn run_interaction_loop_impl(
                         .push(uni::Message::system(stalled_verification_resume_directive(verifier.as_deref())));
                 } else {
                     ctx.conversation_history
-                        .push(uni::Message::system(REPEATED_FOLLOW_UP_STALLED_DIRECTIVE.to_string()));
+                        .push(uni::Message::system(repeated_follow_up_directive(true)));
                 }
                 if let Some((tool, args)) = fallback_hint.as_ref() {
                     let args_preview = fallback_args_preview(args);
@@ -627,8 +642,7 @@ pub(super) async fn run_interaction_loop_impl(
                     },
                 )?;
             } else {
-                let directive = REPEATED_FOLLOW_UP_DIRECTIVE;
-                ctx.conversation_history.push(uni::Message::system(directive.to_string()));
+                ctx.conversation_history.push(uni::Message::system(repeated_follow_up_directive(false)));
                 ctx.renderer
                     .line(MessageStyle::Info, "Repeated follow-up detected; forcing a concrete status/conclusion.")?;
             }

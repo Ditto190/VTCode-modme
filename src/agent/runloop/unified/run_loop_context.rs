@@ -149,6 +149,11 @@ impl ToolBudgetWarning {
     }
 }
 
+
+/// Shared tail of the tool-call and wall-clock budget exhaustion directives.
+const BUDGET_EXHAUSTED_SYNTHESIS_NOTE: &str = "Tools are disabled for the rest of this turn, so further tool calls are \
+skipped. Synthesize your final answer now from the tool outputs already gathered in this conversation.";
+
 impl ToolBudgetExhaustion {
     pub(crate) fn policy_violation_message(self) -> String {
         format!("Policy violation: exceeded max tool calls per turn ({})", self.max)
@@ -167,7 +172,7 @@ impl ToolBudgetExhaustion {
     pub(crate) fn synthesis_directive_message(self) -> String {
         debug_assert!(self.max > 0, "disabled tool-call caps must not emit exhaustion");
         format!(
-            "Tool-call budget exhausted for this turn ({}/{}). Tools are disabled for the rest of this turn. Do NOT emit more tool calls. Synthesize your final answer now from the tool outputs already gathered in this conversation.",
+            "Tool-call budget exhausted for this turn ({}/{}). {BUDGET_EXHAUSTED_SYNTHESIS_NOTE}",
             self.used, self.max
         )
     }
@@ -254,7 +259,7 @@ impl ToolWallClockExhaustion {
     /// the in-turn synthesis nudge that the raw per-call policy errors lack.
     pub(crate) fn synthesis_directive_message(self) -> String {
         format!(
-            "Tool wall-clock budget exhausted for this turn ({}s). Tools are disabled for the rest of this turn. Do NOT emit more tool calls. Synthesize your final answer now from the tool outputs already gathered in this conversation.",
+            "Tool wall-clock budget exhausted for this turn ({}s). {BUDGET_EXHAUSTED_SYNTHESIS_NOTE}",
             self.max_secs
         )
     }
@@ -2610,7 +2615,7 @@ mod tests {
     fn tool_budget_exhaustion_synthesis_directive_matches_contract() {
         assert_eq!(
             ToolBudgetExhaustion { used: 4, max: 4, remaining: 0 }.synthesis_directive_message(),
-            "Tool-call budget exhausted for this turn (4/4). Tools are disabled for the rest of this turn. Do NOT emit more tool calls. Synthesize your final answer now from the tool outputs already gathered in this conversation."
+            "Tool-call budget exhausted for this turn (4/4). Tools are disabled for the rest of this turn, so further tool calls are skipped. Synthesize your final answer now from the tool outputs already gathered in this conversation."
         );
     }
 
@@ -2733,7 +2738,7 @@ mod tests {
         assert_eq!(exhaustion.skipped_call_message(), "Tool wall-clock budget exhausted for this turn; call skipped.");
         assert_eq!(
             exhaustion.synthesis_directive_message(),
-            "Tool wall-clock budget exhausted for this turn (600s). Tools are disabled for the rest of this turn. Do NOT emit more tool calls. Synthesize your final answer now from the tool outputs already gathered in this conversation."
+            "Tool wall-clock budget exhausted for this turn (600s). Tools are disabled for the rest of this turn, so further tool calls are skipped. Synthesize your final answer now from the tool outputs already gathered in this conversation."
         );
     }
 

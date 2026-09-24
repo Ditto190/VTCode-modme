@@ -270,10 +270,10 @@ pub(crate) async fn tracker_completed_count(tool_registry: &vtcode_core::tools::
 pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
     let joined = incomplete.join(", ");
     format!(
-        "Continue working autonomously. The task tracker still has incomplete steps: {joined}. \
-         Execute the next concrete tracker step now using tools; do not ask the user to resume, \
-         do not end with a status-only recap, and update task_tracker as steps complete. \
-         Stop only for a genuine user decision, permission/policy block, or when the tracker is complete."
+        "The task tracker still has incomplete steps: {joined}. This follow-up is the harness resuming \
+         the work, so do not ask the user to resume; continue with the next step using tools and update \
+         task_tracker as steps complete. A status-only recap does not advance the tracker. End the turn \
+         when the tracker is complete, or when a user decision or a permission/policy block stops progress."
     )
 }
 

@@ -159,7 +159,7 @@ impl PlanValidationReport {
         result.push_str("\n\nRewrite every implementation step in this canonical one-line form:\n");
         result.push_str(CANONICAL_STEP_FORMAT);
         result.push_str(&format!(
-            "\nEach step MUST name a concrete file path or symbol (not prose) and one concrete verify command or observable check. \
+            "\nEach step must name a concrete file path or symbol (not prose) and one concrete verify command or observable check. \
              Comma-separated verify entries must each be a command or an observable check; commas inside single or double quotes stay inside one item. \
              Valid examples: {PLANNING_VERIFY_VALID_EXAMPLES}. \
              Invalid examples: {PLANNING_VERIFY_INVALID_EXAMPLES}; vague prose and generic VCS-only checks do not satisfy this validator. \
