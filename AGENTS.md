@@ -2,7 +2,14 @@
 
 Keep this file concise and under 150 lines. Root guidance belongs here; detailed explanations belong in `docs/`, skills, `.vtcode/memory/`, or crate-local `AGENTS.md` files.
 
-Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/prompts/runtime_guidance.rs`. Keep this file and module `AGENTS.md` files focused on project and maintainer guidance; dynamically loaded instruction files are user-controlled context, not a security boundary.
+Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/prompts/runtime_guidance.rs`. Keep this file and module `AGENTS.md` files focused on project and maintainer guidance; dynamically loaded instruction files are user-controlled context, not a security boundary. This workflow is repo-only: do not copy it to other projects or into shipped prompts.
+
+## Core Workflow (repo-only)
+
+- Orient: read `.vtcode/memory/` (`gotchas.md`, `issues.md`, `library.md`, `decisions.md`) before acting; for self-bugs also read `.vtcode/logs/trajectory.jsonl` + `.vtcode/checkpoints`.
+- Reference `openai/codex` first for every task: query DeepWiki MCP (`deepwiki` in `.mcp.json` / `vtcode.toml [mcp.providers]`, e.g. "How does openai/codex implement <feature> in `codex-rs/`?"); if unavailable, fallback to `gh api repos/openai/codex/...` or `git fetch https://github.com/openai/codex`.
+- Implement surgically in the existing small crate; when adapting a Codex pattern cite the source path (`codex-rs/...`) and keep VT Code invariants (`ThreadEvent`, harness config split, sandbox boundary).
+- Verify with `./scripts/check-dev.sh` + `cargo nextest run`; record durable learnings in `.vtcode/memory/` (local-only, gitignored).
 
 ## Rules
 
@@ -30,18 +37,11 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 
 ## Detailed Guides
 
-- Development overview and setup: [docs/development/README.md](docs/development/README.md), [docs/development/DEVELOPMENT_SETUP.md](docs/development/DEVELOPMENT_SETUP.md).
-- Testing: [docs/development/testing.md](docs/development/testing.md), [docs/guides/pty-integration-testing.md](docs/guides/pty-integration-testing.md).
-- Evals: [docs/guides/eval.md](docs/guides/eval.md) — suite authoring, `vtcode eval`, reproducible JSON envelopes.
-- CI/release: [docs/development/ci-cd.md](docs/development/ci-cd.md), [docs/development/CHANGELOG_GENERATION.md](docs/development/CHANGELOG_GENERATION.md).
-- Architecture/conventions: [docs/guides/code-organization-patterns.md](docs/guides/code-organization-patterns.md), [docs/guides/async-architecture.md](docs/guides/async-architecture.md), [docs/development/rust-performance-principles.md](docs/development/rust-performance-principles.md).
-- Tools/security: [docs/development/grep-tool-guide.md](docs/development/grep-tool-guide.md), [docs/development/grep-quick-reference.md](docs/development/grep-quick-reference.md), [docs/development/COMMAND_SECURITY_MODEL.md](docs/development/COMMAND_SECURITY_MODEL.md), [docs/guides/security.md](docs/guides/security.md).
-- WebMCP bridge: [docs/development/webmcp.md](docs/development/webmcp.md) — authenticated browser editing, pairing, runtime adapters, and security boundaries.
-- Harness/agent behavior: [docs/guides/agent-loop-contract.md](docs/guides/agent-loop-contract.md), [docs/harness/INDEX.md](docs/harness/INDEX.md), [docs/harness/CORE_BELIEFS.md](docs/harness/CORE_BELIEFS.md), [docs/harness/ARCHITECTURAL_INVARIANTS.md](docs/harness/ARCHITECTURAL_INVARIANTS.md), [docs/harness/AGENT_LEGIBILITY_GUIDE.md](docs/harness/AGENT_LEGIBILITY_GUIDE.md).
-- Prompt/runtime boundaries: [docs/development/runtime-guidance.md](docs/development/runtime-guidance.md).
-- Planning and automation: [docs/guides/planning-workflow.md](docs/guides/planning-workflow.md), [docs/guides/full-automation.md](docs/guides/full-automation.md), [docs/development/EXECUTION_POLICY.md](docs/development/EXECUTION_POLICY.md).
-- Loop engineering: [docs/project/PLAN-loop-engineering.md](docs/project/PLAN-loop-engineering.md) — worktree isolation, propose/verify sub-agents, loop state persistence, cost guardrails.
-- Models/providers: [docs/development/ADDING_MODELS.md](docs/development/ADDING_MODELS.md), [docs/development/MODEL_ADDITION_WORKFLOW.md](docs/development/MODEL_ADDITION_WORKFLOW.md), [docs/development/MODEL_ADDITION_CHECKLIST.md](docs/development/MODEL_ADDITION_CHECKLIST.md).
+- Development, testing, evals: [README](docs/development/README.md), [SETUP](docs/development/DEVELOPMENT_SETUP.md), [testing](docs/development/testing.md), [pty-testing](docs/guides/pty-integration-testing.md), [eval](docs/guides/eval.md).
+- CI/release + models: [ci-cd](docs/development/ci-cd.md), [CHANGELOG](docs/development/CHANGELOG_GENERATION.md), [ADDING_MODELS](docs/development/ADDING_MODELS.md), [WORKFLOW](docs/development/MODEL_ADDITION_WORKFLOW.md), [CHECKLIST](docs/development/MODEL_ADDITION_CHECKLIST.md).
+- Architecture + tools/security: [code-organization](docs/guides/code-organization-patterns.md), [async](docs/guides/async-architecture.md), [perf](docs/development/rust-performance-principles.md), [grep-guide](docs/development/grep-tool-guide.md), [grep-ref](docs/development/grep-quick-reference.md), [COMMAND_SECURITY](docs/development/COMMAND_SECURITY_MODEL.md), [security](docs/guides/security.md).
+- WebMCP + harness: [webmcp](docs/development/webmcp.md), [agent-loop](docs/guides/agent-loop-contract.md), [harness INDEX](docs/harness/INDEX.md), [CORE_BELIEFS](docs/harness/CORE_BELIEFS.md), [INVARIANTS](docs/harness/ARCHITECTURAL_INVARIANTS.md), [LEGIBILITY](docs/harness/AGENT_LEGIBILITY_GUIDE.md).
+- Prompt/runtime + planning/automation + loop: [runtime-guidance](docs/development/runtime-guidance.md), [planning](docs/guides/planning-workflow.md), [full-auto](docs/guides/full-automation.md), [EXECUTION_POLICY](docs/development/EXECUTION_POLICY.md), [loop-eng](docs/project/PLAN-loop-engineering.md).
 
 ## Workspace
 
@@ -109,7 +109,7 @@ After significant changes (new modules, convention shifts, discovered gotchas, p
 
 ## Project Memory
 
-Session-independent knowledge lives in `.vtcode/memory/` (gitignored): `gotchas.md`, `issues.md`, `library.md`, `decisions.md`, and `scratch.md`. Read these files when context is needed. Write durable learnings there. See `.vtcode/memory/README.md` for format rules.
+Session-independent knowledge lives in `.vtcode/memory/` (gitignored, repo-local only): `gotchas.md`, `issues.md`, `library.md`, `decisions.md`, and `scratch.md`. Read these files when context is needed. Write durable learnings there. DeepWiki-first `openai/codex` pattern lives in `library.md` (2026-09-24). See `.vtcode/memory/README.md` for format rules.
 
 ## Build & Verification
 
@@ -136,8 +136,7 @@ Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profil
 ## Testing
 
 - Runner: `cargo nextest run` (parallel, fast). **Always use nextest — never `cargo test`**.
-- Single test: `cargo nextest run test_name`.
-- Single crate: `cargo nextest run -p vtcode-core`.
+- Single test/crate: `cargo nextest run test_name` / `cargo nextest run -p vtcode-core`.
 - Profiles: `default` (full), `quick` (TDD, skips integration/e2e/slow), `changed` (delta since HEAD~1), `ci` (retries flaky, no fail-fast).
 - Harness regressions: `cargo nextest run -p vtcode-core -E 'binary(/pty_tests/)'`; `cargo nextest run -p vtcode-bash-runner -E 'binary(/pipe_tests/)'`; `cargo nextest run -p vtcode -E 'binary(/inline_events/)'`.
 - Integration tests (Rust): `tests/` at workspace root. Shell/script tests: `scripts/tests/`. Unit tests: in-module.
@@ -146,5 +145,5 @@ Narrow commands: `cargo check`, `cargo nextest run`, `cargo nextest run --profil
 
 - LLM providers: use the `adding-llm-providers` skill. The `/model` picker uses `ModelId::all_models()`; `builtin_model_presets()` is used by `ModelsManager`. Both may need updates.
 - New workspace crates: use the `adding-workspace-crate` skill. This affects more than `Cargo.toml`; all workspace path dependencies need `version` fields.
-- Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters. GitHub refs (issues/PRs/repos/files/URLs): prefer `gh` CLI over `webfetch` — authenticated, structured, repo-aware.
+- Structural code work: prefer `ast-grep` over text grep for code shape, calls, impls, and codemods. Use `rg` for prose, logs, and config strings. Always invoke `ast-grep`, not the `sg` alias. Use `exec_command` or the ast-grep skill for arbitrary structural patterns. Advanced `code_search` accepts one literal query and bounded filters. GitHub refs: prefer `gh` CLI over `webfetch`; for `openai/codex` reference prefer DeepWiki MCP first, `gh`/git-fetch fallback (see Core Workflow).
 - Cap large command output: `COMMAND 2>&1 | head -c 4000` — but never pipe verifier commands (`cargo check --locked`, `cargo fmt --all -- --check`, `cargo nextest run`); pass `max_output_tokens` instead, since a pipe masks the verifier's exit status and never clears the verification gate.
