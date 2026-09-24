@@ -180,10 +180,9 @@ pub fn generate_tool_guidelines_for_profile(
         // in every stack (`cargo check`, `tsc --noEmit`, `pytest --collect-only`).
         lines.push("- Run fast checks before full builds.".to_string());
     }
-    // "Diagnose from evidence; never bypass safeguards" and the
-    // completion-as-checkpoint line are already stated unconditionally in the
-    // Runtime Guidance / operating-profile sections; repeating them here
-    // wastes prompt budget.
+    // Tool-failure diagnosis, the safeguard rule, and the verification outcome
+    // rule (report completion only after a check you ran) each have one home in
+    // Runtime Guidance, which every profile includes; do not restate them here.
     if has_stdin {
         lines.push(format!(
             "- `write_stdin`: reuse the existing `session_id` of an active exec session; prefer the pre-filled `next_wait_args` over `next_continue_args` polling; `spool_complete: false` marks readable partial output; an exited pending spool arrives on a later wait{CROSS_TURN_RESUME_HINT_CLAUSE}"
