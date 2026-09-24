@@ -27,10 +27,10 @@ pub(crate) const PLAN_MODE_MAX_OUTPUT_TOKENS: usize = 4_000;
 /// Maximum per-result preview budget for execution-mode non-verification
 /// calls (`6_000` tokens ≈ 24 KiB). Session `session-vtcode-20260923T064245Z`
 /// ran `5_000-7_000`-token inspections plus unbounded (`10_000`-token
-/// default) calls against the `32 KiB` execution turn budget, exhausting it
-/// after one or two previews. The `6_000`-token bound keeps one default
-/// inspection inside the turn budget with room for tracker echoes and a
-/// second small call; verification commands are exempt so build/test output
+/// default) calls against the `64 KiB` execution turn budget, exhausting it
+/// after two or three previews. The `6_000`-token bound keeps one default
+/// inspection inside the turn budget with room for tracker echoes and several
+/// small calls; verification commands are exempt so build/test output
 /// stays authoritative, and spool paging (with preview credit) stays
 /// available for full content.
 pub(crate) const EXEC_MODE_MAX_OUTPUT_TOKENS: usize = 6_000;

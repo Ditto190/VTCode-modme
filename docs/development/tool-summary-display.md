@@ -108,7 +108,7 @@ three-line tail command preview.
 ## Model-visible tool output budget
 
 Tool-result previews copied into provider-facing history share an
-aggregate budget per turn (32 KiB execution, 96 KiB planning). The existing per-result spool limit still applies;
+aggregate budget per turn (64 KiB execution, 96 KiB planning). The existing per-result spool limit still applies;
 when the aggregate budget is exhausted, later results expose only bounded
 metadata such as the tool name, spool path, byte count, completion state, and a
 short note. Complete output remains in the internal spool and current-session

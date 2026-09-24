@@ -895,7 +895,7 @@ impl HarnessTurnState {
     }
 
     /// Test-only execution-budget shorthand so exec-mode tests avoid
-    /// repeating the `32 KiB` denominator on every call.
+    /// repeating the `64 KiB` denominator on every call.
     #[cfg(test)]
     pub(crate) fn bound_model_visible_tool_preview(&mut self, tool_name: Option<&str>, content: String) -> String {
         self.bound_model_visible_tool_preview_with_budget(
@@ -915,7 +915,7 @@ impl HarnessTurnState {
     /// recursively growing prompt.
     ///
     /// Callers pass the effective turn budget (`turn_preview_budget_bytes`)
-    /// so planning (`96 KiB`) and execution (`32 KiB`) share one accounting
+    /// so planning (`96 KiB`) and execution (`64 KiB`) share one accounting
     /// path instead of duplicated ledgers.
     #[cfg(test)]
     pub(crate) fn bound_model_visible_tool_preview_with_budget(

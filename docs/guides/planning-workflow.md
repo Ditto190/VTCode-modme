@@ -506,7 +506,7 @@ distinct inspections remain eligible for continued research. The generic
  fired.
 
 Tool previews shown to the model share a bounded per-turn budget (96 KiB in
-planning, 32 KiB execution); plan-mode non-verification inspections default
+planning, 64 KiB execution); plan-mode non-verification inspections default
 to a smaller per-result preview (~8 KiB when omitted) and explicit values
 are clamped to ~16 KiB, while verification commands keep the full default. Once it is
 exhausted, further tool responses arrive as metadata stubs without body
