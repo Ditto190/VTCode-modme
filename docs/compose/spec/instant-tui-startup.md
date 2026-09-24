@@ -3,7 +3,7 @@ feature: instant-tui-startup
 status: delivered
 updated: 2026-09-24
 branch: fix/instant-tui-startup-regression
-commits: # filled at delivery
+commits: 39390a615639f8aaed4476a80a55a3de0aa12e98..8575924f89c907d945678ca77e6672b90ee902f5
 ---
 
 # Instant TUI Startup
