@@ -144,7 +144,7 @@ mod tests {
             &self,
             _request: super::uni::LLMRequest,
         ) -> Result<super::uni::LLMResponse, super::uni::LLMError> {
-            unreachable!("stub provider never generates in settings tests")
+            panic!("stub provider never generates in settings tests")
         }
 
         fn supported_models(&self) -> Vec<String> {

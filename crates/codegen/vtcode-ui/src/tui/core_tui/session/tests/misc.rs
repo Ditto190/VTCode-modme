@@ -1,4 +1,8 @@
 #![allow(
+    clippy::float_cmp,
+    reason = "phase is a continuous f32; tests assert exact phase transitions"
+)]
+#![allow(
     missing_docs,
     reason = "Intentional compatibility, platform, or test-only suppression."
 )]

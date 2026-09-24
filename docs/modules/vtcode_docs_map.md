@@ -905,7 +905,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/compose/spec/instant-tui-startup.md`
   - **Content**: Instant TUI Startup
-  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **Topics**: Report, [S1] Problem, [S2] Design, Tasks
   - **User Questions**: "What can you tell me about Instant TUI Startup?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/protocols/KITTY_KEYBOARD_PROTOCOL_RESTORATION.md`
