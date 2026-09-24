@@ -588,15 +588,16 @@ impl AnthropicProvider {
         original_body: &Value,
         plan: &RefusalRetryPlan,
     ) -> Option<AnthropicHttpResponse> {
-        let mut body = plan.retry_body(original_body, &self.model);
+        let fallback_retry::RefusalRetryBody { mut body, with_token } = plan.retry_body(original_body, &self.model);
         tracing::info!(
             provider = "anthropic",
             recommended_model = %plan.model,
+            with_credit_token = with_token,
             "refusal fallback could not run server-side; retrying once on the recommended model"
         );
-        match self.send_request(&plan.retry_request(request, true), &body).await {
+        match self.send_request(&plan.retry_request(request, with_token), &body).await {
             Ok(response) => Some(response),
-            Err(err) if fallback_retry::rejects_credit_token(&err) => {
+            Err(err) if with_token && fallback_retry::rejects_credit_token(&err) => {
                 tracing::warn!(
                     provider = "anthropic",
                     error = %err,
@@ -1739,6 +1740,21 @@ mod tests {
         }
     }
 
+    /// An Opus 5.5 provider whose thinking config (`display: "summarized"`)
+    /// is valid on the recommended Opus 4.8 as sent, so a refusal retry can
+    /// match the refused request exactly and redeem the credit token.
+    fn credit_retry_provider(server: &wiremock::MockServer) -> AnthropicProvider {
+        let mut provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        provider.anthropic_config.thinking_display = Some(vtcode_config::ThinkingDisplayMode::Summarized);
+        provider
+    }
+
     fn refusal_with_recommendation() -> serde_json::Value {
         json!({
             "content": [],
@@ -1786,13 +1802,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let provider = AnthropicProvider::new_with_client(
-            "test-key".to_string(),
-            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
-            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
-            format!("{}/v1", server.uri()),
-            vtcode_config::TimeoutsConfig::default(),
-        );
+        let provider = credit_retry_provider(&server);
         let response = LLMProvider::generate(
             &provider,
             LLMRequest {
@@ -1848,6 +1858,56 @@ mod tests {
             .mount(&server)
             .await;
 
+        let provider = credit_retry_provider(&server);
+        let response = LLMProvider::generate(
+            &provider,
+            LLMRequest {
+                model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("uncredited retry should succeed");
+
+        assert_eq!(response.content.as_deref(), Some("uncredited answer"));
+    }
+
+    #[tokio::test]
+    async fn generate_retry_without_credit_token_when_thinking_must_be_rewritten() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
+                body_has(req, "model", Some("claude-opus-5-5")) && body["thinking"]["display"] == "updates"
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(refusal_with_recommendation()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // Opus 4.8 rejects `display: "updates"`, so the retry's thinking
+        // differs from the refused request and the token could never match:
+        // one request, sent without the token.
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
+                body_has(req, "model", Some("claude-opus-4-8"))
+                    && body_has(req, "fallback_credit_token", None)
+                    && body["thinking"].get("display").is_none()
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "text", "text": "uncredited answer"}],
+                "stop_reason": "end_turn"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
         let provider = AnthropicProvider::new_with_client(
             "test-key".to_string(),
             models::anthropic::CLAUDE_OPUS_5_5.to_string(),
@@ -1867,6 +1927,7 @@ mod tests {
         .expect("uncredited retry should succeed");
 
         assert_eq!(response.content.as_deref(), Some("uncredited answer"));
+        assert_eq!(response.model, "claude-opus-4-8");
     }
 
     #[tokio::test]
@@ -1952,13 +2013,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let provider = AnthropicProvider::new_with_client(
-            "test-key".to_string(),
-            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
-            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
-            format!("{}/v1", server.uri()),
-            vtcode_config::TimeoutsConfig::default(),
-        );
+        let provider = credit_retry_provider(&server);
         let mut stream = LLMProvider::stream(
             &provider,
             LLMRequest {

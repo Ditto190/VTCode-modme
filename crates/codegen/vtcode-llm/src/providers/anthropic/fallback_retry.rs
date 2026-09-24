@@ -81,20 +81,22 @@ impl RefusalRetryPlan {
     }
 
     /// The retry body: the refused request's exact payload retargeted at the
-    /// recommended model, with the credit token and without `fallbacks`.
+    /// recommended model, without `fallbacks`, and with the credit token when
+    /// it can still be redeemed.
     ///
     /// `thinking` is rewritten only when the recommended model would reject
     /// the original config outright (for example `display: "updates"`); the
-    /// unchanged config would fail anyway, and a mismatched credit token is
-    /// handled by resending without it.
-    pub(crate) fn retry_body(&self, original: &Value, default_model: &str) -> Value {
+    /// unchanged config would fail anyway. A credit retry must match the
+    /// refused request's `thinking` exactly, so a rewritten body is sent
+    /// without the token from the start (credit forfeited) instead of
+    /// spending a request on a guaranteed mismatch.
+    pub(crate) fn retry_body(&self, original: &Value, default_model: &str) -> RefusalRetryBody {
         let mut body = original.clone();
         let Some(object) = body.as_object_mut() else {
-            return body;
+            return RefusalRetryBody { body, with_token: false };
         };
         object.insert("model".to_string(), Value::String(self.model.clone()));
         object.remove("fallbacks");
-        object.insert(CREDIT_TOKEN_FIELD.to_string(), Value::String(self.credit_token.clone()));
 
         let effort = object
             .get("output_config")
@@ -106,11 +108,21 @@ impl RefusalRetryPlan {
             .and_then(|thinking| serde_json::from_value::<ThinkingConfig>(thinking.clone()).ok())
             .and_then(|thinking| rewrite_thinking_for_model(&thinking, &self.model, default_model, effort.as_deref()))
             .and_then(|thinking| serde_json::to_value(thinking).ok());
+        let with_token = rewritten.is_none();
         if let Some(thinking) = rewritten {
             object.insert("thinking".to_string(), thinking);
+        } else {
+            object.insert(CREDIT_TOKEN_FIELD.to_string(), Value::String(self.credit_token.clone()));
         }
-        body
+        RefusalRetryBody { body, with_token }
     }
+}
+
+/// A refusal retry payload and whether it redeems the credit token.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RefusalRetryBody {
+    pub(crate) body: Value,
+    pub(crate) with_token: bool,
 }
 
 /// Removes the credit token from a retry body (credit forfeited).
@@ -217,25 +229,49 @@ mod tests {
             "model": "claude-opus-5-5",
             "system": "sys",
             "messages": [{ "role": "user", "content": "hi" }],
-            "thinking": { "type": "adaptive", "display": "updates" },
+            "thinking": { "type": "adaptive", "display": "summarized" },
             "fallbacks": "default",
             "max_tokens": 64000,
             "stream": true
         });
 
-        let mut body = plan.retry_body(&original, "claude-opus-5-5");
+        let RefusalRetryBody { mut body, with_token } = plan.retry_body(&original, "claude-opus-5-5");
+        assert!(with_token);
         assert_eq!(body["model"], "claude-opus-4-8");
         assert_eq!(body["fallback_credit_token"], "tok");
         assert!(body.get("fallbacks").is_none());
         assert_eq!(body["system"], original["system"]);
         assert_eq!(body["messages"], original["messages"]);
+        assert_eq!(body["thinking"], original["thinking"]);
         assert_eq!(body["max_tokens"], 64000);
         assert_eq!(body["stream"], true);
-        // `display: "updates"` is rejected outside Opus 5.5 / Fable 5.x.
-        assert_eq!(body["thinking"], json!({ "type": "adaptive" }));
 
         strip_credit_token(&mut body);
         assert!(body.get("fallback_credit_token").is_none());
+    }
+
+    #[test]
+    fn retry_body_with_rewritten_thinking_forfeits_the_credit_token() {
+        let plan = RefusalRetryPlan {
+            model: "claude-opus-4-8".to_string(),
+            credit_token: "tok".to_string(),
+        };
+        let original = json!({
+            "model": "claude-opus-5-5",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "thinking": { "type": "adaptive", "display": "updates" },
+            "fallbacks": "default",
+            "max_tokens": 64000
+        });
+
+        let RefusalRetryBody { body, with_token } = plan.retry_body(&original, "claude-opus-5-5");
+        // `display: "updates"` is rejected outside Opus 5.5 / Fable 5.x, and
+        // the rewritten `thinking` can never match the credit token.
+        assert_eq!(body["thinking"], json!({ "type": "adaptive" }));
+        assert!(!with_token);
+        assert!(body.get("fallback_credit_token").is_none());
+        assert_eq!(body["model"], "claude-opus-4-8");
+        assert!(body.get("fallbacks").is_none());
     }
 
     #[test]
