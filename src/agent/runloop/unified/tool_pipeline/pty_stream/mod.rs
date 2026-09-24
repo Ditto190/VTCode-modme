@@ -375,6 +375,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn expanded_live_preview_never_exceeds_ten_rows() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let (runtime, callback) =
+            PtyStreamRuntime::start(handle, Default::default(), 50, None, test_pty_config(), None, true);
+
+        let chunk = (1..=15).map(|n| format!("line-{n:02}")).collect::<Vec<_>>().join("\n") + "\n";
+        callback("run_pty_cmd", &chunk);
+        runtime.shutdown(anstyle::Color::Ansi(AnsiColor::Green)).await;
+
+        let commands = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+        let last_preview = commands
+            .iter()
+            .rev()
+            .find_map(|command| match command {
+                InlineCommand::ReplaceLast { lines, .. } => Some(lines),
+                _ => None,
+            })
+            .expect("expanded execution should emit a live preview");
+        assert!(
+            last_preview.len() <= 10,
+            "live preview must stay within the 10-row budget, got {} rows",
+            last_preview.len()
+        );
+        let text = last_preview
+            .iter()
+            .map(|row| row.iter().map(|segment| segment.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("line-01"), "head row should survive: {text:?}");
+        assert!(text.contains("line-15"), "tail row should survive: {text:?}");
+        assert!(!text.contains("line-05"), "middle row should be trimmed: {text:?}");
+    }
+
+    #[tokio::test]
     async fn pty_stream_runtime_drop_aborts_background_task() {
         let (drop_tx, drop_rx) = oneshot::channel();
         let notifier = DropNotifier(Some(drop_tx));
