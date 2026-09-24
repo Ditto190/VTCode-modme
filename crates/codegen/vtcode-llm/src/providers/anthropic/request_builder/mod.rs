@@ -27,7 +27,7 @@ use super::capabilities::{
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
 use system::{SystemPromptBuildResult, build_system_prompt};
-use thinking::build_thinking_config;
+use thinking::{build_thinking_config, rewrite_thinking_for_model};
 use tools::{build_tool_choice, build_tools};
 
 #[cfg(test)]
@@ -238,6 +238,7 @@ pub(crate) fn convert_to_anthropic_format(
     } else {
         None
     };
+    let fallbacks = build_fallbacks(request, thinking_val.as_ref(), effort_value.as_deref(), ctx.model);
     let output_format = request
         .output_format
         .as_ref()
@@ -252,11 +253,24 @@ pub(crate) fn convert_to_anthropic_format(
         None
     };
 
-    let effective_temperature = if thinking_val.is_some() || rejects_sampling(resolved_model, ctx.model) {
-        None
-    } else {
-        request.temperature
-    };
+    // Fallback entries cannot override sampling, so the top-level temperature
+    // is sent to every fallback model too; drop it when any of them would
+    // reject it.
+    let fallback_rejects_sampling = fallbacks.as_ref().is_some_and(|fallbacks| {
+        fallbacks.iter().any(|fb| {
+            rejects_sampling(&fb.model, ctx.model)
+                || fb
+                    .thinking
+                    .as_ref()
+                    .is_some_and(|thinking| !matches!(thinking, ThinkingConfig::Disabled))
+        })
+    });
+    let effective_temperature =
+        if thinking_val.is_some() || rejects_sampling(resolved_model, ctx.model) || fallback_rejects_sampling {
+            None
+        } else {
+            request.temperature
+        };
 
     let top_level_cache_control =
         if ctx.prompt_cache_enabled && explicit_breakpoints_used < max_breakpoints && !has_uncached_runtime_context {
@@ -289,33 +303,7 @@ pub(crate) fn convert_to_anthropic_format(
         reasoning: reasoning_val,
         output_config: output_config.map(Into::into),
         context_management: request.context_management.clone(),
-        fallbacks: request.fallbacks.as_ref().map(|fallbacks| {
-            fallbacks
-                .iter()
-                .map(|fb| AnthropicFallbackParam {
-                    model: fb.model.clone(),
-                    max_tokens: fb.max_tokens,
-                    thinking: fb.thinking.as_ref().map(|t| match t {
-                        AnthropicThinkingConfig::Disabled => ThinkingConfig::Disabled,
-                        AnthropicThinkingConfig::Enabled { budget_tokens, display } => ThinkingConfig::Enabled {
-                            budget_tokens: *budget_tokens,
-                            display: display.as_ref().and_then(|d| match d.as_str() {
-                                "summarized" => Some(ThinkingDisplay::Summarized),
-                                "omitted" => Some(ThinkingDisplay::Omitted),
-                                _ => None,
-                            }),
-                        },
-                        AnthropicThinkingConfig::Adaptive { display } => ThinkingConfig::Adaptive {
-                            display: display.as_ref().and_then(|d| match d.as_str() {
-                                "summarized" => Some(ThinkingDisplay::Summarized),
-                                "omitted" => Some(ThinkingDisplay::Omitted),
-                                _ => None,
-                            }),
-                        },
-                    }),
-                })
-                .collect()
-        }),
+        fallbacks,
         fallback_credit_token: request.fallback_credit_token.clone(),
         stream: request.stream,
     };
@@ -329,6 +317,62 @@ pub(crate) fn convert_to_anthropic_format(
         message: format!("Serialization error: {e}"),
         metadata: None,
     })
+}
+
+/// Builds the server-side `fallbacks` entries.
+///
+/// The API merges each entry into the primary request, and the merged request
+/// must be valid as a direct request to the entry's model. An explicit thinking
+/// override is rewritten for its model; without one, the entry inherits the
+/// primary thinking config, so an explicit valid override is added whenever
+/// the fallback model would reject the inherited config.
+fn build_fallbacks(
+    request: &LLMRequest,
+    primary_thinking: Option<&ThinkingConfig>,
+    effort: Option<&str>,
+    default_model: &str,
+) -> Option<Vec<AnthropicFallbackParam>> {
+    let fallbacks = request.fallbacks.as_ref()?;
+    Some(
+        fallbacks
+            .iter()
+            .map(|fb| {
+                let thinking = match fb.thinking.as_ref().map(fallback_thinking_config) {
+                    Some(explicit) => Some(
+                        rewrite_thinking_for_model(&explicit, &fb.model, default_model, effort).unwrap_or(explicit),
+                    ),
+                    None => primary_thinking
+                        .and_then(|inherited| rewrite_thinking_for_model(inherited, &fb.model, default_model, effort)),
+                };
+                AnthropicFallbackParam {
+                    model: fb.model.clone(),
+                    max_tokens: fb.max_tokens,
+                    thinking,
+                }
+            })
+            .collect(),
+    )
+}
+
+fn fallback_thinking_config(thinking: &AnthropicThinkingConfig) -> ThinkingConfig {
+    match thinking {
+        AnthropicThinkingConfig::Disabled => ThinkingConfig::Disabled,
+        AnthropicThinkingConfig::Enabled { budget_tokens, display } => ThinkingConfig::Enabled {
+            budget_tokens: *budget_tokens,
+            display: parse_thinking_display(display.as_deref()),
+        },
+        AnthropicThinkingConfig::Adaptive { display } => ThinkingConfig::Adaptive {
+            display: parse_thinking_display(display.as_deref()),
+        },
+    }
+}
+
+fn parse_thinking_display(display: Option<&str>) -> Option<ThinkingDisplay> {
+    match display? {
+        "summarized" => Some(ThinkingDisplay::Summarized),
+        "omitted" => Some(ThinkingDisplay::Omitted),
+        _ => None,
+    }
 }
 
 fn effort_from_reasoning_for_adaptive(effort: ReasoningEffortLevel) -> &'static str {
@@ -406,7 +450,143 @@ pub(crate) fn resolve_advisor_tool(executor: &str, advisor: &AdvisorConfig) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::{AnthropicRequestOverrides, AnthropicThinkingModeOverride, FallbackModel, Message};
+    use vtcode_config::constants::models::anthropic;
     use vtcode_config::core::AdvisorConfig;
+
+    fn convert(request: &LLMRequest) -> Value {
+        let prompt_cache_settings = AnthropicPromptCacheSettings::default();
+        let anthropic_config = AnthropicConfig::default();
+        let ctx = RequestBuilderContext {
+            prompt_cache_enabled: false,
+            prompt_cache_settings: &prompt_cache_settings,
+            anthropic_config: &anthropic_config,
+            model: anthropic::DEFAULT_MODEL,
+        };
+        convert_to_anthropic_format(request, &ctx).expect("payload conversion")
+    }
+
+    fn fallback(model: &str, thinking: Option<AnthropicThinkingConfig>) -> FallbackModel {
+        FallbackModel {
+            model: model.to_string(),
+            max_tokens: None,
+            thinking,
+        }
+    }
+
+    fn request_with_fallbacks(model: &str, fallbacks: Vec<FallbackModel>) -> LLMRequest {
+        LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            fallbacks: Some(fallbacks),
+            ..Default::default()
+        }
+    }
+
+    fn fallback_thinking(payload: &Value, index: usize) -> &Value {
+        &payload["fallbacks"][index]["thinking"]
+    }
+
+    #[test]
+    fn fallback_manual_budget_becomes_adaptive_for_models_without_budget_support() {
+        let request = request_with_fallbacks(
+            anthropic::CLAUDE_SONNET_5,
+            vec![fallback(
+                anthropic::CLAUDE_OPUS_5_5,
+                Some(AnthropicThinkingConfig::Enabled {
+                    budget_tokens: 8192,
+                    display: Some("summarized".to_string()),
+                }),
+            )],
+        );
+        let payload = convert(&request);
+
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive", "display": "summarized" }));
+    }
+
+    #[test]
+    fn fallback_disabled_thinking_becomes_adaptive_for_adaptive_only_models() {
+        let request = request_with_fallbacks(
+            anthropic::CLAUDE_SONNET_5,
+            vec![
+                fallback(anthropic::CLAUDE_OPUS_5_5, Some(AnthropicThinkingConfig::Disabled)),
+                fallback(anthropic::CLAUDE_FABLE_5_1, Some(AnthropicThinkingConfig::Disabled)),
+                fallback(anthropic::CLAUDE_SONNET_5, Some(AnthropicThinkingConfig::Disabled)),
+            ],
+        );
+        let payload = convert(&request);
+
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive" }));
+        assert_eq!(fallback_thinking(&payload, 1), &json!({ "type": "adaptive" }));
+        // Sonnet 5 accepts disabled thinking, so the override is kept.
+        assert_eq!(fallback_thinking(&payload, 2), &json!({ "type": "disabled" }));
+    }
+
+    #[test]
+    fn fallback_inheriting_rejected_disabled_thinking_gets_explicit_adaptive() {
+        let mut request = request_with_fallbacks(
+            anthropic::CLAUDE_SONNET_5,
+            vec![
+                fallback(anthropic::CLAUDE_OPUS_5_5, None),
+                fallback(anthropic::CLAUDE_OPUS_5, None),
+            ],
+        );
+        request.anthropic_request_overrides = Some(AnthropicRequestOverrides {
+            thinking_mode: AnthropicThinkingModeOverride::Disabled,
+            ..Default::default()
+        });
+        let payload = convert(&request);
+
+        assert_eq!(payload["thinking"], json!({ "type": "disabled" }));
+        // Opus 5.5 would inherit the rejected `disabled` config.
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive" }));
+        // Opus 5 accepts disabled thinking at its default effort, so it inherits.
+        assert!(payload["fallbacks"][1].get("thinking").is_none());
+    }
+
+    #[test]
+    fn fallback_without_override_inherits_valid_primary_thinking() {
+        let request =
+            request_with_fallbacks(anthropic::CLAUDE_SONNET_5, vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
+        let payload = convert(&request);
+
+        assert_eq!(payload["thinking"]["type"], "adaptive");
+        assert!(payload["fallbacks"][0].get("thinking").is_none());
+    }
+
+    #[test]
+    fn fallback_thinking_is_kept_for_unprofiled_models() {
+        let request = request_with_fallbacks(
+            anthropic::CLAUDE_SONNET_5,
+            vec![fallback(
+                "claude-unlisted-model",
+                Some(AnthropicThinkingConfig::Enabled { budget_tokens: 4096, display: None }),
+            )],
+        );
+        let payload = convert(&request);
+
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "enabled", "budget_tokens": 4096 }));
+    }
+
+    #[test]
+    fn temperature_is_dropped_when_a_fallback_model_rejects_sampling() {
+        let mut request =
+            request_with_fallbacks("claude-unlisted-model", vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
+        request.temperature = Some(0.2);
+        let payload = convert(&request);
+
+        assert!(payload.get("thinking").is_none());
+        assert!(payload.get("temperature").is_none(), "payload: {payload}");
+    }
+
+    #[test]
+    fn temperature_is_kept_when_no_fallback_rejects_sampling() {
+        let mut request = request_with_fallbacks("claude-unlisted-model", vec![fallback("claude-other-model", None)]);
+        request.temperature = Some(0.2);
+        let payload = convert(&request);
+
+        assert!(payload["temperature"].as_f64().is_some_and(|t| (t - 0.2).abs() < 1e-6), "payload: {payload}");
+    }
 
     fn advisor_config(enabled: bool, model: &str, max_uses: Option<u32>) -> AdvisorConfig {
         AdvisorConfig {

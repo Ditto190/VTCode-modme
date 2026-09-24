@@ -321,22 +321,29 @@ pub(crate) fn effort_is_at_most_high(
     if let Some(overrides) = request.anthropic_request_overrides.as_ref() {
         match &overrides.effort {
             AnthropicOptionalStringOverride::Explicit(effort) => {
-                return matches!(effort.to_ascii_lowercase().as_str(), "low" | "medium" | "high");
+                return effort_str_is_at_most_high(effort);
             }
             AnthropicOptionalStringOverride::Omit => {
-                return default_effort_for_model(&request.model, "").is_some_and(|effort| effort <= "high");
+                return default_effort_for_model(&request.model, "").is_some_and(effort_str_is_at_most_high);
             }
             AnthropicOptionalStringOverride::Inherit => {}
         }
     }
 
     if let Some(effort) = request.effort.as_ref() {
-        return matches!(effort.to_ascii_lowercase().as_str(), "low" | "medium" | "high");
+        return effort_str_is_at_most_high(effort);
     }
     if let Some(effort) = request.reasoning_effort {
         return matches!(effort, ReasoningEffortLevel::Low | ReasoningEffortLevel::Medium | ReasoningEffortLevel::High);
     }
-    matches!(anthropic_config.effort.as_str(), "low" | "medium" | "high")
+    effort_str_is_at_most_high(anthropic_config.effort.as_str())
+}
+
+/// Returns true if `effort` names one of the `low`, `medium`, or `high`
+/// levels (case-insensitive).
+pub(crate) fn effort_str_is_at_most_high(effort: &str) -> bool {
+    let normalized = effort.trim().to_ascii_lowercase();
+    matches!(normalized.as_str(), reasoning::LOW | reasoning::MEDIUM | reasoning::HIGH)
 }
 
 #[cfg(test)]

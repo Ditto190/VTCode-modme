@@ -12,8 +12,8 @@ use vtcode_config::types::ReasoningEffortLevel;
 use vtcode_config::constants::models::anthropic;
 
 use super::super::capabilities::{
-    claude_thinking_profile, default_effort_for_model, effort_is_at_most_high, matches_model, resolve_model_name,
-    supports_reasoning_effort,
+    ClaudeThinkingProfile, claude_thinking_profile, effort_is_at_most_high, effort_str_is_at_most_high, matches_model,
+    resolve_model_name, supports_reasoning_effort,
 };
 
 fn resolve_configured_thinking_display(anthropic_config: &AnthropicConfig) -> Option<ThinkingDisplay> {
@@ -50,6 +50,57 @@ fn manual_thinking_config(
     Some(ThinkingConfig::Enabled { budget_tokens: effective_budget, display })
 }
 
+/// Whether a profiled model accepts `thinking: {type: "disabled"}`.
+/// Adaptive-only models (Opus 5.5, Fable 5.x) reject it outright, and Opus 5
+/// accepts it only at effort `high` or below. The Opus 5.5 id contains the
+/// Opus 5 id, so the adaptive-only check must run first.
+fn disabled_thinking_allowed(
+    profile: &ClaudeThinkingProfile,
+    model: &str,
+    effort_is_at_most_high: impl FnOnce() -> bool,
+) -> bool {
+    if profile.adaptive_only {
+        return false;
+    }
+    if matches_model(model, anthropic::CLAUDE_OPUS_5) {
+        return effort_is_at_most_high();
+    }
+    true
+}
+
+/// Rewrites `thinking` into a config that is valid as a direct request to
+/// `model`, or returns `None` when it is already valid (or the model has no
+/// capability profile to check against).
+///
+/// Server-side fallback entries are merged into the primary request, so the
+/// merged request must satisfy the fallback model's own rules: models without
+/// manual-budget support get adaptive thinking instead of `budget_tokens`, and
+/// a `disabled` config the model rejects becomes adaptive. `effort` is the
+/// request's `output_config.effort`, which fallback entries inherit; `None`
+/// means the model's default effort applies.
+pub(crate) fn rewrite_thinking_for_model(
+    thinking: &ThinkingConfig,
+    model: &str,
+    default_model: &str,
+    effort: Option<&str>,
+) -> Option<ThinkingConfig> {
+    let resolved_model = resolve_model_name(model, default_model);
+    let profile = claude_thinking_profile(resolved_model, default_model)?;
+    match thinking {
+        ThinkingConfig::Enabled { display, .. } if !profile.supports_manual_budget => {
+            Some(ThinkingConfig::Adaptive { display: *display })
+        }
+        ThinkingConfig::Disabled
+            if !disabled_thinking_allowed(&profile, resolved_model, || {
+                effort_str_is_at_most_high(effort.unwrap_or(profile.default_effort))
+            }) =>
+        {
+            Some(ThinkingConfig::Adaptive { display: None })
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn build_thinking_config(
     request: &LLMRequest,
     anthropic_config: &AnthropicConfig,
@@ -63,22 +114,15 @@ pub(crate) fn build_thinking_config(
     if let Some(overrides) = request.anthropic_request_overrides.as_ref() {
         match overrides.thinking_mode {
             AnthropicThinkingModeOverride::Disabled => {
-                if default_thinking {
-                    // Opus 5.5 runs adaptive thinking always on; it never
-                    // accepts `thinking: {type: "disabled"}`. Its id contains
-                    // the Opus 5 id, so exclude it from the Opus 5 allowance.
-                    if matches_model(resolved_model, anthropic::CLAUDE_OPUS_5_5) {
-                        return Ok((None, None));
-                    }
-                    if matches_model(resolved_model, anthropic::CLAUDE_OPUS_5) {
-                        if effort_is_at_most_high(request, anthropic_config) {
-                            return Ok((Some(ThinkingConfig::Disabled), None));
-                        }
-                        return Ok((None, None));
-                    }
-                    if matches_model(resolved_model, anthropic::CLAUDE_SONNET_5) {
-                        return Ok((Some(ThinkingConfig::Disabled), None));
-                    }
+                // Models that think by default need an explicit `disabled`
+                // when they accept one; otherwise the field is omitted and the
+                // model runs its default thinking mode.
+                if let Some(profile) = profile.filter(|p| p.default_thinking_enabled)
+                    && disabled_thinking_allowed(&profile, resolved_model, || {
+                        effort_is_at_most_high(request, anthropic_config)
+                    })
+                {
+                    return Ok((Some(ThinkingConfig::Disabled), None));
                 }
                 return Ok((None, None));
             }
@@ -245,10 +289,7 @@ mod tests {
         let (thinking, _) =
             build_thinking_config(&request, &config, anthropic::DEFAULT_MODEL).expect("thinking config");
 
-        assert!(
-            matches!(thinking, Some(ThinkingConfig::Enabled { budget_tokens: 4096, .. })),
-            "got {thinking:?}"
-        );
+        assert!(matches!(thinking, Some(ThinkingConfig::Enabled { budget_tokens: 4096, .. })), "got {thinking:?}");
     }
 
     #[test]
