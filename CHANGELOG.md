@@ -8,6 +8,12 @@ All notable changes to vtcode will be documented in this file.
 
 - Add filesnap-backed prompt checkpoints for combined file and conversation rewind, with `/redo` and `/rewind-recover`. Track known file edits and literal Unix shell output redirects before mutation, and retain legacy snapshot compatibility.
 
+### Behavior Changes
+
+- Anthropic: an unset `provider.anthropic.effort` now means the model's own default effort (`medium` on Claude Opus 5.5, `high` on the other Claude 5 models). It previously defaulted to `xhigh`; set `effort = "xhigh"` to keep the old behavior. An explicit `agent.reasoning_effort` or `/effort` still takes precedence.
+- Anthropic: `provider.anthropic.fallbacks` now defaults to `"default"`, so requests to the first-party Claude API for models that support server-side refusal fallbacks (Claude Opus 5, Opus 5.5, Fable 5, and Fable 5.1) send `fallbacks: "default"` with the `server-side-fallback-2026-07-01` beta header. Other models and endpoints (Bedrock, Vertex, Foundry, Anthropic-compatible providers) send nothing. Set `fallbacks = "off"` to opt out.
+- A provider refusal (`stop_reason: "refusal"`) now ends the turn as blocked: partial output is not committed as an answer, tool calls in the refused response are not executed, and empty-response recovery does not resend the prompt.
+
 ## v0.73.2 - 2026-01-29
 ## 0.169.1 - 2026-09-23
 
