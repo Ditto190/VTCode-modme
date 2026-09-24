@@ -1294,10 +1294,7 @@ impl AgentRunner {
                                         asks_user,
                                         &reason,
                                     ) {
-                                        let prompt = format!(
-                                            "Continue working. Do not stop yet. The task tracker still has incomplete steps: {joined}. \
-                                             Complete the remaining steps before finishing. Do not ask the user to resume."
-                                        );
+                                        let prompt = super::continuation::tracker_incomplete_continue_prompt(&joined);
                                         self.runner_println(format_args!(
                                             "[{}] {}: {}",
                                             self.agent_type,

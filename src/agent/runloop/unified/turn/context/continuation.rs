@@ -1,7 +1,10 @@
 use vtcode_core::llm::provider as uni;
 
-pub(super) const AUTONOMOUS_CONTINUE_DIRECTIVE: &str =
-    "Do not stop with intent-only updates. Execute the next concrete action now, then report completion or blocker.";
+/// Pushed when an interim/status reply (or a recap while tracker steps remain)
+/// would otherwise end the turn. Also covers the tracker override path, so it
+/// must not claim the reply was specifically a progress update.
+pub(super) const AUTONOMOUS_CONTINUE_DIRECTIVE: &str = "The last reply did not finish the task, so the turn continues. \
+     Take the next concrete action, then report the result or what is blocking it.";
 
 /// Maximum number of consecutive relaxed continuation decisions before the turn
 /// is forced to end. This prevents infinite loops where the model keeps producing
