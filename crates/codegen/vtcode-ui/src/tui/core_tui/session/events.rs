@@ -378,11 +378,9 @@ pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<Inline
                         return None;
                     }
                 }
-                KeyCode::Down => {
-                    if session.move_cursor_down_for_history() {
-                        session.mark_dirty();
-                        return None;
-                    }
+                KeyCode::Down if session.move_cursor_down_for_history() => {
+                    session.mark_dirty();
+                    return None;
                 }
                 _ => {}
             }

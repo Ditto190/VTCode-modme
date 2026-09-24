@@ -547,7 +547,7 @@ impl DotManager {
             let time = fs::metadata(backup).await.ok().and_then(|m| m.modified().ok());
             backup_times.push((backup.clone(), time));
         }
-        backup_times.sort_by(|a, b| b.1.cmp(&a.1));
+        backup_times.sort_by_key(|a| std::cmp::Reverse(a.1));
 
         Ok(backup_times.into_iter().map(|(path, _)| path).collect())
     }

@@ -599,7 +599,7 @@ impl SnapshotManager {
             Self::hydrate_prompt_metadata(&mut stored);
             snapshots.push(stored.metadata);
         }
-        snapshots.sort_by(|a, b| b.turn_number.cmp(&a.turn_number));
+        snapshots.sort_by_key(|a| std::cmp::Reverse(a.turn_number));
         Ok(snapshots)
     }
 

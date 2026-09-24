@@ -536,7 +536,7 @@ pub(super) async fn run_interaction_loop_impl(
                                         &format!(
                                             "Recovery: set {} in your shell environment, or run `/secret add {}` in a session to store it securely.",
                                             env_key,
-                                            &ctx.config.provider,
+                                            ctx.config.provider,
                                         ),
                             )?;
                         }

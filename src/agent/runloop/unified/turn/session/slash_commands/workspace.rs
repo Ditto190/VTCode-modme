@@ -304,10 +304,8 @@ fn extract_first_json_block(text: &str) -> Option<&str> {
                     return None;
                 }
             }
-            ']' => {
-                if stack.pop() != Some('[') {
-                    return None;
-                }
+            ']' if stack.pop() != Some('[') => {
+                return None;
             }
             _ => {}
         }

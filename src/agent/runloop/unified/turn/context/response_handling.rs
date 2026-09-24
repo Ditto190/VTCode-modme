@@ -126,12 +126,10 @@ pub(super) fn looks_like_attempted_plan(text: &str) -> bool {
         // Accept the same step punctuation as the artifact validator
         // (`numbered_line_parts` in planning_workflow/artifacts.rs).
         match chars.next() {
-            Some('.') | Some(')') | Some(':') => {
-                if chars.next().is_some_and(|next| next.is_whitespace()) {
-                    numbered_steps += 1;
-                    if numbered_steps >= 2 {
-                        return true;
-                    }
+            Some('.') | Some(')') | Some(':') if chars.next().is_some_and(|next| next.is_whitespace()) => {
+                numbered_steps += 1;
+                if numbered_steps >= 2 {
+                    return true;
                 }
             }
             _ => {}

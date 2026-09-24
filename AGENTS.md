@@ -45,7 +45,7 @@ Universal model-facing behavior is compiled in `crates/codegen/vtcode-core/src/p
 
 ## Workspace
 
-Cargo workspace, ~30 crates. Rust stable, MSRV 1.88, edition 2024. `default-members` = root, `vtcode-core`, `vtcode-ui` only.
+Cargo workspace, ~30 crates. Rust stable, MSRV 1.98.1, edition 2024. `default-members` = root, `vtcode-core`, `vtcode-ui` only.
 
 | Crate                                     | Role                                                                                                                                   |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |

@@ -700,7 +700,7 @@ pub(crate) fn describe_tool_action(
         |label: &str| -> (String, HashSet<String>) { (format!("{}{}", mcp_label(is_mcp_tool), label), HashSet::new()) };
 
     match actual_tool_name {
-        actual_name if tool_intent::is_command_run_tool_call(tool_name, args) => describe_shell_command(args)
+        _ if tool_intent::is_command_run_tool_call(tool_name, args) => describe_shell_command(args)
             .map(|(desc, used)| with_mcp(desc, used))
             .unwrap_or_else(|| fallback("command")),
         actual_name if actual_name == tool_names::UNIFIED_EXEC => {

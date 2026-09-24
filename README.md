@@ -303,7 +303,7 @@ graph LR
     CORE --> UI[vtcode-ui]
 ```
 
-Rust stable, edition 2024, MSRV 1.93. Clone and run the fast gate:
+Rust stable, edition 2024, MSRV 1.98.1. Clone and run the fast gate:
 
 ```bash
 git clone https://github.com/vinhnx/vtcode.git

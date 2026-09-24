@@ -629,7 +629,7 @@ impl ModelsManager {
     /// Build available models by merging remote and local presets
     fn build_available_models(&self, mut remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
         // Sort by priority
-        remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
+        remote_models.sort_by_key(|a| a.priority);
 
         // Convert remote models to presets
         let remote_presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
