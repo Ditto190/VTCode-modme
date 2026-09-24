@@ -480,8 +480,15 @@ model received. Replacing an in-progress result with its terminal result does
 not double-count suppression. Once that
 aggregate budget is exhausted, VTCode retains bounded outcome and control
 metadata while omitting payload bodies. A successful verifier therefore stays
-authoritative without encouraging duplicate reads or checks. Blocker live
-pointers are cleared only by the session that created them; archived blocker
+authoritative without encouraging duplicate reads or checks.
+
+Preview-gate rejections from parallel inspections count as one assistant batch;
+the agent gets one response to page a known spool, edit from visible evidence,
+verify, or finish. A second blind-inspection batch without an admitted tool
+between them triggers bounded
+tool-free recovery. The preview gate does not revoke access to all tools.
+
+Blocker live pointers are cleared only by the session that created them; archived blocker
 files remain self-contained, append a durable resolution marker before pointer
 cleanup, and do not claim ownership of the workspace-global task tracker. An
 ordinary user exit after a completed non-fallback turn is reported as successful

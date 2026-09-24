@@ -525,6 +525,10 @@ pub(crate) struct HarnessTurnState {
     recovery_activations: u32,
     pub blocked_tool_calls: usize,
     pub consecutive_blocked_tool_calls: usize,
+    /// Parallel preview-gate rejections are one failed decision, not separate
+    /// permission denials. Allow one response to choose spool paging or finish.
+    preview_gate_rejected_this_batch: bool,
+    consecutive_preview_gate_batches: u8,
     /// Counts consecutive malformed/schema-invalid tool calls independently
     /// from policy denials. A valid admitted call resets this streak.
     pub consecutive_preflight_failures: usize,
@@ -709,6 +713,8 @@ impl HarnessTurnState {
             recovery_activations: 0,
             blocked_tool_calls: 0,
             consecutive_blocked_tool_calls: 0,
+            preview_gate_rejected_this_batch: false,
+            consecutive_preview_gate_batches: 0,
             consecutive_preflight_failures: 0,
             consecutive_assistant_text_responses: 0,
             out_of_band_tool_progress: false,
@@ -1216,6 +1222,25 @@ impl HarnessTurnState {
 
     pub(crate) fn reset_blocked_tool_call_streak(&mut self) {
         self.consecutive_blocked_tool_calls = 0;
+    }
+
+    pub(crate) fn record_preview_gate_rejection(&mut self) {
+        self.preview_gate_rejected_this_batch = true;
+    }
+
+    /// Returns true after two blind-inspection batches without an admitted
+    /// tool between them. A batch of parallel calls counts only once.
+    pub(crate) fn finish_preview_gate_batch(&mut self) -> bool {
+        if !std::mem::take(&mut self.preview_gate_rejected_this_batch) {
+            return false;
+        }
+        self.consecutive_preview_gate_batches = self.consecutive_preview_gate_batches.saturating_add(1);
+        self.consecutive_preview_gate_batches >= 2
+    }
+
+    pub(crate) fn reset_preview_gate_batches(&mut self) {
+        self.preview_gate_rejected_this_batch = false;
+        self.consecutive_preview_gate_batches = 0;
     }
 
     pub(crate) fn record_preflight_failure(&mut self) -> usize {

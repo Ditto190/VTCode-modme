@@ -1706,7 +1706,7 @@ async fn registry_exhaustion_latches_runloop_and_blocks_the_next_inspection() {
             &json!({"cmd": command}),
             true,
         );
-        assert!(matches!(blocked, Some(ValidationResult::Blocked)), "{command}");
+        assert!(matches!(blocked, Some(ValidationResult::PreviewExhausted)), "{command}");
     }
 }
 
@@ -1738,7 +1738,7 @@ async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channe
         &json!({"path": "src/main.rs"}),
         true,
     );
-    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked, Some(ValidationResult::PreviewExhausted)));
     assert!(
         ctx.working_history
             .iter()
@@ -1752,7 +1752,7 @@ async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channe
         &json!({"query": "fn main"}),
         true,
     );
-    assert!(matches!(blocked_search, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked_search, Some(ValidationResult::PreviewExhausted)));
 
     let blocked_grep = enforce_preview_exhaustion_inspection_gate(
         &mut ctx,
@@ -1761,7 +1761,7 @@ async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channe
         &json!({"cmd": "rg -n 'fn run' src/main.rs"}),
         true,
     );
-    assert!(matches!(blocked_grep, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked_grep, Some(ValidationResult::PreviewExhausted)));
 
     // A tiny ordinary inspection is still an inspection: output size must not
     // turn it into a verifier or bypass the post-exhaustion gate.
@@ -1772,7 +1772,7 @@ async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channe
         &json!({"cmd": "printf tiny"}),
         true,
     );
-    assert!(matches!(blocked_tiny, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked_tiny, Some(ValidationResult::PreviewExhausted)));
 
     // Verification verdicts survive in stub metadata: checks keep running.
     let check = enforce_preview_exhaustion_inspection_gate(
@@ -1820,6 +1820,71 @@ async fn preview_exhaustion_gate_blocks_blind_inspection_but_keeps_useful_channe
 }
 
 #[tokio::test]
+async fn parallel_preview_gate_rejections_allow_one_corrective_response() {
+    use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
+
+    let mut backing = TestContextBacking::new(8).await;
+    let mut ctx = backing.turn_processing_context();
+    exhaust_preview_budget_for_test(&mut ctx);
+
+    // The latest session sent four inspection calls together. They were one
+    // model decision, so they must not exhaust the policy-denial fuse.
+    for index in 0..4 {
+        let call_id = format!("blind-{index}");
+        let args = json!({"cmd": "rg -n 'reduce_motion' crates/codegen/vtcode-ui/src"});
+        let result =
+            enforce_preview_exhaustion_inspection_gate(&mut ctx, &call_id, tool_names::EXEC_COMMAND, &args, true)
+                .expect("inspection should be rejected");
+        assert!(matches!(result, ValidationResult::PreviewExhausted));
+        assert!(matches!(
+            finalize_validation_result(&mut ctx, &call_id, tool_names::EXEC_COMMAND, &args, result),
+            ValidationTransition::Return(None)
+        ));
+    }
+    flush_blocked_tool_recovery(&mut ctx);
+    assert_eq!(ctx.blocked_tool_calls(), 0);
+    assert!(!ctx.harness_state.recovery_is_tool_free());
+
+    // A spool page remains available on the corrective response.
+    let spool_args = json!({"cmd": "sed -n '1,20p' .vtcode/context/tool_outputs/write_stdin_run-abc123.txt"});
+    assert!(
+        enforce_preview_exhaustion_inspection_gate(
+            &mut ctx,
+            "spool-page",
+            tool_names::EXEC_COMMAND,
+            &spool_args,
+            true,
+        )
+        .is_none()
+    );
+
+    // A successfully handled tool on the corrective response resets the
+    // blind-batch streak; the next rejection gets its own chance to recover.
+    assert!(matches!(
+        finalize_validation_result(
+            &mut ctx,
+            "handled-page",
+            tool_names::READ_FILE,
+            &json!({"path": ".vtcode/context/tool_outputs/write_stdin_run-abc123.txt"}),
+            ValidationResult::Handled,
+        ),
+        ValidationTransition::Return(None)
+    ));
+
+    // Repeated blind batches still converge to bounded recovery.
+    let args = json!({"path": "src/main.rs"});
+    for (index, should_recover) in [(0, false), (1, true)] {
+        let call_id = format!("blind-again-{index}");
+        let result = enforce_preview_exhaustion_inspection_gate(&mut ctx, &call_id, tool_names::READ_FILE, &args, true)
+            .expect("inspection should be rejected");
+        finalize_validation_result(&mut ctx, &call_id, tool_names::READ_FILE, &args, result);
+        flush_blocked_tool_recovery(&mut ctx);
+        assert_eq!(ctx.harness_state.recovery_is_tool_free(), should_recover);
+    }
+    assert!(ctx.harness_state.recovery_is_tool_free());
+}
+
+#[tokio::test]
 async fn preview_exhaustion_gate_directs_planning_toward_synthesis() {
     use crate::agent::runloop::unified::turn::tool_outcomes::handlers::ValidationResult;
     use crate::agent::runloop::unified::turn::tool_outcomes::handlers::guards::read_guard::enforce_preview_exhaustion_inspection_gate;
@@ -1836,7 +1901,7 @@ async fn preview_exhaustion_gate_directs_planning_toward_synthesis() {
         &json!({"path": "src/main.rs"}),
         true,
     );
-    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked, Some(ValidationResult::PreviewExhausted)));
     assert!(
         ctx.working_history
             .iter()
@@ -1861,7 +1926,7 @@ async fn preview_exhaustion_guidance_names_open_channels_without_inviting_retry(
         &json!({"path": "src/main.rs"}),
         true,
     );
-    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked, Some(ValidationResult::PreviewExhausted)));
     let planning_text = planning_ctx
         .working_history
         .iter()
@@ -1884,7 +1949,7 @@ async fn preview_exhaustion_guidance_names_open_channels_without_inviting_retry(
         &json!({"path": "src/main.rs"}),
         true,
     );
-    assert!(matches!(blocked, Some(ValidationResult::Blocked)));
+    assert!(matches!(blocked, Some(ValidationResult::PreviewExhausted)));
     let exec_text = exec_ctx
         .working_history
         .iter()

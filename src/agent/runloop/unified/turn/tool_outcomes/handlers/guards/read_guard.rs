@@ -388,7 +388,7 @@ pub(crate) fn enforce_preview_exhaustion_inspection_gate(
     .to_string();
     let error_content = build_preview_exhaustion_error_content(planning_active);
     push_guard_failure_messages(ctx, tool_call_id, canonical_tool_name, error_content, &block_reason);
-    Some(ValidationResult::Blocked)
+    Some(ValidationResult::PreviewExhausted)
 }
 
 /// Build the error content for a read-after-write guard trip.
