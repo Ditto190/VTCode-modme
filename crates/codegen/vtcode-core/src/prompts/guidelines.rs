@@ -187,7 +187,7 @@ pub fn generate_tool_guidelines_for_profile(
         // classification (`tool_intent/activity.rs`, spool processing); the
         // prompt keeps only the outcome rule so wording cannot drift from
         // enforcement.
-        lines.push("- Run verifiers standalone or as a pure `&&` chain so the exit status is visible; results behind pipes, `;`, or `||` stay unverified.".to_string());
+        lines.push("- Run verifiers standalone or as a pure `&&` chain so the exit status is visible; a verifier piped only into `head` or `tail` counts as standalone, while results behind other pipes, `;`, or `||` stay unverified.".to_string());
         // Tool-latency tail is dominated by full builds (observed p90 ~18s):
         // verify incrementally first. Kept tool-agnostic: fast checks exist
         // in every stack (`cargo check`, `tsc --noEmit`, `pytest --collect-only`).
@@ -1077,8 +1077,9 @@ mod tests {
         assert!(guidelines.contains("Batch independent read-only calls"));
         assert!(guidelines.contains("code_search"));
         // Shipped verifier discipline: every exec-capable profile must carry
-        // the truthful-status outcome rule (standalone/pure-`&&`, other
-        // pipes stay unverified). Elision and `max_output_tokens` detail
+        // the truthful-status outcome rule (standalone/pure-`&&`, a pure
+        // `head`/`tail` truncator counts as standalone, other pipes stay
+        // unverified), matching `VERIFIER_SHELL_FORM_NOTE`. Elision and `max_output_tokens` detail
         // lives in runtime enforcement, not prompt text.
         assert!(guidelines.contains("stay unverified"));
         assert!(guidelines.contains("pure `&&`"));

@@ -1928,7 +1928,11 @@ Repairs the approved plan after the referenced paths moved.
             "first denied-interview response without a plan should retry synthesis"
         );
         let directive_present = ctx.working_history.iter().any(|message| {
-            message.role == uni::MessageRole::System && message.content.as_text().contains(DENIED_INTERVIEW_PLAN_SYNTHESIS_RETRY_DIRECTIVE)
+            message.role == uni::MessageRole::System
+                && message
+                    .content
+                    .as_text()
+                    .contains(DENIED_INTERVIEW_PLAN_SYNTHESIS_RETRY_DIRECTIVE)
         });
         assert!(directive_present, "a plan-synthesis retry directive should be pushed");
     }

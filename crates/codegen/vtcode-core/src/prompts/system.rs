@@ -2143,7 +2143,7 @@ Use a skill only when the user names it or the task clearly matches. Load detail
 - Batch independent read-only calls; order dependent reads, and serialize mutations.
 - Use `exec_command.cmd` for build tools, test tools, `git diff -- <path>`, and shell-only tasks. In one-shot `exec_command` calls, do not use `!!`, `!$`, `!ssh`, or `fc`; write full command arguments explicitly from conversation or tool results. Interactive shells: review-safe history expansion (Bash `histverify`, zsh `HIST_VERIFY`).
 - For long-lived commands, set `background: true` on `exec_command`; it returns a bounded preview plus a stable `session_id` and wait arguments. At most three live background processes are retained per runtime, with no automatic eviction; reuse the session operations to wait, poll, write, inspect, terminate, or close.
-- Run verifiers standalone or as a pure `&&` chain so the exit status is visible; results behind pipes, `;`, or `||` stay unverified.
+- Run verifiers standalone or as a pure `&&` chain so the exit status is visible; a verifier piped only into `head` or `tail` counts as standalone, while results behind other pipes, `;`, or `||` stay unverified.
 - Run fast checks before full builds.
 - `code_search`: omit unused filters; no empty values (`path: ""`).
 - Advanced `code_search` takes `query`; filters `path`, `file_types`, `result_types`, `max_results`; results: definitions, exact syntactic usages. Queries use literal smart-case and `|`-separated literals; truncated: narrow. Example: `{"query":"TurnLoop","path":"src","result_types":["definition"]}`. Do not JSON-encode arrays or integers as strings. Prefer `code_search` over `rg` on `.vtcode/context/tool_outputs/`. Use `exec_command` or a skill for syntax patterns.

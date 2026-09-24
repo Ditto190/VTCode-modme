@@ -642,7 +642,8 @@ pub(super) async fn run_interaction_loop_impl(
                     },
                 )?;
             } else {
-                ctx.conversation_history.push(uni::Message::system(repeated_follow_up_directive(false)));
+                ctx.conversation_history
+                    .push(uni::Message::system(repeated_follow_up_directive(false)));
                 ctx.renderer
                     .line(MessageStyle::Info, "Repeated follow-up detected; forcing a concrete status/conclusion.")?;
             }

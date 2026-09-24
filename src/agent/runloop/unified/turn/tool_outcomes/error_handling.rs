@@ -147,11 +147,7 @@ fn failure_guidance(error_msg: &str, failure_kind: &'static str) -> (&'static st
     // synthesis) are named instead. Error class and recoverability stay at
     // the execution defaults so no control-flow behavior changes.
     if failure_kind == "preview_exhaustion_gate" {
-        return (
-            "execution_failure",
-            true,
-            PREVIEW_EXHAUSTION_NEXT_ACTION,
-        );
+        return ("execution_failure", true, PREVIEW_EXHAUSTION_NEXT_ACTION);
     }
 
     if check_is_argument_error(error_msg) {
@@ -180,11 +176,7 @@ fn structured_failure_guidance(
     // read-guard path (which uses `build_error_content`), kept for
     // defense-in-depth if a structured error ever carries this kind.
     if failure_kind == "preview_exhaustion_gate" {
-        return (
-            "execution_failure",
-            error.is_recoverable,
-            PREVIEW_EXHAUSTION_NEXT_ACTION,
-        );
+        return ("execution_failure", error.is_recoverable, PREVIEW_EXHAUSTION_NEXT_ACTION);
     }
 
     if matches!(error.category, ErrorCategory::InvalidParameters) || check_is_argument_error(&error.message) {
