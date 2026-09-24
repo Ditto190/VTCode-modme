@@ -7,7 +7,7 @@
 //! - Parallel tool configuration
 //! - Context window sizes
 
-use crate::providers::anthropic_types::ThinkingDisplay;
+use crate::providers::anthropic_types::{ThinkingConfig, ThinkingDisplay};
 use vtcode_config::constants::{models, reasoning};
 
 const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
@@ -35,6 +35,9 @@ pub(crate) struct ClaudeThinkingProfile {
     /// plus response text together, so it must leave room for adaptive
     /// thinking on agentic turns while staying within the model's output limit.
     pub default_max_tokens: u32,
+    /// Whether `tool_choice` `any`/`tool` is rejected with a 400 regardless
+    /// of the thinking config. Such requests must fall back to `auto`.
+    pub rejects_forced_tool_choice: bool,
 }
 
 /// Default `max_tokens` for Claude 5.x models: a starting point for agentic
@@ -83,6 +86,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_xhigh_effort: true,
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
+            rejects_forced_tool_choice: true,
         });
     }
 
@@ -100,6 +104,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_xhigh_effort: true,
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
+            rejects_forced_tool_choice: false,
         });
     }
 
@@ -117,6 +122,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_xhigh_effort: true,
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
+            rejects_forced_tool_choice: false,
         });
     }
 
@@ -137,6 +143,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_xhigh_effort: true,
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
+            rejects_forced_tool_choice: true,
         });
     }
 
@@ -154,6 +161,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_xhigh_effort: true,
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
+            rejects_forced_tool_choice: false,
         });
     }
 
@@ -235,6 +243,24 @@ pub(crate) fn default_max_tokens_for_model(model: &str, default_model: &str, thi
         Some(profile) => profile.default_max_tokens,
         None if thinking_enabled => LEGACY_THINKING_DEFAULT_MAX_TOKENS,
         None => LEGACY_DEFAULT_MAX_TOKENS,
+    }
+}
+
+/// Whether `model` rejects forced tool use (`tool_choice` `any`/`tool`)
+/// even when thinking is off.
+pub(crate) fn rejects_forced_tool_choice(model: &str, default_model: &str) -> bool {
+    claude_thinking_profile(model, default_model).is_some_and(|profile| profile.rejects_forced_tool_choice)
+}
+
+/// Whether a request to `model` with this `thinking` field runs with thinking
+/// on. An omitted field means the model's default, which is on for every
+/// profiled Claude 5.x model (Opus 5.5 omits `disabled` because it rejects it).
+pub(crate) fn thinking_is_on(thinking: Option<&ThinkingConfig>, model: &str, default_model: &str) -> bool {
+    match thinking {
+        Some(ThinkingConfig::Disabled) => false,
+        // Unknown configs are treated as thinking so callers stay conservative.
+        Some(_) => true,
+        None => claude_thinking_profile(model, default_model).is_some_and(|profile| profile.default_thinking_enabled),
     }
 }
 
@@ -414,6 +440,28 @@ mod tests {
             assert_eq!(default_max_tokens_for_model(model, "", true), 64_000, "{model}");
             assert_eq!(default_max_tokens_for_model(model, "", false), 64_000, "{model}");
         }
+    }
+
+    #[test]
+    fn only_opus_5_5_and_fable_5_1_reject_forced_tool_choice() {
+        assert!(rejects_forced_tool_choice(models::anthropic::CLAUDE_OPUS_5_5, ""));
+        assert!(rejects_forced_tool_choice(models::anthropic::CLAUDE_FABLE_5_1, ""));
+        for model in [
+            models::anthropic::CLAUDE_SONNET_5,
+            models::anthropic::CLAUDE_FABLE_5,
+            models::anthropic::CLAUDE_OPUS_5,
+            "claude-unlisted-model",
+        ] {
+            assert!(!rejects_forced_tool_choice(model, ""), "{model}");
+        }
+    }
+
+    #[test]
+    fn omitted_thinking_follows_the_model_default() {
+        assert!(thinking_is_on(None, models::anthropic::CLAUDE_OPUS_5_5, ""));
+        assert!(!thinking_is_on(None, "claude-unlisted-model", ""));
+        assert!(!thinking_is_on(Some(&ThinkingConfig::Disabled), models::anthropic::CLAUDE_SONNET_5, ""));
+        assert!(thinking_is_on(Some(&ThinkingConfig::Adaptive { display: None }), "claude-unlisted-model", ""));
     }
 
     #[test]

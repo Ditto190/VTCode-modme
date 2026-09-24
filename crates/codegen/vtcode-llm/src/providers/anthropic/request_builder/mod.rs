@@ -21,8 +21,9 @@ use vtcode_config::core::{AdvisorConfig, AnthropicConfig, AnthropicPromptCacheSe
 use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
-    default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, rejects_sampling,
-    resolve_model_name, supports_effort, supports_mid_conversation_system_messages, supports_task_budget,
+    default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, rejects_forced_tool_choice,
+    rejects_sampling, resolve_model_name, supports_effort, supports_mid_conversation_system_messages,
+    supports_task_budget, thinking_is_on,
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
@@ -190,7 +191,6 @@ pub(crate) fn convert_to_anthropic_format(
 
     let (thinking_val, reasoning_val) = build_thinking_config(request, ctx.anthropic_config, ctx.model)?;
 
-    let final_tool_choice = build_tool_choice(request, &thinking_val);
     let anthropic_overrides = request.anthropic_request_overrides.as_ref();
     let thinking_is_adaptive = matches!(thinking_val, Some(ThinkingConfig::Adaptive { .. }));
 
@@ -239,6 +239,19 @@ pub(crate) fn convert_to_anthropic_format(
         None
     };
     let fallbacks = build_fallbacks(request, thinking_val.as_ref(), effort_value.as_deref(), ctx.model);
+    // Forced tool use (`any`/`tool`) is rejected when thinking is on and, on
+    // some models, unconditionally. Fallback entries inherit the top-level
+    // `tool_choice`, so every fallback model must accept it as well.
+    let forced_tool_choice_allowed = !thinking_is_on(thinking_val.as_ref(), resolved_model, ctx.model)
+        && !rejects_forced_tool_choice(resolved_model, ctx.model)
+        && fallbacks.as_ref().is_none_or(|fallbacks| {
+            fallbacks.iter().all(|fb| {
+                let fallback_thinking = fb.thinking.as_ref().or(thinking_val.as_ref());
+                !thinking_is_on(fallback_thinking, &fb.model, ctx.model)
+                    && !rejects_forced_tool_choice(&fb.model, ctx.model)
+            })
+        });
+    let final_tool_choice = build_tool_choice(request, forced_tool_choice_allowed);
     let output_format = request
         .output_format
         .as_ref()
@@ -452,7 +465,9 @@ pub(crate) fn resolve_advisor_tool(executor: &str, advisor: &AdvisorConfig) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{AnthropicRequestOverrides, AnthropicThinkingModeOverride, FallbackModel, Message};
+    use crate::provider::{
+        AnthropicRequestOverrides, AnthropicThinkingModeOverride, FallbackModel, Message, ToolChoice,
+    };
     use vtcode_config::constants::models::anthropic;
     use vtcode_config::core::AdvisorConfig;
 
@@ -640,6 +655,74 @@ mod tests {
 
         assert!(payload.get("thinking").is_none(), "payload: {payload}");
         assert_eq!(payload["max_tokens"], 4096, "payload: {payload}");
+    }
+
+    fn forced_tool_request(model: &str, disable_thinking: bool) -> LLMRequest {
+        let mut request = plain_request(model);
+        request.tool_choice = Some(ToolChoice::any());
+        if disable_thinking {
+            request.anthropic_request_overrides = Some(AnthropicRequestOverrides {
+                thinking_mode: AnthropicThinkingModeOverride::Disabled,
+                ..Default::default()
+            });
+        }
+        request
+    }
+
+    #[test]
+    fn forced_tool_choice_is_downgraded_for_models_that_reject_it_even_without_thinking() {
+        for model in [anthropic::CLAUDE_OPUS_5_5, anthropic::CLAUDE_FABLE_5_1] {
+            let payload = convert(&forced_tool_request(model, true));
+
+            assert!(payload.get("thinking").is_none(), "{model}: {payload}");
+            assert_eq!(payload["tool_choice"], json!({"type": "auto"}), "{model}: {payload}");
+        }
+    }
+
+    #[test]
+    fn forced_tool_choice_is_kept_when_thinking_is_disabled() {
+        let payload = convert(&forced_tool_request(anthropic::CLAUDE_SONNET_5, true));
+
+        assert_eq!(payload["thinking"], json!({"type": "disabled"}), "payload: {payload}");
+        assert_eq!(payload["tool_choice"], json!({"type": "any"}), "payload: {payload}");
+    }
+
+    #[test]
+    fn forced_tool_choice_is_downgraded_when_thinking_is_on() {
+        let payload = convert(&forced_tool_request(anthropic::CLAUDE_SONNET_5, false));
+
+        assert_eq!(payload["thinking"]["type"], "adaptive", "payload: {payload}");
+        assert_eq!(payload["tool_choice"], json!({"type": "auto"}), "payload: {payload}");
+    }
+
+    #[test]
+    fn forced_tool_choice_is_kept_for_unprofiled_models_without_thinking() {
+        let mut request = plain_request("claude-unlisted-model");
+        request.tool_choice = Some(ToolChoice::function("get_weather".to_string()));
+        let payload = convert(&request);
+
+        assert_eq!(payload["tool_choice"], json!({"type": "tool", "name": "get_weather"}), "payload: {payload}");
+    }
+
+    #[test]
+    fn forced_tool_choice_is_downgraded_when_a_fallback_model_rejects_it() {
+        let mut request = forced_tool_request(anthropic::CLAUDE_SONNET_5, true);
+        request.fallbacks = Some(vec![fallback(anthropic::CLAUDE_OPUS_5_5, None)]);
+        let payload = convert(&request);
+
+        assert_eq!(payload["tool_choice"], json!({"type": "auto"}), "payload: {payload}");
+    }
+
+    #[test]
+    fn forced_tool_choice_is_downgraded_when_a_fallback_thinks() {
+        let mut request = forced_tool_request(anthropic::CLAUDE_SONNET_5, true);
+        request.fallbacks = Some(vec![fallback(
+            anthropic::CLAUDE_OPUS_5,
+            Some(AnthropicThinkingConfig::Adaptive { display: None }),
+        )]);
+        let payload = convert(&request);
+
+        assert_eq!(payload["tool_choice"], json!({"type": "auto"}), "payload: {payload}");
     }
 
     fn advisor_config(enabled: bool, model: &str, max_uses: Option<u32>) -> AdvisorConfig {
