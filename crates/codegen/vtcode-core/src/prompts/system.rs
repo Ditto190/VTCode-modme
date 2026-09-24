@@ -125,15 +125,13 @@ pub const MINIMAL_SPECIFIC_LINES: &[&str] = &[];
 /// rule with slightly different phrasing. Mode deltas below must reuse them
 /// verbatim; `operating_profile_deltas_share_canonical_sentences` enforces it.
 pub const OPERATING_TASK_TRACKER: &str = "Track the work in `task_tracker` once it stops being trivial.";
-pub const OPERATING_PLANNING_SUGGESTION: &str = "For demanding, ambiguous, or multi-phase tasks, suggest `start_planning` and wait for the user to confirm before entering it.";
 
 pub const DEFAULT_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
 - The core tools are `exec_command`, `write_stdin`, and `apply_patch`; `code_search` becomes available in Planning workflow.
 - Shell commands go in `exec_command.cmd` and are not separate tools. Follow the active shell profile's syntax.
 - When the user asks for a change, make it with the tools rather than describing it, unless the active agent mode is read-only.
-- Use Planning workflow for research and spec work, and stay read-only until the user states implementation intent.
-- For demanding, ambiguous, or multi-phase tasks, suggest `start_planning` and wait for the user to confirm before entering it."#;
+- Use Planning workflow for research and spec work, and stay read-only until the user states implementation intent."#;
 
 pub const MINIMAL_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
@@ -143,8 +141,7 @@ pub const MINIMAL_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 pub const LIGHTWEIGHT_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
 - This profile is for simple work: act directly in this thread and keep the loop short.
-- Track the work in `task_tracker` once it stops being trivial.
-- For demanding, ambiguous, or multi-phase tasks, suggest `start_planning` and wait for the user to confirm before entering it."#;
+- Track the work in `task_tracker` once it stops being trivial."#;
 
 pub const SPECIALIZED_OPERATING_PROFILE_DELTA: &str = r#"## Operating Profile
 
@@ -985,10 +982,18 @@ mod tests {
 
     #[test]
     fn operating_profile_deltas_share_canonical_sentences() {
-        assert!(DEFAULT_OPERATING_PROFILE_DELTA.contains(OPERATING_PLANNING_SUGGESTION));
         assert!(MINIMAL_OPERATING_PROFILE_DELTA.contains(OPERATING_TASK_TRACKER));
         assert!(LIGHTWEIGHT_OPERATING_PROFILE_DELTA.contains(OPERATING_TASK_TRACKER));
-        assert!(LIGHTWEIGHT_OPERATING_PROFILE_DELTA.contains(OPERATING_PLANNING_SUGGESTION));
+        // `start_planning` guidance has one home: the tool-gated Active Tools
+        // line, which is present only when the tool is.
+        for delta in [
+            DEFAULT_OPERATING_PROFILE_DELTA,
+            MINIMAL_OPERATING_PROFILE_DELTA,
+            LIGHTWEIGHT_OPERATING_PROFILE_DELTA,
+            SPECIALIZED_OPERATING_PROFILE_DELTA,
+        ] {
+            assert!(!delta.contains("start_planning"), "{delta}");
+        }
         assert!(!DEFAULT_OPERATING_PROFILE_DELTA.contains("task_tracker"));
     }
 
@@ -2038,7 +2043,6 @@ Work the way a senior engineer on this codebase would: understand the relevant c
 - Shell commands go in `exec_command.cmd` and are not separate tools. Follow the active shell profile's syntax.
 - When the user asks for a change, make it with the tools rather than describing it, unless the active agent mode is read-only.
 - Use Planning workflow for research and spec work, and stay read-only until the user states implementation intent.
-- For demanding, ambiguous, or multi-phase tasks, suggest `start_planning` and wait for the user to confirm before entering it.
 
 ## Shell Profile
 - Active shell profile: `unix_like`. Use Unix-like command syntax in `exec_command.cmd`, for example `ls`, `rg`, `find`, `cat`, `sed`, and `awk`.
@@ -2108,7 +2112,6 @@ You are VT Code (Build mode), a coding agent working in the user's repository an
 
 - This profile is for simple work: act directly in this thread and keep the loop short.
 - Track the work in `task_tracker` once it stops being trivial.
-- For demanding, ambiguous, or multi-phase tasks, suggest `start_planning` and wait for the user to confirm before entering it.
 
 
 ## Structured Reasoning

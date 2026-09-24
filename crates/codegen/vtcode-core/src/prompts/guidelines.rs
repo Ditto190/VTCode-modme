@@ -26,6 +26,12 @@ const TOOL_START_PLANNING: &str = tools::START_PLANNING;
 const CROSS_TURN_RESUME_HINT_CLAUSE: &str =
     "; a turn-start `Exec session resume:` hint carries the live ids when a prior turn ended mid-run.";
 
+/// The single home of `start_planning` guidance, shared by the Minimal and
+/// Default Active Tools. The tool itself asks the user before entering
+/// planning (`require_confirmation`), except under full-auto or
+/// skip-confirmations, so the model calls it rather than proposing it in prose.
+const START_PLANNING_GUIDANCE_LINE: &str = "- For demanding, ambiguous, or multi-phase tasks, call `start_planning`; it asks the user before entering the read-only Planning workflow unless the session runs in full-auto or skips confirmations. Skip it for straightforward changes.";
+
 /// Planning-workflow `task_tracker` index rules. While planning, the tracker
 /// routes to the plan sidecar, which rejects index 0 (`index_path components
 /// must be >= 1`); checklist-level `index: 0` completion exists only outside
@@ -111,7 +117,7 @@ pub fn generate_tool_guidelines_with_capabilities(
             // Safeguard, verification, and spool/preview rules already ship in
             // Runtime Guidance.
             if has(TOOL_START_PLANNING) {
-                lines.push("- Use `start_planning` for demanding or ambiguous work; it asks before entering read-only planning.".to_owned());
+                lines.push(START_PLANNING_GUIDANCE_LINE.to_owned());
             }
             if parallel_tools {
                 lines.push(
@@ -210,9 +216,7 @@ pub fn generate_tool_guidelines_for_profile(
         lines.push("- Run independent tools in parallel when inputs do not depend on each other.".to_string());
     }
     if has_start_planning {
-        lines.push(
-            "- For demanding, ambiguous, or multi-phase tasks, call `start_planning` to ask the user before entering the read-only Planning workflow; do not use it for straightforward changes.".to_string(),
-        );
+        lines.push(START_PLANNING_GUIDANCE_LINE.to_string());
     }
 
     if lines.is_empty() {
@@ -1079,8 +1083,22 @@ mod tests {
         let tools = vec![TOOL_START_PLANNING.to_string(), TOOL_EXEC_COMMAND.to_string()];
         let guidelines = generate_tool_guidelines_for_profile(&tools, None, ResolvedShellPromptProfile::UnixLike);
 
-        assert!(guidelines.contains("call `start_planning`"));
-        assert!(guidelines.contains("do not use it for straightforward changes"));
+        assert_eq!(guidelines.matches(START_PLANNING_GUIDANCE_LINE).count(), 1);
+        let minimal = generate_tool_guidelines_with_capabilities(
+            &tools,
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+            ToolGuidanceProfile::Minimal,
+            false,
+        );
+        assert_eq!(minimal.matches(START_PLANNING_GUIDANCE_LINE).count(), 1);
+        // Without the tool, no profile mentions it.
+        let without = generate_tool_guidelines_for_profile(
+            &[TOOL_EXEC_COMMAND.to_string()],
+            None,
+            ResolvedShellPromptProfile::UnixLike,
+        );
+        assert!(!without.contains("start_planning"));
     }
 
     #[test]
