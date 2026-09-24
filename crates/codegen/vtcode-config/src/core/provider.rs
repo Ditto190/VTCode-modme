@@ -467,10 +467,12 @@ pub struct AnthropicConfig {
     /// Effort level for adaptive thinking/token usage (low, medium, high, xhigh, max)
     /// Controls how many tokens Claude uses when responding, trading off between
     /// response thoroughness and token efficiency.
-    /// The default config value keeps Claude Opus 4.7 on `xhigh`; models that do not
-    /// support `xhigh` fall back to their supported model default, typically `high`.
-    #[serde(default = "default_effort")]
-    pub effort: ReasoningEffortLevel,
+    /// Unset by default: each model then uses its own default effort (for example
+    /// `medium` on Claude Opus 5.5, `high` on Claude Opus 5). An explicit
+    /// `agent.reasoning_effort` or `/effort` selection takes precedence; a value the
+    /// active model does not support falls back to that model's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<ReasoningEffortLevel>,
 
     /// Optional Anthropic task budget token total for Claude Opus 4.7.
     /// When set, VT Code sends `output_config.task_budget = { type = "tokens", total = N }`
@@ -601,7 +603,7 @@ impl Default for AnthropicConfig {
             interleaved_thinking_type_enabled: default_interleaved_thinking_type(),
             tool_search: ToolSearchConfig::default(),
             memory: AnthropicMemoryConfig::default(),
-            effort: default_effort(),
+            effort: None,
             task_budget_tokens: None,
             task_budget_beta: default_task_budget_beta(),
             thinking_display: None,
@@ -735,11 +737,6 @@ fn default_interleaved_thinking_type() -> String {
 }
 
 #[inline]
-fn default_effort() -> ReasoningEffortLevel {
-    ReasoningEffortLevel::XHigh
-}
-
-#[inline]
 fn default_task_budget_beta() -> String {
     "task-budgets-2026-03-13".to_string()
 }
@@ -752,6 +749,17 @@ mod tests {
         OpenAIHostedShellNetworkPolicy, OpenAIHostedShellNetworkPolicyType, OpenAIHostedSkill,
         OpenAIHostedSkillVersion, OpenAIManualCompactionConfig, OpenAIServiceTier, ToolSearchAlgorithm,
     };
+
+    #[test]
+    fn anthropic_effort_is_unset_unless_configured() {
+        assert_eq!(AnthropicConfig::default().effort, None);
+
+        let parsed: AnthropicConfig = toml::from_str("").expect("empty anthropic config");
+        assert_eq!(parsed.effort, None);
+
+        let parsed: AnthropicConfig = toml::from_str("effort = \"high\"").expect("explicit effort");
+        assert_eq!(parsed.effort, Some(super::ReasoningEffortLevel::High));
+    }
 
     #[test]
     fn anthropic_fallbacks_default_to_default_mode() {

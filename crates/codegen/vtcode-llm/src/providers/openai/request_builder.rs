@@ -1278,6 +1278,17 @@ mod tests {
     }
 
     #[test]
+    fn gpt6_sol_explicit_reasoning_effort_overrides_model_default() {
+        let mut request = gpt6_sol_request();
+        request.reasoning_effort = Some(vtcode_config::types::ReasoningEffortLevel::High);
+
+        let payload =
+            build_responses_request(&request, &base_context(None)).expect("sol responses request should build");
+
+        assert_eq!(payload.pointer("/reasoning/effort").and_then(Value::as_str), Some("high"));
+    }
+
+    #[test]
     fn gpt6_luna_defaults_to_medium_reasoning_effort() {
         let payload = build_responses_request(&gpt6_luna_request(), &base_context(None))
             .expect("luna responses request should build");

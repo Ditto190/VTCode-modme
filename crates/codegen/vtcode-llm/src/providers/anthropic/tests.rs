@@ -1284,15 +1284,22 @@ mod request_builder_tests {
         assert_eq!(payload["tools"][0]["name"], "code_execution");
     }
 
-    #[test]
-    fn test_convert_to_anthropic_format_uses_configured_default_effort_for_sonnet_5() {
+    fn adaptive_effort_payload(
+        model: &str,
+        reasoning_effort: Option<vtcode_config::types::ReasoningEffortLevel>,
+        configured_effort: Option<vtcode_config::types::ReasoningEffortLevel>,
+    ) -> serde_json::Value {
         let request = LLMRequest {
-            model: models::CLAUDE_SONNET_5.to_string(),
+            model: model.to_string(),
             messages: vec![Message::user("solve this carefully".to_string())].into(),
+            reasoning_effort,
             ..Default::default()
         };
         let cache_settings = AnthropicPromptCacheSettings::default();
-        let anthropic_config = AnthropicConfig::default();
+        let anthropic_config = AnthropicConfig {
+            effort: configured_effort,
+            ..AnthropicConfig::default()
+        };
         let ctx = RequestBuilderContext {
             prompt_cache_enabled: false,
             prompt_cache_settings: &cache_settings,
@@ -1302,8 +1309,50 @@ mod request_builder_tests {
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
+        assert_eq!(payload["thinking"]["type"], "adaptive", "model {model}");
+        payload
+    }
 
-        assert_eq!(payload["thinking"]["type"], "adaptive");
+    #[test]
+    fn test_convert_to_anthropic_format_uses_model_default_effort_when_unset() {
+        // Opus 5.5 is tuned for `medium`; the others default to `high`.
+        for (model, expected) in [
+            (models::anthropic::CLAUDE_OPUS_5_5, "medium"),
+            (models::anthropic::CLAUDE_OPUS_5, "high"),
+            (models::CLAUDE_SONNET_5, "high"),
+            (models::anthropic::CLAUDE_FABLE_5_1, "high"),
+        ] {
+            let payload = adaptive_effort_payload(model, None, None);
+            assert_eq!(payload["output_config"]["effort"], expected, "model {model}");
+        }
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_honors_explicit_reasoning_effort_over_model_default() {
+        use vtcode_config::types::ReasoningEffortLevel;
+
+        let payload =
+            adaptive_effort_payload(models::anthropic::CLAUDE_OPUS_5_5, Some(ReasoningEffortLevel::High), None);
+        assert_eq!(payload["output_config"]["effort"], "high");
+
+        // `agent.reasoning_effort` / `/effort` wins over `provider.anthropic.effort`.
+        let payload = adaptive_effort_payload(
+            models::anthropic::CLAUDE_OPUS_5_5,
+            Some(ReasoningEffortLevel::High),
+            Some(ReasoningEffortLevel::Low),
+        );
+        assert_eq!(payload["output_config"]["effort"], "high");
+    }
+
+    #[test]
+    fn test_convert_to_anthropic_format_honors_explicit_configured_effort() {
+        use vtcode_config::types::ReasoningEffortLevel;
+
+        let payload =
+            adaptive_effort_payload(models::anthropic::CLAUDE_OPUS_5_5, None, Some(ReasoningEffortLevel::XHigh));
+        assert_eq!(payload["output_config"]["effort"], "xhigh");
+
+        let payload = adaptive_effort_payload(models::CLAUDE_SONNET_5, None, Some(ReasoningEffortLevel::XHigh));
         assert_eq!(payload["output_config"]["effort"], "xhigh");
     }
 

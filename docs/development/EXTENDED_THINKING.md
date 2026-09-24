@@ -28,7 +28,7 @@ thinking_display = "summarized"
 
 ### Important defaults
 
-- `effort` now defaults to `xhigh`; models that do not support `xhigh` fall back to their supported default, typically `high`
+- `effort` is unset by default, so each model uses its own default (`medium` on Claude Opus 5.5, `high` on the other adaptive models); an explicit `agent.reasoning_effort` or `/effort` takes precedence, and a configured level the model does not support falls back to the model default
 - `xhigh` is only valid for Claude Opus 4.8/4.7
 - `task_budget_tokens` is only sent for Claude Opus 4.8/4.7
 - `thinking_display` defaults to the Anthropic API default when unset

@@ -230,13 +230,15 @@ pub(crate) fn convert_to_anthropic_format(
                 .map(|effort| effort.to_ascii_lowercase())
                 .or_else(|| adaptive_effort.as_ref().map(|effort| effort.to_ascii_lowercase()))
                 .or_else(|| {
+                    // Only an explicitly configured effort overrides the
+                    // model's own default (for example `medium` on Opus 5.5).
                     thinking_val.as_ref().and_then(|_| {
-                        let configured_effort = ctx.anthropic_config.effort.as_str();
-                        if effort_allowed_for_model(resolved_model, ctx.model, configured_effort) {
-                            Some(configured_effort.to_string())
-                        } else {
-                            default_effort_for_model(resolved_model, ctx.model).map(str::to_string)
-                        }
+                        ctx.anthropic_config
+                            .effort
+                            .map(|effort| effort.as_str())
+                            .filter(|effort| effort_allowed_for_model(resolved_model, ctx.model, effort))
+                            .or_else(|| default_effort_for_model(resolved_model, ctx.model))
+                            .map(str::to_string)
                     })
                 }),
         }

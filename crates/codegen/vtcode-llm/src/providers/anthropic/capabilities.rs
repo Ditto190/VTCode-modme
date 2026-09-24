@@ -437,7 +437,10 @@ pub(crate) fn effort_is_at_most_high(
     if let Some(effort) = request.reasoning_effort {
         return matches!(effort, ReasoningEffortLevel::Low | ReasoningEffortLevel::Medium | ReasoningEffortLevel::High);
     }
-    effort_str_is_at_most_high(anthropic_config.effort.as_str())
+    match anthropic_config.effort {
+        Some(effort) => effort_str_is_at_most_high(effort.as_str()),
+        None => default_effort_for_model(&request.model, "").is_some_and(effort_str_is_at_most_high),
+    }
 }
 
 /// Returns true if `effort` names one of the `low`, `medium`, or `high`
