@@ -1838,7 +1838,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         session_stats.reset_verification_auto_recovery_turns();
                     }
                     let max_turns = tracker_continue::tracker_cross_turn_turns(vt_cfg.as_ref());
-                    let final_text = latest_assistant_result_text(&runtime.state.messages);
+                    // A rolled-back refused turn left no final text; the latest
+                    // assistant message belongs to an earlier turn.
+                    let final_text = if refused_turn_rolled_back {
+                        None
+                    } else {
+                        latest_assistant_result_text(&runtime.state.messages)
+                    };
                     let final_text_is_safety_handoff =
                         vtcode_core::core::agent::completion::tracker_final_text_is_safety_handoff(
                             final_text.as_deref().unwrap_or(""),
