@@ -9061,6 +9061,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "vtcode-commons",
 ]
 
 [[package]]

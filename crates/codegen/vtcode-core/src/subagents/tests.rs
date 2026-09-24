@@ -1072,12 +1072,43 @@ fn subagent_input_item_reads_schema_type_field() {
 
 #[test]
 fn agent_schema_reasoning_effort_enum_matches_parser() {
-    for value in vtcode_utility_tool_specs::SUBAGENT_REASONING_EFFORT_VALUES {
-        assert!(ReasoningEffortLevel::parse(value).is_some(), "schema value {value} must parse");
-    }
     let schema = vtcode_utility_tool_specs::agent_parameters();
-    let listed = schema["properties"]["reasoning_effort"]["enum"].as_array().expect("enum").len();
-    assert_eq!(listed, vtcode_utility_tool_specs::SUBAGENT_REASONING_EFFORT_VALUES.len());
+    let listed = schema["properties"]["reasoning_effort"]["enum"]
+        .as_array()
+        .expect("enum")
+        .iter()
+        .map(|value| value.as_str().expect("string enum value").to_string())
+        .collect::<Vec<_>>();
+    // Schema -> parser: every advertised value parses back to itself.
+    for value in &listed {
+        let parsed = ReasoningEffortLevel::parse(value).unwrap_or_else(|| panic!("schema value {value} must parse"));
+        assert_eq!(parsed.as_str(), value);
+    }
+    // Parser -> schema: every named level is advertised. The exhaustive match
+    // makes a new variant fail to compile here until it is listed.
+    let named = [
+        ReasoningEffortLevel::None,
+        ReasoningEffortLevel::Minimal,
+        ReasoningEffortLevel::Low,
+        ReasoningEffortLevel::Medium,
+        ReasoningEffortLevel::High,
+        ReasoningEffortLevel::XHigh,
+        ReasoningEffortLevel::Max,
+    ];
+    for level in named {
+        match level {
+            ReasoningEffortLevel::None
+            | ReasoningEffortLevel::Minimal
+            | ReasoningEffortLevel::Low
+            | ReasoningEffortLevel::Medium
+            | ReasoningEffortLevel::High
+            | ReasoningEffortLevel::XHigh
+            | ReasoningEffortLevel::Max
+            | ReasoningEffortLevel::Unknown => {}
+        }
+        assert!(listed.iter().any(|value| value == level.as_str()), "{level} missing from schema enum");
+    }
+    assert_eq!(listed.len(), named.len());
 }
 
 #[tokio::test]

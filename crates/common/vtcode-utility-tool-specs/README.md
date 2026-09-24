@@ -42,8 +42,7 @@ See [docs.rs/vtcode-utility-tool-specs](https://docs.rs/vtcode-utility-tool-spec
 - `SEARCH_TOOLS_DESCRIPTION` – model-visible description of the search_tools tool
 - `MCP_DESCRIPTION` – model-visible description of the mcp tool
 - `AGENT_DESCRIPTION` – model-visible description of the agent tool
-- `SUBAGENT_REASONING_EFFORT_VALUES` – reasoning effort values accepted by the agent tool override
-- `SUBAGENT_INPUT_ITEM_TYPES` – values for the `type` label on structured agent context items
+- `SUBAGENT_REASONING_EFFORT_VALUES` – reasoning effort values accepted by the agent tool override (from `vtcode-commons`)
 - `EXEC_COMMAND_DESCRIPTION` – model-visible description of the exec_command tool
 
 ### Schema functions

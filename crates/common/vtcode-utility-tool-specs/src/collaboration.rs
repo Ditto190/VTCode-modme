@@ -232,14 +232,10 @@ pub fn request_user_input_parameters() -> Value {
     })
 }
 
-/// Reasoning effort values accepted for a child agent override. Mirrors
-/// `ReasoningEffortLevel::parse` in `vtcode-commons`; a vtcode-core test keeps
-/// the two lists in sync.
-pub const SUBAGENT_REASONING_EFFORT_VALUES: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-/// Values for the optional `type` label on a structured context item. Each
-/// value names the content field the item carries.
-pub const SUBAGENT_INPUT_ITEM_TYPES: &[&str] = &["text", "path", "name", "image_url"];
+/// Reasoning effort values accepted for a child agent override: every value
+/// `ReasoningEffortLevel::parse` accepts, including `none` (the child sends no
+/// reasoning configuration), taken from the single list in `vtcode-commons`.
+pub const SUBAGENT_REASONING_EFFORT_VALUES: &[&str] = vtcode_commons::reasoning::constants::PARSEABLE_LEVELS;
 
 const ITEMS_DESCRIPTION: &str = "Structured context items for the child. Each item carries one content field. Items are used only when message is empty; each item contributes its first non-empty field in the order text, path, name, image_url.";
 
@@ -265,7 +261,6 @@ fn collaboration_input_item_schema() -> Value {
         "properties": {
             "type": {
                 "type": "string",
-                "enum": SUBAGENT_INPUT_ITEM_TYPES,
                 "description": "Optional label naming the content field this item carries."
             },
             "text": {"type": "string", "description": "Inline text passed to the child as-is."},
@@ -290,7 +285,8 @@ mod tests {
         assert_eq!(spawn_items, send_items);
         assert_eq!(spawn_items["additionalProperties"], json!(false));
         assert_eq!(spawn_items["properties"]["image_url"]["type"], json!("string"));
-        assert_eq!(spawn_items["properties"]["type"]["enum"], json!(SUBAGENT_INPUT_ITEM_TYPES));
+        // The label is informational; the child reads only the content fields.
+        assert!(spawn_items["properties"]["type"].get("enum").is_none());
         for field in ["type", "text", "path", "name", "image_url"] {
             let description = spawn_items["properties"][field]["description"].as_str().unwrap_or_default();
             assert!(!description.is_empty(), "item field {field} needs a description");
