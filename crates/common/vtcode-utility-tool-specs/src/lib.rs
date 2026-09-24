@@ -18,9 +18,9 @@ mod responses_api;
 mod tool_kind;
 
 pub use collaboration::{
-    SUBAGENT_INPUT_ITEM_TYPES, SUBAGENT_REASONING_EFFORT_VALUES, agent_parameters, close_agent_parameters,
-    request_user_input_description, request_user_input_parameters, resume_agent_parameters, send_input_parameters,
-    spawn_agent_parameters, spawn_background_subprocess_parameters, wait_agent_parameters,
+    AGENT_DESCRIPTION, SUBAGENT_INPUT_ITEM_TYPES, SUBAGENT_REASONING_EFFORT_VALUES, agent_parameters,
+    close_agent_parameters, request_user_input_description, request_user_input_parameters, resume_agent_parameters,
+    send_input_parameters, spawn_agent_parameters, spawn_background_subprocess_parameters, wait_agent_parameters,
 };
 pub use json_schema::{AdditionalProperties, JsonSchema, parse_tool_input_schema};
 #[cfg(feature = "mcp")]
@@ -148,6 +148,9 @@ pub fn cron_parameters() -> Value {
     })
 }
 
+/// Model-visible description of the `mcp` tool.
+pub const MCP_DESCRIPTION: &str = "Discover and manage Model Context Protocol capabilities. Use action=search_tools to find tools, action=get_tool_details to fetch one schema, action=list_servers to inspect configured servers, or action=connect and action=disconnect to manage a named server. action=search_tools searches only tools exposed by configured MCP servers; the separate search_tools tool searches the whole session catalog, including deferred built-in tools. Do not disconnect a server while one of its tool calls is active.";
+
 #[must_use]
 pub fn mcp_parameters() -> Value {
     json!({
@@ -254,7 +257,6 @@ pub fn write_stdin_parameters() -> Value {
             "chars": {"type": "string", "description": "Bytes to write to stdin. Pass an empty string to poll without sending input."},
             "yield_time_ms": {"type": "integer", "description": "Wait before returning fresh session output (ms).", "default": 1000},
             "wait_timeout_seconds": {"type": "integer", "minimum": 1, "description": "Explicit wait deadline in seconds. A deadline returns an in-progress session that can be waited on again."},
-            "timeout_seconds": {"type": "integer", "minimum": 1, "description": "Alias for wait_timeout_seconds."},
             "max_output_tokens": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 10000, "description": "Output token cap for the continuation response. Large or truncated output can return a spool_path; the response reports whether an active session has finished writing it."}
         },
         "anyOf": [
@@ -541,6 +543,10 @@ mod tests {
         assert_eq!(stdin_params["properties"]["chars"]["type"], "string");
         assert_eq!(stdin_params["properties"]["action"]["enum"], json!(["write", "poll", "wait"]));
         assert!(stdin_params["properties"]["wait_timeout_seconds"].is_object());
+        assert!(
+            stdin_params["properties"].get("timeout_seconds").is_none(),
+            "write_stdin schema advertises only wait_timeout_seconds"
+        );
         assert_eq!(stdin_params["anyOf"][1]["required"], json!(["action"]));
         assert_eq!(stdin_params["anyOf"][1]["properties"]["action"]["const"], "wait");
         assert!(
@@ -562,6 +568,25 @@ mod tests {
                 .contains("spool_path")
         );
         assert_eq!(stdin_params["additionalProperties"], false);
+    }
+
+    #[test]
+    fn mcp_description_distinguishes_server_search_from_catalog_search() {
+        assert!(MCP_DESCRIPTION.starts_with("Discover and manage Model Context Protocol capabilities."));
+        assert!(MCP_DESCRIPTION.contains("action=search_tools searches only tools exposed by configured MCP servers"));
+        assert!(MCP_DESCRIPTION.contains("the separate search_tools tool searches the whole session catalog"));
+    }
+
+    #[test]
+    fn agent_description_routes_shell_processes_to_exec_command() {
+        assert!(AGENT_DESCRIPTION.starts_with("Spawn and steer delegated child agents."));
+        assert!(AGENT_DESCRIPTION.contains("spawn_subprocess runs a subagent defined with background: true"));
+        assert!(AGENT_DESCRIPTION.contains("go through exec_command, with background=true"));
+        let action = agent_parameters()["properties"]["action"]["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(!action.contains("daemons"), "{action}");
     }
 
     #[test]

@@ -25,9 +25,9 @@ use crate::tools::web_fetch::{WEB_FETCH_DESCRIPTION, WebFetchTool, web_fetch_par
 use crate::tools::web_search::{WEB_SEARCH_DESCRIPTION, WebSearchTool};
 use serde_json::json;
 use vtcode_utility_tool_specs::{
-    EXEC_COMMAND_DESCRIPTION, SEARCH_TOOLS_DESCRIPTION, agent_parameters, apply_patch_parameters,
-    code_search_parameters, cron_parameters, exec_command_parameters, list_files_parameters, mcp_parameters,
-    search_tools_parameters, write_stdin_parameters,
+    AGENT_DESCRIPTION, EXEC_COMMAND_DESCRIPTION, MCP_DESCRIPTION, SEARCH_TOOLS_DESCRIPTION, agent_parameters,
+    apply_patch_parameters, code_search_parameters, cron_parameters, exec_command_parameters, list_files_parameters,
+    mcp_parameters, search_tools_parameters, write_stdin_parameters,
 };
 
 use super::distributed::{BUILTIN_TOOLS, tool_config};
@@ -166,33 +166,26 @@ fn register_task_tracker(plan_state: Option<&PlanningWorkflowState>) -> ToolRegi
 
 #[distributed_slice(BUILTIN_TOOLS)]
 fn register_agent(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
-    ToolRegistration::new(
-        tools::AGENT,
-        CapabilityLevel::Basic,
-        false,
-        ToolRegistry::agent_executor,
-    )
-    .with_description(
-        "Spawn and steer delegated child agents. Use action=spawn to delegate a scoped task, action=spawn_subprocess for a managed background process, action=send_input to continue a child, action=resume to reopen a completed child, action=wait for results, or action=close to cancel a child. Use exec_command for one-shot shell commands.",
-    )
-    .with_parameter_schema(agent_parameters())
-    .with_aliases([
-        tools::SPAWN_AGENT,
-        tools::SPAWN_BACKGROUND_SUBPROCESS,
-        tools::SEND_INPUT,
-        tools::RESUME_AGENT,
-        tools::WAIT_AGENT,
-        tools::CLOSE_AGENT,
-        "delegate",
-        "subagent",
-        "background_subagent",
-        "launch_background_helper",
-        "message_agent",
-        "continue_agent",
-        "resume_subagent",
-        "wait_subagent",
-        "close_subagent",
-    ])
+    ToolRegistration::new(tools::AGENT, CapabilityLevel::Basic, false, ToolRegistry::agent_executor)
+        .with_description(AGENT_DESCRIPTION)
+        .with_parameter_schema(agent_parameters())
+        .with_aliases([
+            tools::SPAWN_AGENT,
+            tools::SPAWN_BACKGROUND_SUBPROCESS,
+            tools::SEND_INPUT,
+            tools::RESUME_AGENT,
+            tools::WAIT_AGENT,
+            tools::CLOSE_AGENT,
+            "delegate",
+            "subagent",
+            "background_subagent",
+            "launch_background_helper",
+            "message_agent",
+            "continue_agent",
+            "resume_subagent",
+            "wait_subagent",
+            "close_subagent",
+        ])
 }
 
 // ---------------------------------------------------------------------------
@@ -301,26 +294,19 @@ fn register_defuddle_fetch(_plan_state: Option<&PlanningWorkflowState>) -> ToolR
 
 #[distributed_slice(BUILTIN_TOOLS)]
 fn register_mcp(_plan_state: Option<&PlanningWorkflowState>) -> ToolRegistration {
-    ToolRegistration::new(
-        tools::MCP,
-        CapabilityLevel::CodeSearch,
-        false,
-        ToolRegistry::mcp_executor,
-    )
-    .with_description(
-        "Discover and manage Model Context Protocol capabilities. Use action=search_tools to find tools, action=get_tool_details to fetch one schema, action=list_servers to inspect configured servers, or action=connect and action=disconnect to manage a named server. Do not disconnect a server while one of its tool calls is active.",
-    )
-    .with_parameter_schema(mcp_parameters())
-    .with_permission(ToolPolicy::Allow)
-    .with_aliases([
-        tools::MCP_SEARCH_TOOLS,
-        tools::MCP_GET_TOOL_DETAILS,
-        tools::MCP_LIST_SERVERS,
-        tools::MCP_CONNECT_SERVER,
-        tools::MCP_DISCONNECT_SERVER,
-        "mcp_tool_search",
-        "mcp_tool_details",
-    ])
+    ToolRegistration::new(tools::MCP, CapabilityLevel::CodeSearch, false, ToolRegistry::mcp_executor)
+        .with_description(MCP_DESCRIPTION)
+        .with_parameter_schema(mcp_parameters())
+        .with_permission(ToolPolicy::Allow)
+        .with_aliases([
+            tools::MCP_SEARCH_TOOLS,
+            tools::MCP_GET_TOOL_DETAILS,
+            tools::MCP_LIST_SERVERS,
+            tools::MCP_CONNECT_SERVER,
+            tools::MCP_DISCONNECT_SERVER,
+            "mcp_tool_search",
+            "mcp_tool_details",
+        ])
 }
 
 #[distributed_slice(BUILTIN_TOOLS)]

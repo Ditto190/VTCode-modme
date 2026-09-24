@@ -124,6 +124,8 @@ find tools whose definitions are deferred (for example `code_search`,
 `limit` is optional (1–25, default 5), and `detail_level` accepts `name`,
 `name_description` (default), or `full`. Deferred matches are listed in
 `expanded_for_next_segment` and become callable on the next request segment.
+The `mcp` tool's `action=search_tools` is narrower: it searches only tools
+exposed by configured MCP servers.
 
 ```json
 {"query":"GitHub pull request review","limit":5,"detail_level":"name_description"}
