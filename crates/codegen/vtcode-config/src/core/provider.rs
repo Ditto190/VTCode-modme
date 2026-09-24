@@ -506,6 +506,90 @@ pub struct AnthropicConfig {
     /// guidance mid-generation. Only honored for Anthropic models and providers.
     #[serde(default)]
     pub advisor: AdvisorConfig,
+
+    /// Server-side refusal fallbacks (`fallbacks` request parameter).
+    ///   - "default": let Anthropic pick the recommended fallback model when the
+    ///     primary model declines on policy grounds (the VT Code default).
+    ///   - "off": never send `fallbacks`.
+    ///   - a list of 1-3 `{ model, max_tokens }` entries tried in order.
+    ///
+    /// Only sent to the first-party Claude API (`api.anthropic.com`) for models
+    /// whose capability profile supports server-side fallbacks (Claude Opus 5,
+    /// Opus 5.5, Fable 5 and Fable 5.1); other models and endpoints send nothing.
+    #[serde(default)]
+    pub fallbacks: AnthropicFallbacks,
+}
+
+/// Keyword forms of [`AnthropicFallbacks`].
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AnthropicFallbackMode {
+    /// Use Anthropic's recommended fallback chain (`fallbacks: "default"`).
+    #[default]
+    Default,
+    /// Do not request server-side fallbacks.
+    Off,
+}
+
+/// One explicit server-side fallback entry.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AnthropicFallbackTarget {
+    /// Fallback model id, for example `claude-opus-4-8`.
+    pub model: String,
+    /// Optional `max_tokens` override for this fallback attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+/// Server-side refusal fallback selection: `"default"`, `"off"`, or an explicit
+/// list of fallback models.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum AnthropicFallbacks {
+    Mode(AnthropicFallbackMode),
+    Models(Vec<AnthropicFallbackTarget>),
+}
+
+impl Default for AnthropicFallbacks {
+    fn default() -> Self {
+        Self::Mode(AnthropicFallbackMode::Default)
+    }
+}
+
+impl AnthropicFallbacks {
+    /// Maximum number of explicit fallback entries the API accepts.
+    pub const MAX_MODELS: usize = 3;
+
+    /// Returns a validation message when an explicit list is empty, too long,
+    /// has a blank model, or repeats a model.
+    pub fn validation_error(&self, field_path: &str) -> Option<String> {
+        let Self::Models(models) = self else {
+            return None;
+        };
+        if models.is_empty() || models.len() > Self::MAX_MODELS {
+            return Some(format!(
+                "`{field_path}` must list between 1 and {} fallback models, or be \"default\" or \"off\".",
+                Self::MAX_MODELS
+            ));
+        }
+        let mut seen = std::collections::HashSet::with_capacity(models.len());
+        for target in models {
+            let model = target.model.trim();
+            if model.is_empty() {
+                return Some(format!("`{field_path}` entries must set a non-empty `model`."));
+            }
+            if !seen.insert(model) {
+                return Some(format!("`{field_path}` lists `{model}` more than once; entries must be distinct."));
+            }
+            if target.max_tokens == Some(0) {
+                return Some(format!("`{field_path}` entry `{model}` must use a positive `max_tokens`."));
+            }
+        }
+        None
+    }
 }
 
 impl Default for AnthropicConfig {
@@ -523,6 +607,7 @@ impl Default for AnthropicConfig {
             thinking_display: None,
             count_tokens_enabled: default_count_tokens_enabled(),
             advisor: AdvisorConfig::default(),
+            fallbacks: AnthropicFallbacks::default(),
         }
     }
 }
@@ -662,11 +747,83 @@ fn default_task_budget_beta() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AnthropicConfig, OpenAIConfig, OpenAIHostedShellConfig, OpenAIHostedShellDomainSecret,
-        OpenAIHostedShellEnvironment, OpenAIHostedShellNetworkPolicy, OpenAIHostedShellNetworkPolicyType,
-        OpenAIHostedSkill, OpenAIHostedSkillVersion, OpenAIManualCompactionConfig, OpenAIServiceTier,
-        ToolSearchAlgorithm,
+        AnthropicConfig, AnthropicFallbackMode, AnthropicFallbackTarget, AnthropicFallbacks, OpenAIConfig,
+        OpenAIHostedShellConfig, OpenAIHostedShellDomainSecret, OpenAIHostedShellEnvironment,
+        OpenAIHostedShellNetworkPolicy, OpenAIHostedShellNetworkPolicyType, OpenAIHostedSkill,
+        OpenAIHostedSkillVersion, OpenAIManualCompactionConfig, OpenAIServiceTier, ToolSearchAlgorithm,
     };
+
+    #[test]
+    fn anthropic_fallbacks_default_to_default_mode() {
+        let config = AnthropicConfig::default();
+        assert_eq!(config.fallbacks, AnthropicFallbacks::Mode(AnthropicFallbackMode::Default));
+        let parsed: AnthropicConfig = toml::from_str("").expect("config should parse");
+        assert_eq!(parsed.fallbacks, AnthropicFallbacks::Mode(AnthropicFallbackMode::Default));
+    }
+
+    #[test]
+    fn anthropic_fallbacks_parse_all_three_forms() {
+        let parsed: AnthropicConfig = toml::from_str("fallbacks = \"default\"").expect("default form");
+        assert_eq!(parsed.fallbacks, AnthropicFallbacks::Mode(AnthropicFallbackMode::Default));
+
+        let parsed: AnthropicConfig = toml::from_str("fallbacks = \"off\"").expect("off form");
+        assert_eq!(parsed.fallbacks, AnthropicFallbacks::Mode(AnthropicFallbackMode::Off));
+
+        let parsed: AnthropicConfig = toml::from_str(
+            "fallbacks = [{ model = \"claude-opus-4-8\", max_tokens = 32000 }, { model = \"claude-opus-5\" }]",
+        )
+        .expect("list form");
+        assert_eq!(
+            parsed.fallbacks,
+            AnthropicFallbacks::Models(vec![
+                AnthropicFallbackTarget {
+                    model: "claude-opus-4-8".to_string(),
+                    max_tokens: Some(32_000),
+                },
+                AnthropicFallbackTarget {
+                    model: "claude-opus-5".to_string(),
+                    max_tokens: None,
+                },
+            ])
+        );
+        assert_eq!(parsed.fallbacks.validation_error("fallbacks"), None);
+
+        assert!(toml::from_str::<AnthropicConfig>("fallbacks = \"sometimes\"").is_err());
+    }
+
+    #[test]
+    fn anthropic_fallbacks_round_trip_through_serde() {
+        for fallbacks in [
+            AnthropicFallbacks::Mode(AnthropicFallbackMode::Default),
+            AnthropicFallbacks::Mode(AnthropicFallbackMode::Off),
+            AnthropicFallbacks::Models(vec![AnthropicFallbackTarget {
+                model: "claude-opus-4-8".to_string(),
+                max_tokens: None,
+            }]),
+        ] {
+            let json = serde_json::to_value(&fallbacks).expect("serialize");
+            let back: AnthropicFallbacks = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(back, fallbacks);
+        }
+        assert_eq!(
+            serde_json::to_value(AnthropicFallbacks::default()).expect("serialize"),
+            serde_json::json!("default")
+        );
+    }
+
+    #[test]
+    fn anthropic_fallback_list_validation_rejects_bad_lists() {
+        let target = |model: &str| AnthropicFallbackTarget { model: model.to_string(), max_tokens: None };
+        for bad in [
+            AnthropicFallbacks::Models(vec![]),
+            AnthropicFallbacks::Models(vec![target("a"), target("b"), target("c"), target("d")]),
+            AnthropicFallbacks::Models(vec![target("  ")]),
+            AnthropicFallbacks::Models(vec![target("a"), target(" a ")]),
+            AnthropicFallbacks::Models(vec![AnthropicFallbackTarget { model: "a".to_string(), max_tokens: Some(0) }]),
+        ] {
+            assert!(bad.validation_error("fallbacks").is_some(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn openai_config_defaults_to_websocket_mode_disabled() {

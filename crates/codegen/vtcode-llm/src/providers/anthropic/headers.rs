@@ -15,6 +15,42 @@ pub(crate) const MID_CONVERSATION_SYSTEM_CLEAR_AT_BETA: &str = "mid-conversation
 /// Required whenever a request sends `thinking.display: "updates"`.
 pub(crate) const THINKING_DISPLAY_UPDATES_BETA: &str = "thinking-display-updates-2026-08-18";
 
+/// Beta for the `fallbacks: "default"` keyword form.
+pub(crate) const SERVER_SIDE_FALLBACK_DEFAULT_BETA: &str = "server-side-fallback-2026-07-01";
+/// Beta for the explicit-list `fallbacks` form. The date is older than the
+/// keyword form's on purpose; each header is rejected with the other form.
+pub(crate) const SERVER_SIDE_FALLBACK_LIST_BETA: &str = "server-side-fallback-2026-06-01";
+/// Beta that makes a refusal return a `fallback_credit_token` and lets a
+/// client-side retry echo it.
+pub(crate) const FALLBACK_CREDIT_BETA: &str = "fallback-credit-2026-07-01";
+
+/// Which `fallbacks` form a request sends; each needs its own beta header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerSideFallbackForm {
+    /// `fallbacks: "default"`.
+    Default,
+    /// `fallbacks: [{ "model": ... }, ...]`.
+    List,
+}
+
+impl ServerSideFallbackForm {
+    /// Detects the form from a serialized request's `fallbacks` value.
+    pub(crate) fn of_request(anthropic_request: &serde_json::Value) -> Option<Self> {
+        match anthropic_request.get("fallbacks")? {
+            serde_json::Value::String(mode) if mode == "default" => Some(Self::Default),
+            serde_json::Value::Array(entries) if !entries.is_empty() => Some(Self::List),
+            _ => None,
+        }
+    }
+
+    fn beta(self) -> &'static str {
+        match self {
+            Self::Default => SERVER_SIDE_FALLBACK_DEFAULT_BETA,
+            Self::List => SERVER_SIDE_FALLBACK_LIST_BETA,
+        }
+    }
+}
+
 /// Configuration for beta header generation
 pub struct BetaHeaderConfig<'a> {
     pub config: &'a AnthropicConfig,
@@ -23,7 +59,7 @@ pub struct BetaHeaderConfig<'a> {
     pub include_manual_interleaved_beta: bool,
     pub request_betas: Option<&'a [String]>,
     pub include_task_budget: bool,
-    pub include_server_side_fallback: bool,
+    pub server_side_fallback: Option<ServerSideFallbackForm>,
     pub include_fallback_credit: bool,
     pub include_mid_conversation_tool_changes: bool,
     pub include_mid_conversation_system_clear_at: bool,
@@ -54,12 +90,12 @@ pub fn combined_beta_header_value(
         pieces.push(config.config.task_budget_beta.clone());
     }
 
-    if config.include_server_side_fallback {
-        pieces.push("server-side-fallback-2026-07-01".to_owned());
+    if let Some(form) = config.server_side_fallback {
+        pieces.push(form.beta().to_owned());
     }
 
     if config.include_fallback_credit {
-        pieces.push("fallback-credit-2026-06-01".to_owned());
+        pieces.push(FALLBACK_CREDIT_BETA.to_owned());
     }
 
     if config.include_mid_conversation_tool_changes {
@@ -101,7 +137,7 @@ mod tests {
             include_manual_interleaved_beta: false,
             request_betas: None,
             include_task_budget: false,
-            include_server_side_fallback: false,
+            server_side_fallback: None,
             include_fallback_credit: false,
             include_mid_conversation_tool_changes: false,
             include_mid_conversation_system_clear_at: false,
@@ -115,6 +151,39 @@ mod tests {
             messages_ttl_seconds: ttl_seconds,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn server_side_fallback_beta_matches_the_request_form() {
+        let config = AnthropicConfig::default();
+        let mut beta = beta_config(&config);
+
+        beta.server_side_fallback = ServerSideFallbackForm::of_request(&serde_json::json!({ "fallbacks": "default" }));
+        assert_eq!(
+            combined_beta_header_value(false, &cache_settings(300), &beta).as_deref(),
+            Some("server-side-fallback-2026-07-01")
+        );
+
+        beta.server_side_fallback =
+            ServerSideFallbackForm::of_request(&serde_json::json!({ "fallbacks": [{ "model": "claude-opus-4-8" }] }));
+        assert_eq!(
+            combined_beta_header_value(false, &cache_settings(300), &beta).as_deref(),
+            Some("server-side-fallback-2026-06-01")
+        );
+
+        assert_eq!(ServerSideFallbackForm::of_request(&serde_json::json!({ "fallbacks": [] })), None);
+        assert_eq!(ServerSideFallbackForm::of_request(&serde_json::json!({ "model": "x" })), None);
+    }
+
+    #[test]
+    fn fallback_credit_retry_uses_current_credit_beta() {
+        let config = AnthropicConfig::default();
+        let mut beta = beta_config(&config);
+        beta.include_fallback_credit = true;
+        assert_eq!(
+            combined_beta_header_value(false, &cache_settings(300), &beta).as_deref(),
+            Some("fallback-credit-2026-07-01")
+        );
     }
 
     #[test]

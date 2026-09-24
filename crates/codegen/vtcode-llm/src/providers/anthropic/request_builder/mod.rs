@@ -11,24 +11,27 @@ use crate::provider::{
     PromptCacheProfile,
 };
 use crate::providers::anthropic_types::{
-    AnthropicAdvisorCaching, AnthropicAdvisorTool, AnthropicFallbackParam, AnthropicOutputConfig,
-    AnthropicOutputFormat, AnthropicRequest, AnthropicTaskBudget, AnthropicTool, CacheControl, ThinkingConfig,
-    ThinkingDisplay,
+    AnthropicAdvisorCaching, AnthropicAdvisorTool, AnthropicFallbackParam, AnthropicFallbacksKeyword,
+    AnthropicFallbacksParam, AnthropicOutputConfig, AnthropicOutputFormat, AnthropicRequest, AnthropicTaskBudget,
+    AnthropicTool, CacheControl, ThinkingConfig, ThinkingDisplay,
 };
 use serde_json::{Value, json};
 use vtcode_config::constants::reasoning;
-use vtcode_config::core::{AdvisorConfig, AnthropicConfig, AnthropicPromptCacheSettings};
+use vtcode_config::core::{
+    AdvisorConfig, AnthropicConfig, AnthropicFallbackMode, AnthropicFallbacks, AnthropicPromptCacheSettings,
+};
 use vtcode_config::types::ReasoningEffortLevel;
 
 use super::capabilities::{
     default_effort_for_model, default_max_tokens_for_model, effort_allowed_for_model, preserves_thinking_across_turns,
     rejects_forced_tool_choice, rejects_sampling, resolve_model_name, supports_effort,
-    supports_mid_conversation_system_messages, supports_task_budget, thinking_is_on,
+    supports_mid_conversation_system_messages, supports_server_side_fallback, supports_task_budget, thinking_is_on,
 };
 use super::prompt_cache::{get_messages_cache_ttl, get_tools_cache_ttl};
 use messages::{build_messages, hoist_largest_user_message};
 use system::{HistorySystemPlacement, SystemPromptBuildResult, build_system_prompt};
-use thinking::{build_thinking_config, rewrite_thinking_for_model};
+use thinking::build_thinking_config;
+pub(crate) use thinking::rewrite_thinking_for_model;
 use tools::{build_tool_choice, build_tools};
 
 #[cfg(test)]
@@ -39,6 +42,11 @@ pub(crate) struct RequestBuilderContext<'a> {
     pub(crate) prompt_cache_settings: &'a AnthropicPromptCacheSettings,
     pub(crate) anthropic_config: &'a AnthropicConfig,
     pub(crate) model: &'a str,
+    /// Whether the endpoint accepts server-side refusal fallbacks. Only the
+    /// first-party Claude API does; Bedrock, Vertex, Foundry and
+    /// Anthropic-compatible third-party endpoints reject or ignore them, so
+    /// the configured `provider.anthropic.fallbacks` is applied only when set.
+    pub(crate) server_side_fallbacks_available: bool,
 }
 
 fn resolve_messages_ttl(request: &LLMRequest, ctx: &RequestBuilderContext<'_>) -> &'static str {
@@ -249,14 +257,14 @@ pub(crate) fn convert_to_anthropic_format(
     } else {
         None
     };
-    let fallbacks = build_fallbacks(request, thinking_val.as_ref(), effort_value.as_deref(), ctx.model);
+    let fallbacks = build_fallbacks(request, ctx, resolved_model, thinking_val.as_ref(), effort_value.as_deref());
     // Forced tool use (`any`/`tool`) is rejected when thinking is on and, on
     // some models, unconditionally. Fallback entries inherit the top-level
     // `tool_choice`, so every fallback model must accept it as well.
     let forced_tool_choice_allowed = !thinking_is_on(thinking_val.as_ref(), resolved_model, ctx.model)
         && !rejects_forced_tool_choice(resolved_model, ctx.model)
         && fallbacks.as_ref().is_none_or(|fallbacks| {
-            fallbacks.iter().all(|fb| {
+            fallbacks.models().iter().all(|fb| {
                 let fallback_thinking = fb.thinking.as_ref().or(thinking_val.as_ref());
                 !thinking_is_on(fallback_thinking, &fb.model, ctx.model)
                     && !rejects_forced_tool_choice(&fb.model, ctx.model)
@@ -281,7 +289,7 @@ pub(crate) fn convert_to_anthropic_format(
     // is sent to every fallback model too; drop it when any of them would
     // reject it.
     let fallback_rejects_sampling = fallbacks.as_ref().is_some_and(|fallbacks| {
-        fallbacks.iter().any(|fb| {
+        fallbacks.models().iter().any(|fb| {
             rejects_sampling(&fb.model, ctx.model)
                 || fb
                     .thinking
@@ -345,39 +353,87 @@ pub(crate) fn convert_to_anthropic_format(
     })
 }
 
-/// Builds the server-side `fallbacks` entries.
+/// Builds the server-side `fallbacks` parameter.
+///
+/// Request-level `fallbacks` win. Otherwise `provider.anthropic.fallbacks`
+/// applies, but only on the first-party API and for models whose profile
+/// supports server-side fallbacks: `"default"` sends the keyword form, an
+/// explicit list sends entries, and `"off"` (or an invalid list, which config
+/// validation reports) sends nothing.
+fn build_fallbacks(
+    request: &LLMRequest,
+    ctx: &RequestBuilderContext<'_>,
+    resolved_model: &str,
+    primary_thinking: Option<&ThinkingConfig>,
+    effort: Option<&str>,
+) -> Option<AnthropicFallbacksParam> {
+    if let Some(fallbacks) = request.fallbacks.as_ref() {
+        let entries = fallbacks
+            .iter()
+            .map(|fb| (fb.model.as_str(), fb.max_tokens, fb.thinking.as_ref().map(fallback_thinking_config)));
+        return Some(AnthropicFallbacksParam::Models(sanitize_fallback_entries(
+            entries,
+            primary_thinking,
+            effort,
+            ctx.model,
+        )));
+    }
+
+    // A credit-token retry already targets the fallback model; asking for
+    // further fallbacks would change the prompt-shaping fields the token was
+    // issued for.
+    if request.fallback_credit_token.is_some()
+        || !ctx.server_side_fallbacks_available
+        || !supports_server_side_fallback(resolved_model, ctx.model)
+    {
+        return None;
+    }
+
+    match &ctx.anthropic_config.fallbacks {
+        AnthropicFallbacks::Mode(AnthropicFallbackMode::Default) => {
+            Some(AnthropicFallbacksParam::Mode(AnthropicFallbacksKeyword::Default))
+        }
+        AnthropicFallbacks::Mode(AnthropicFallbackMode::Off) => None,
+        configured @ AnthropicFallbacks::Models(targets) => {
+            if configured.validation_error("provider.anthropic.fallbacks").is_some() {
+                return None;
+            }
+            let entries = targets.iter().map(|target| (target.model.trim(), target.max_tokens, None));
+            Some(AnthropicFallbacksParam::Models(sanitize_fallback_entries(
+                entries,
+                primary_thinking,
+                effort,
+                ctx.model,
+            )))
+        }
+    }
+}
+
+/// Makes explicit `fallbacks` entries valid for their own models.
 ///
 /// The API merges each entry into the primary request, and the merged request
 /// must be valid as a direct request to the entry's model. An explicit thinking
 /// override is rewritten for its model; without one, the entry inherits the
 /// primary thinking config, so an explicit valid override is added whenever
 /// the fallback model would reject the inherited config.
-fn build_fallbacks(
-    request: &LLMRequest,
+fn sanitize_fallback_entries<'m>(
+    entries: impl Iterator<Item = (&'m str, Option<u32>, Option<ThinkingConfig>)>,
     primary_thinking: Option<&ThinkingConfig>,
     effort: Option<&str>,
     default_model: &str,
-) -> Option<Vec<AnthropicFallbackParam>> {
-    let fallbacks = request.fallbacks.as_ref()?;
-    Some(
-        fallbacks
-            .iter()
-            .map(|fb| {
-                let thinking = match fb.thinking.as_ref().map(fallback_thinking_config) {
-                    Some(explicit) => Some(
-                        rewrite_thinking_for_model(&explicit, &fb.model, default_model, effort).unwrap_or(explicit),
-                    ),
-                    None => primary_thinking
-                        .and_then(|inherited| rewrite_thinking_for_model(inherited, &fb.model, default_model, effort)),
-                };
-                AnthropicFallbackParam {
-                    model: fb.model.clone(),
-                    max_tokens: fb.max_tokens,
-                    thinking,
+) -> Vec<AnthropicFallbackParam> {
+    entries
+        .map(|(model, max_tokens, explicit_thinking)| {
+            let thinking = match explicit_thinking {
+                Some(explicit) => {
+                    Some(rewrite_thinking_for_model(&explicit, model, default_model, effort).unwrap_or(explicit))
                 }
-            })
-            .collect(),
-    )
+                None => primary_thinking
+                    .and_then(|inherited| rewrite_thinking_for_model(inherited, model, default_model, effort)),
+            };
+            AnthropicFallbackParam { model: model.to_string(), max_tokens, thinking }
+        })
+        .collect()
 }
 
 fn fallback_thinking_config(thinking: &AnthropicThinkingConfig) -> ThinkingConfig {
@@ -484,15 +540,114 @@ mod tests {
     use vtcode_config::core::AdvisorConfig;
 
     fn convert(request: &LLMRequest) -> Value {
+        convert_with(request, &AnthropicConfig::default(), false)
+    }
+
+    fn convert_with(request: &LLMRequest, anthropic_config: &AnthropicConfig, first_party: bool) -> Value {
         let prompt_cache_settings = AnthropicPromptCacheSettings::default();
-        let anthropic_config = AnthropicConfig::default();
         let ctx = RequestBuilderContext {
             prompt_cache_enabled: false,
             prompt_cache_settings: &prompt_cache_settings,
-            anthropic_config: &anthropic_config,
+            anthropic_config,
             model: anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: first_party,
         };
         convert_to_anthropic_format(request, &ctx).expect("payload conversion")
+    }
+
+    fn user_request(model: &str) -> LLMRequest {
+        LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        }
+    }
+
+    fn config_with_fallbacks(fallbacks: AnthropicFallbacks) -> AnthropicConfig {
+        AnthropicConfig { fallbacks, ..AnthropicConfig::default() }
+    }
+
+    #[test]
+    fn default_config_requests_default_fallbacks_on_supporting_models() {
+        for model in [
+            anthropic::CLAUDE_OPUS_5_5,
+            anthropic::CLAUDE_OPUS_5,
+            anthropic::CLAUDE_FABLE_5,
+            anthropic::CLAUDE_FABLE_5_1,
+        ] {
+            let payload = convert_with(&user_request(model), &AnthropicConfig::default(), true);
+            assert_eq!(payload["fallbacks"], json!("default"), "{model}");
+        }
+    }
+
+    #[test]
+    fn config_fallbacks_are_omitted_for_unsupported_models_off_and_third_party_endpoints() {
+        let default_config = AnthropicConfig::default();
+        for model in [anthropic::CLAUDE_SONNET_5, "claude-3-5-haiku-latest", "MiniMax-M2"] {
+            let payload = convert_with(&user_request(model), &default_config, true);
+            assert!(payload.get("fallbacks").is_none(), "{model} has no fallback profile");
+        }
+
+        let off = config_with_fallbacks(AnthropicFallbacks::Mode(AnthropicFallbackMode::Off));
+        let payload = convert_with(&user_request(anthropic::CLAUDE_OPUS_5_5), &off, true);
+        assert!(payload.get("fallbacks").is_none(), "\"off\" sends nothing");
+
+        let payload = convert_with(&user_request(anthropic::CLAUDE_OPUS_5_5), &default_config, false);
+        assert!(payload.get("fallbacks").is_none(), "non-first-party endpoints send nothing");
+    }
+
+    #[test]
+    fn credit_token_retry_does_not_request_further_fallbacks() {
+        let mut request = user_request(anthropic::CLAUDE_OPUS_5);
+        request.fallback_credit_token = Some("tok".to_string());
+        let payload = convert_with(&request, &AnthropicConfig::default(), true);
+        assert!(payload.get("fallbacks").is_none());
+        assert_eq!(payload["fallback_credit_token"], "tok");
+    }
+
+    #[test]
+    fn configured_fallback_list_is_sanitized_per_model() {
+        use vtcode_config::core::AnthropicFallbackTarget;
+        let config = config_with_fallbacks(AnthropicFallbacks::Models(vec![
+            AnthropicFallbackTarget {
+                model: " claude-opus-4-8 ".to_string(),
+                max_tokens: Some(32_000),
+            },
+            AnthropicFallbackTarget {
+                model: anthropic::CLAUDE_OPUS_5.to_string(),
+                max_tokens: None,
+            },
+        ]));
+        let payload = convert_with(&user_request(anthropic::CLAUDE_OPUS_5_5), &config, true);
+
+        // Opus 5.5 defaults to `display: "updates"`, which neither fallback
+        // model accepts, so each entry gets an explicit valid override.
+        assert_eq!(payload["thinking"], json!({ "type": "adaptive", "display": "updates" }));
+        assert_eq!(payload["fallbacks"][0]["model"], "claude-opus-4-8");
+        assert_eq!(payload["fallbacks"][0]["max_tokens"], 32_000);
+        assert_eq!(fallback_thinking(&payload, 0), &json!({ "type": "adaptive" }));
+        assert_eq!(payload["fallbacks"][1]["model"], anthropic::CLAUDE_OPUS_5);
+        assert!(payload["fallbacks"][1].get("max_tokens").is_none());
+        assert_eq!(fallback_thinking(&payload, 1), &json!({ "type": "adaptive" }));
+    }
+
+    #[test]
+    fn invalid_configured_fallback_list_sends_nothing() {
+        use vtcode_config::core::AnthropicFallbackTarget;
+        let target = AnthropicFallbackTarget {
+            model: "claude-opus-4-8".to_string(),
+            max_tokens: None,
+        };
+        let config = config_with_fallbacks(AnthropicFallbacks::Models(vec![target.clone(), target]));
+        let payload = convert_with(&user_request(anthropic::CLAUDE_OPUS_5_5), &config, true);
+        assert!(payload.get("fallbacks").is_none());
+    }
+
+    #[test]
+    fn request_fallbacks_override_config_fallbacks() {
+        let request = request_with_fallbacks(anthropic::CLAUDE_OPUS_5, vec![fallback("claude-opus-4-8", None)]);
+        let payload = convert_with(&request, &AnthropicConfig::default(), true);
+        assert_eq!(payload["fallbacks"][0]["model"], "claude-opus-4-8");
     }
 
     fn fallback(model: &str, thinking: Option<AnthropicThinkingConfig>) -> FallbackModel {

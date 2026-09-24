@@ -10,6 +10,43 @@ use crate::agent::runloop::unified::planning_workflow::validate_plan_content;
 use crate::agent::runloop::unified::turn::context::{PreparedAssistantToolCall, TurnProcessingResult};
 use crate::agent::runloop::unified::turn::guards::validate_tool_args_security;
 
+/// User-facing explanation for a provider refusal. Anthropic reports the
+/// refusal category and explanation in a `stop_details` reasoning detail;
+/// other providers only report the finish reason.
+fn refusal_reason(reasoning_details: Option<&[String]>) -> String {
+    let stop_details = reasoning_details
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|detail| serde_json::from_str::<serde_json::Value>(detail).ok())
+        .find(|detail| detail.get("type").and_then(serde_json::Value::as_str) == Some("stop_details"));
+    let field = |name: &str| {
+        stop_details
+            .as_ref()
+            .and_then(|detail| detail.get(name))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+
+    let mut reason = match field("category") {
+        Some(category) => format!("The model declined this request (refusal category: {category})."),
+        None => "The model declined this request.".to_string(),
+    };
+    if let Some(explanation) = field("explanation") {
+        reason.push(' ');
+        reason.push_str(&explanation);
+        if !explanation.ends_with('.') {
+            reason.push('.');
+        }
+    }
+    if stop_details.is_some() {
+        reason.push_str(" Any configured server-side fallback models also declined or could not run.");
+    }
+    reason.push_str(" The same prompt is not retried; rephrase the request or switch models.");
+    reason
+}
+
 /// Process an LLM response and return a `TurnProcessingResult` describing whether
 /// there are tool calls to run, a textual assistant response, or nothing.
 pub(crate) fn process_llm_response(
@@ -27,6 +64,15 @@ pub(crate) fn process_llm_response(
     use crate::agent::runloop::unified::turn::provider_noise::strip_provider_noise;
     use vtcode_core::config::constants::tools;
     use vtcode_core::llm::provider as uni;
+
+    // A refusal is terminal for this prompt: empty-response recovery would
+    // resend it and be refused again, and any partial output was cut off by
+    // the provider, so it must not be committed as an answer or executed.
+    if matches!(response.finish_reason, uni::FinishReason::Refusal) {
+        return Ok(TurnProcessingResult::Refusal {
+            reason: refusal_reason(response.reasoning_details.as_deref()),
+        });
+    }
 
     let reasoning = split_reasoning_from_text(response.reasoning.as_deref().unwrap_or("")).0;
     let reasoning_text = reasoning
@@ -725,6 +771,55 @@ mod tests {
         }
     }
 
+    fn refusal_response(content: Option<&str>, reasoning_details: Option<Vec<String>>) -> LLMResponse {
+        LLMResponse {
+            content: content.map(str::to_string),
+            finish_reason: FinishReason::Refusal,
+            reasoning_details,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn process_llm_response_ends_refused_turn_with_category_and_explanation() {
+        let detail = serde_json::json!({
+            "type": "stop_details",
+            "category": "cyber",
+            "explanation": "Request resembles malware development",
+        })
+        .to_string();
+        // Partial output cut off by the refusal must not become the answer.
+        let response = refusal_response(Some("Sure, here is"), Some(vec![detail]));
+
+        let mut renderer = AnsiRenderer::stdout();
+        let result = process_llm_response(&response, &mut renderer, 0, false, true, true, true, None, None)
+            .expect("processing should succeed");
+
+        let TurnProcessingResult::Refusal { reason } = result else {
+            panic!("refusal should end the turn");
+        };
+        assert!(reason.contains("refusal category: cyber"), "{reason}");
+        assert!(reason.contains("Request resembles malware development."), "{reason}");
+        assert!(reason.contains("server-side fallback"), "{reason}");
+        assert!(reason.contains("rephrase the request or switch models"), "{reason}");
+    }
+
+    #[test]
+    fn process_llm_response_reports_refusal_without_stop_details() {
+        let response = refusal_response(None, None);
+
+        let mut renderer = AnsiRenderer::stdout();
+        let result = process_llm_response(&response, &mut renderer, 0, false, true, true, true, None, None)
+            .expect("processing should succeed");
+
+        let TurnProcessingResult::Refusal { reason } = result else {
+            panic!("refusal should not fall through to empty-response recovery");
+        };
+        assert!(reason.starts_with("The model declined this request."), "{reason}");
+        assert!(!reason.contains("category"), "{reason}");
+        assert!(!reason.contains("server-side fallback"), "{reason}");
+    }
+
     #[tokio::test]
     async fn process_llm_response_rejects_textual_exec_command_without_command() {
         let temp = tempfile::tempdir().expect("temp workspace");
@@ -857,7 +952,9 @@ mod tests {
             TurnProcessingResult::TextResponse { text, .. } => {
                 panic!("spaced DSML leaked as text: {text}");
             }
-            TurnProcessingResult::Empty => panic!("spaced DSML should produce a tool call"),
+            TurnProcessingResult::Empty | TurnProcessingResult::Refusal { .. } => {
+                panic!("spaced DSML should produce a tool call")
+            }
         }
     }
 
@@ -1041,7 +1138,9 @@ mod tests {
                 assert!(proposed_plan.is_some());
             }
             TurnProcessingResult::ToolCalls { .. } => panic!("attached calls must not bypass plan approval"),
-            TurnProcessingResult::Empty => panic!("complete plan should remain actionable"),
+            TurnProcessingResult::Empty | TurnProcessingResult::Refusal { .. } => {
+                panic!("complete plan should remain actionable")
+            }
         }
     }
 

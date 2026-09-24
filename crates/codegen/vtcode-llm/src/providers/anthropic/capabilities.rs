@@ -38,6 +38,9 @@ pub(crate) struct ClaudeThinkingProfile {
     /// Whether `tool_choice` `any`/`tool` is rejected with a 400 regardless
     /// of the thinking config. Such requests must fall back to `auto`.
     pub rejects_forced_tool_choice: bool,
+    /// Whether the model accepts server-side refusal fallbacks (the
+    /// `fallbacks` request parameter). Sonnet 5 is not listed as supported.
+    pub supports_server_side_fallback: bool,
 }
 
 /// Default `max_tokens` for Claude 5.x models: a starting point for agentic
@@ -87,6 +90,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
             rejects_forced_tool_choice: true,
+            supports_server_side_fallback: true,
         });
     }
 
@@ -105,6 +109,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
             rejects_forced_tool_choice: false,
+            supports_server_side_fallback: false,
         });
     }
 
@@ -123,6 +128,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
             rejects_forced_tool_choice: false,
+            supports_server_side_fallback: true,
         });
     }
 
@@ -144,6 +150,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
             rejects_forced_tool_choice: true,
+            supports_server_side_fallback: true,
         });
     }
 
@@ -162,6 +169,7 @@ pub(crate) fn claude_thinking_profile(model: &str, default_model: &str) -> Optio
             supports_max_effort: true,
             default_max_tokens: CLAUDE_5_DEFAULT_MAX_TOKENS,
             rejects_forced_tool_choice: false,
+            supports_server_side_fallback: true,
         });
     }
 
@@ -250,6 +258,12 @@ pub(crate) fn default_max_tokens_for_model(model: &str, default_model: &str, thi
 /// even when thinking is off.
 pub(crate) fn rejects_forced_tool_choice(model: &str, default_model: &str) -> bool {
     claude_thinking_profile(model, default_model).is_some_and(|profile| profile.rejects_forced_tool_choice)
+}
+
+/// Whether `model` accepts server-side refusal fallbacks. Unprofiled models
+/// never get fallbacks requested on their behalf.
+pub(crate) fn supports_server_side_fallback(model: &str, default_model: &str) -> bool {
+    claude_thinking_profile(model, default_model).is_some_and(|profile| profile.supports_server_side_fallback)
 }
 
 /// Whether a request to `model` with this `thinking` field runs with thinking

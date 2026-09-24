@@ -534,6 +534,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -560,6 +561,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -590,6 +592,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -620,6 +623,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -650,6 +654,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -680,6 +685,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -720,6 +726,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -764,6 +771,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -810,6 +818,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -853,6 +862,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -880,6 +890,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -914,6 +925,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -950,6 +962,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -980,6 +993,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1008,6 +1022,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1044,6 +1059,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
         convert_to_anthropic_format(&request, &ctx).expect("payload conversion")
     }
@@ -1124,6 +1140,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
         convert_to_anthropic_format(&request, &ctx).expect("payload conversion")
     }
@@ -1182,6 +1199,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1223,6 +1241,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         convert_to_anthropic_format(&request, &ctx).unwrap_err();
@@ -1256,6 +1275,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1278,6 +1298,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1303,6 +1324,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1357,6 +1379,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1393,6 +1416,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1434,6 +1458,7 @@ mod request_builder_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
 
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
@@ -1485,6 +1510,7 @@ mod block_order_round_trip_tests {
             prompt_cache_settings: &cache_settings,
             anthropic_config: &anthropic_config,
             model: models::anthropic::DEFAULT_MODEL,
+            server_side_fallbacks_available: false,
         };
         let payload = convert_to_anthropic_format(&request, &ctx).expect("payload conversion");
         payload["messages"]

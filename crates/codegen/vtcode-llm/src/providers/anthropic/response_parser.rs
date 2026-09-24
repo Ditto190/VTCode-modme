@@ -206,8 +206,9 @@ pub fn parse_response(response_json: Value, model: String) -> Result<LLMResponse
     })
 }
 
-/// Serializes a response's `stop_details` (refusal category, explanation and
-/// fallback-credit fields) into a `reasoning_details` entry. Shared by the
+/// Serializes a response's `stop_details` (refusal category, explanation,
+/// fallback-credit fields and `recommended_model`) into a `reasoning_details`
+/// entry. Shared by the
 /// non-streaming parser and the stream decoder, which receives the same object
 /// on `message_delta`. Returns `None` for an absent or `null` value.
 pub(crate) fn stop_details_reasoning_detail(stop_details: &Value) -> Option<String> {
@@ -216,6 +217,9 @@ pub(crate) fn stop_details_reasoning_detail(stop_details: &Value) -> Option<Stri
     let explanation = sd.get("explanation").and_then(Value::as_str).unwrap_or("");
     let credit_token = sd.get("fallback_credit_token").and_then(Value::as_str).unwrap_or("");
     let has_prefill = sd.get("fallback_has_prefill_claim").and_then(Value::as_bool);
+    // Present only when a server-side fallback attempt could not run (rate
+    // limited or overloaded); a direct retry on that model may succeed.
+    let recommended_model = sd.get("recommended_model").and_then(Value::as_str).map(str::trim).unwrap_or("");
     let mut detail = json!({
         "type": "stop_details",
         "category": category,
@@ -228,6 +232,9 @@ pub(crate) fn stop_details_reasoning_detail(stop_details: &Value) -> Option<Stri
     }
     if let Some(prefill) = has_prefill {
         detail["fallback_has_prefill_claim"] = Value::Bool(prefill);
+    }
+    if !recommended_model.is_empty() {
+        detail["recommended_model"] = Value::String(recommended_model.to_string());
     }
     Some(detail.to_string())
 }

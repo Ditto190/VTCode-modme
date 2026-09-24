@@ -605,6 +605,10 @@ pub(crate) async fn handle_turn_processing_result<'a>(
                 .handle_text_response(text, reasoning, reasoning_details, proposed_plan, params.response_streamed)
                 .await
         }
+        TurnProcessingResult::Refusal { reason } => {
+            tracing::warn!(reason = %reason, "Provider refused the turn; ending it without recovery retries.");
+            Ok(TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(reason) }))
+        }
         TurnProcessingResult::Empty => {
             if params.ctx.is_recovery_active() && params.ctx.recovery_pass_used() {
                 let recovery_mode = if params.ctx.recovery_is_tool_free() {
@@ -1348,6 +1352,36 @@ mod tests {
             !backing.last_history_message_contains(ANTI_BLIND_EDITING_DIRECTIVE),
             "generic never-ran directive must not be used while fix edits are granted"
         );
+    }
+
+    #[tokio::test]
+    async fn refusal_blocks_turn_with_reason_even_during_recovery() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.activate_recovery("loop detector");
+        assert!(ctx.consume_recovery_pass());
+
+        let mut repeated_tool_attempts = LoopTracker::new();
+        let mut turn_modified_files = BTreeSet::new();
+        let reason = "The model declined this request (refusal category: cyber).".to_string();
+
+        let outcome = handle_turn_processing_result(HandleTurnProcessingResultParams {
+            ctx: &mut ctx,
+            processing_result: TurnProcessingResult::Refusal { reason: reason.clone() },
+            response_streamed: true,
+            step_count: 1,
+            repeated_tool_attempts: &mut repeated_tool_attempts,
+            turn_modified_files: &mut turn_modified_files,
+            max_tool_loops: 4,
+            tool_repeat_limit: 4,
+        })
+        .await
+        .expect("refusal should be handled");
+
+        assert!(matches!(
+            outcome,
+            TurnHandlerOutcome::Break(TurnLoopResult::Blocked { reason: Some(ref blocked) }) if *blocked == reason
+        ));
     }
 
     #[tokio::test]

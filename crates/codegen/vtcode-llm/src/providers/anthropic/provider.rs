@@ -10,12 +10,13 @@
 //! - Header management (headers)
 
 use crate::client::LLMClient;
-use crate::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, LLMStream, ToolDefinition};
+use crate::provider::{LLMError, LLMProvider, LLMRequest, LLMResponse, LLMStream, LLMStreamEvent, ToolDefinition};
 use vtcode_config::TimeoutsConfig;
 use vtcode_config::constants::{env_vars, models, urls};
 use vtcode_config::core::{AnthropicConfig, AnthropicPromptCacheSettings, ModelConfig, PromptCachingConfig};
 
 use super::capabilities;
+use super::fallback_retry::{self, RefusalRetryPlan};
 use super::headers;
 use super::request_builder::{self, RequestBuilderContext};
 use super::response_parser;
@@ -27,6 +28,7 @@ use crate::providers::error_handling::{format_network_error, format_parse_error,
 use crate::providers::openai::CustomProviderAuthHandle;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client as HttpClient;
 use reqwest::StatusCode;
 use serde_json::Value;
@@ -36,6 +38,16 @@ const ANTHROPIC_COMPACT_BETA: &str = "compact-2026-01-12";
 const ANTHROPIC_CONTEXT_MANAGEMENT_BETA: &str = "context-management-2025-06-27";
 const ANTHROPIC_ADVISOR_BETA: &str = "advisor-tool-2026-03-01";
 
+/// Whether `base_url` points at the first-party Claude API, the only endpoint
+/// VT Code talks to that accepts server-side refusal fallbacks.
+fn is_first_party_anthropic_endpoint(base_url: &str) -> bool {
+    url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.eq_ignore_ascii_case("api.anthropic.com")))
+        .unwrap_or(false)
+}
+
+#[derive(Clone)]
 pub struct AnthropicProvider {
     api_key: String,
     http_client: HttpClient,
@@ -346,6 +358,7 @@ impl AnthropicProvider {
             prompt_cache_settings: &self.prompt_cache_settings,
             anthropic_config: &self.anthropic_config,
             model: &self.model,
+            server_side_fallbacks_available: is_first_party_anthropic_endpoint(&self.base_url),
         }
     }
 
@@ -397,10 +410,7 @@ impl AnthropicProvider {
                 .get("output_config")
                 .and_then(|value| value.get("task_budget"))
                 .is_some(),
-            include_server_side_fallback: anthropic_request
-                .get("fallbacks")
-                .and_then(|value| value.as_array())
-                .is_some_and(|arr| !arr.is_empty()),
+            server_side_fallback: headers::ServerSideFallbackForm::of_request(anthropic_request),
             include_fallback_credit: request.fallback_credit_token.is_some(),
             include_mid_conversation_tool_changes: false,
             include_mid_conversation_system_clear_at: capabilities::supports_turn_scoped_system_messages(
@@ -544,6 +554,136 @@ struct AnthropicHttpResponse {
     organization_id: Option<String>,
 }
 
+impl AnthropicProvider {
+    async fn generate_with_body(
+        &self,
+        request: &LLMRequest,
+        anthropic_request: &Value,
+        model: String,
+    ) -> Result<LLMResponse, LLMError> {
+        let AnthropicHttpResponse { response, request_id, organization_id } =
+            self.send_request(request, anthropic_request).await?;
+
+        let anthropic_response: Value = response.json().await.map_err(|e| format_parse_error("Anthropic", &e))?;
+
+        let mut llm_response = response_parser::parse_response(anthropic_response, model)?;
+        llm_response.request_id = request_id;
+        llm_response.organization_id = organization_id;
+        Ok(llm_response)
+    }
+
+    /// Sends the one bounded refusal retry described in `fallback_retry`. A
+    /// 400 naming the credit token is resent once without it; any other
+    /// failure is logged and reported as `None` so the caller keeps the
+    /// original refusal.
+    async fn send_refusal_retry(
+        &self,
+        request: &LLMRequest,
+        original_body: &Value,
+        plan: &RefusalRetryPlan,
+    ) -> Option<AnthropicHttpResponse> {
+        let mut body = plan.retry_body(original_body, &self.model);
+        tracing::info!(
+            provider = "anthropic",
+            recommended_model = %plan.model,
+            "refusal fallback could not run server-side; retrying once on the recommended model"
+        );
+        match self.send_request(&plan.retry_request(request, true), &body).await {
+            Ok(response) => Some(response),
+            Err(err) if fallback_retry::rejects_credit_token(&err) => {
+                tracing::warn!(
+                    provider = "anthropic",
+                    error = %err,
+                    "fallback credit token rejected; resending the refusal retry without it"
+                );
+                fallback_retry::strip_credit_token(&mut body);
+                match self.send_request(&plan.retry_request(request, false), &body).await {
+                    Ok(response) => Some(response),
+                    Err(err) => {
+                        tracing::warn!(provider = "anthropic", error = %err, "refusal retry failed");
+                        None
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(provider = "anthropic", error = %err, "refusal retry failed");
+                None
+            }
+        }
+    }
+
+    async fn retry_refused_generate(
+        &self,
+        request: &LLMRequest,
+        original_body: &Value,
+        plan: &RefusalRetryPlan,
+        refused: LLMResponse,
+    ) -> Result<LLMResponse, LLMError> {
+        let Some(AnthropicHttpResponse { response, request_id, organization_id }) =
+            self.send_refusal_retry(request, original_body, plan).await
+        else {
+            return Ok(refused);
+        };
+        let parsed = match response.json::<Value>().await {
+            Ok(value) => response_parser::parse_response(value, plan.model.clone()),
+            Err(err) => Err(format_parse_error("Anthropic", &err)),
+        };
+        match parsed {
+            Ok(mut retried) => {
+                retried.request_id = request_id;
+                retried.organization_id = organization_id;
+                Ok(retried)
+            }
+            Err(err) => {
+                tracing::warn!(provider = "anthropic", error = %err, "refusal retry response could not be parsed");
+                Ok(refused)
+            }
+        }
+    }
+
+    /// Wraps a primary stream so a pre-output refusal eligible for the
+    /// bounded retry is replaced by the retry's stream. Every other event,
+    /// including a refusal that is not retried, passes through unchanged.
+    fn stream_with_refusal_retry(
+        &self,
+        primary: LLMStream,
+        request: LLMRequest,
+        original_body: Value,
+        model: String,
+    ) -> LLMStream {
+        let provider = self.clone();
+        Box::pin(async_stream::stream! {
+            let mut primary = primary;
+            while let Some(event) = primary.next().await {
+                let response = match event {
+                    Ok(LLMStreamEvent::Completed { response }) => response,
+                    other => {
+                        yield other;
+                        continue;
+                    }
+                };
+                let retry = match RefusalRetryPlan::for_response(&response, &model) {
+                    Some(plan) => provider
+                        .send_refusal_retry(&request, &original_body, &plan)
+                        .await
+                        .map(|http| (plan, http)),
+                    None => None,
+                };
+                match retry {
+                    Some((plan, AnthropicHttpResponse { response: http, request_id, organization_id })) => {
+                        let mut retried =
+                            stream_decoder::create_stream(http, plan.model, request_id, organization_id);
+                        while let Some(event) = retried.next().await {
+                            yield event;
+                        }
+                    }
+                    None => yield Ok(LLMStreamEvent::Completed { response }),
+                }
+            }
+        })
+    }
+}
+
 #[async_trait]
 impl LLMProvider for AnthropicProvider {
     fn name(&self) -> &str {
@@ -632,15 +772,13 @@ impl LLMProvider for AnthropicProvider {
         let resolved_model = self.resolved_request_model(&request).to_string();
         let anthropic_request = self.convert_to_anthropic_format(&request)?;
 
-        let AnthropicHttpResponse { response, request_id, organization_id } =
-            self.send_request(&request, &anthropic_request).await?;
-
-        let anthropic_response: Value = response.json().await.map_err(|e| format_parse_error("Anthropic", &e))?;
-
-        let mut llm_response = response_parser::parse_response(anthropic_response, resolved_model)?;
-        llm_response.request_id = request_id;
-        llm_response.organization_id = organization_id;
-        Ok(llm_response)
+        let response = self
+            .generate_with_body(&request, &anthropic_request, resolved_model.clone())
+            .await?;
+        match RefusalRetryPlan::for_response(&response, &resolved_model) {
+            Some(plan) => self.retry_refused_generate(&request, &anthropic_request, &plan, response).await,
+            None => Ok(response),
+        }
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<LLMStream, LLMError> {
@@ -654,7 +792,8 @@ impl LLMProvider for AnthropicProvider {
         let AnthropicHttpResponse { response, request_id, organization_id } =
             self.send_request(&request, &anthropic_request).await?;
 
-        Ok(stream_decoder::create_stream(response, resolved_model, request_id, organization_id))
+        let primary = stream_decoder::create_stream(response, resolved_model.clone(), request_id, organization_id);
+        Ok(self.stream_with_refusal_retry(primary, request, anthropic_request, resolved_model))
     }
 
     fn supported_models(&self) -> Vec<String> {
@@ -1401,6 +1540,340 @@ mod tests {
                 header.split(", ").any(|beta| beta == headers::THINKING_DISPLAY_UPDATES_BETA)
             })
         );
+    }
+
+    fn first_party_provider(model: &str) -> AnthropicProvider {
+        AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            model.to_string(),
+            reqwest::Client::new(),
+            vtcode_config::constants::urls::ANTHROPIC_API_BASE.to_string(),
+            vtcode_config::TimeoutsConfig::default(),
+        )
+    }
+
+    fn split_betas(header: Option<String>) -> Vec<String> {
+        header
+            .map(|header| header.split(", ").map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn opus_5_5_default_payload_requests_default_fallbacks_with_matching_beta() {
+        let model = models::anthropic::CLAUDE_OPUS_5_5;
+        let provider = first_party_provider(model);
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert_eq!(payload["fallbacks"], json!("default"));
+        let betas = split_betas(provider.beta_header_for_request(&request, &payload, false, None));
+        assert!(betas.iter().any(|beta| beta == "server-side-fallback-2026-07-01"), "{betas:?}");
+        assert!(!betas.iter().any(|beta| beta == "server-side-fallback-2026-06-01"), "{betas:?}");
+    }
+
+    #[test]
+    fn configured_fallback_list_uses_list_form_beta() {
+        let model = models::anthropic::CLAUDE_OPUS_5;
+        let mut provider = first_party_provider(model);
+        provider.anthropic_config.fallbacks =
+            vtcode_config::core::AnthropicFallbacks::Models(vec![vtcode_config::core::AnthropicFallbackTarget {
+                model: "claude-opus-4-8".to_string(),
+                max_tokens: None,
+            }]);
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+
+        let payload = provider.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert_eq!(payload["fallbacks"][0]["model"], "claude-opus-4-8");
+        let betas = split_betas(provider.beta_header_for_request(&request, &payload, false, None));
+        assert!(betas.iter().any(|beta| beta == "server-side-fallback-2026-06-01"), "{betas:?}");
+        assert!(!betas.iter().any(|beta| beta == "server-side-fallback-2026-07-01"), "{betas:?}");
+    }
+
+    #[test]
+    fn unprofiled_and_off_payloads_send_no_fallbacks_or_beta() {
+        let unprofiled = first_party_provider("claude-3-5-haiku-latest");
+        let request = LLMRequest {
+            model: "claude-3-5-haiku-latest".to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+        let payload = unprofiled.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert!(payload.get("fallbacks").is_none());
+        let betas = split_betas(unprofiled.beta_header_for_request(&request, &payload, false, None));
+        assert!(!betas.iter().any(|beta| beta.starts_with("server-side-fallback")), "{betas:?}");
+
+        let model = models::anthropic::CLAUDE_OPUS_5_5;
+        let mut off = first_party_provider(model);
+        off.anthropic_config.fallbacks =
+            vtcode_config::core::AnthropicFallbacks::Mode(vtcode_config::core::AnthropicFallbackMode::Off);
+        let request = LLMRequest {
+            model: model.to_string(),
+            messages: vec![Message::user("hello".to_string())].into(),
+            ..Default::default()
+        };
+        let payload = off.convert_to_anthropic_format(&request).expect("payload conversion");
+        assert!(payload.get("fallbacks").is_none());
+        let betas = split_betas(off.beta_header_for_request(&request, &payload, false, None));
+        assert!(!betas.iter().any(|beta| beta.starts_with("server-side-fallback")), "{betas:?}");
+    }
+
+    fn body_has(request: &wiremock::Request, key: &str, value: Option<&str>) -> bool {
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
+        match value {
+            Some(expected) => body.get(key).and_then(serde_json::Value::as_str) == Some(expected),
+            None => body.get(key).is_none(),
+        }
+    }
+
+    fn refusal_with_recommendation() -> serde_json::Value {
+        json!({
+            "content": [],
+            "stop_reason": "refusal",
+            "stop_details": {
+                "type": "refusal",
+                "category": "cyber",
+                "explanation": "declined",
+                "fallback_credit_token": "credit-1",
+                "recommended_model": "claude-opus-4-8"
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn generate_retries_refusal_once_on_recommended_model_with_credit_token() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| body_has(req, "model", Some("claude-opus-5-5")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refusal_with_recommendation()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| {
+                body_has(req, "model", Some("claude-opus-4-8"))
+                    && body_has(req, "fallback_credit_token", Some("credit-1"))
+                    && body_has(req, "fallbacks", None)
+                    && req
+                        .headers
+                        .get("anthropic-beta")
+                        .and_then(|value| value.to_str().ok())
+                        .is_some_and(|value| value.split(", ").any(|beta| beta == "fallback-credit-2026-07-01"))
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "text", "text": "retried answer"}],
+                "stop_reason": "end_turn"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let response = LLMProvider::generate(
+            &provider,
+            LLMRequest {
+                model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("retried request should succeed");
+
+        assert_eq!(response.content.as_deref(), Some("retried answer"));
+        assert_eq!(response.model, "claude-opus-4-8");
+        assert!(matches!(response.finish_reason, crate::provider::FinishReason::Stop));
+    }
+
+    #[tokio::test]
+    async fn generate_resends_without_credit_token_when_token_is_rejected() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| body_has(req, "model", Some("claude-opus-5-5")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refusal_with_recommendation()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| {
+                body_has(req, "model", Some("claude-opus-4-8"))
+                    && body_has(req, "fallback_credit_token", Some("credit-1"))
+            })
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "type": "error",
+                "error": {"type": "invalid_request_error", "message": "fallback_credit_token has expired"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| {
+                body_has(req, "model", Some("claude-opus-4-8")) && body_has(req, "fallback_credit_token", None)
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "text", "text": "uncredited answer"}],
+                "stop_reason": "end_turn"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let response = LLMProvider::generate(
+            &provider,
+            LLMRequest {
+                model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("uncredited retry should succeed");
+
+        assert_eq!(response.content.as_deref(), Some("uncredited answer"));
+    }
+
+    #[tokio::test]
+    async fn generate_keeps_original_refusal_when_retry_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| body_has(req, "model", Some("claude-opus-5-5")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refusal_with_recommendation()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| body_has(req, "model", Some("claude-opus-4-8")))
+            .respond_with(ResponseTemplate::new(529).set_body_json(json!({
+                "type": "error",
+                "error": {"type": "overloaded_error", "message": "Overloaded"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let response = LLMProvider::generate(
+            &provider,
+            LLMRequest {
+                model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("original refusal is returned");
+
+        assert!(matches!(response.finish_reason, crate::provider::FinishReason::Refusal));
+        assert_eq!(response.model, models::anthropic::CLAUDE_OPUS_5_5);
+    }
+
+    #[tokio::test]
+    async fn stream_replaces_retryable_refusal_with_retry_stream() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let refused = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-opus-5-5\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_sequence\":null,\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"fallback_credit_token\":\"credit-1\",\"recommended_model\":\"claude-opus-4-8\"}},\"usage\":{\"output_tokens\":0}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let retried = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-opus-4-8\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"retried\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| body_has(req, "model", Some("claude-opus-5-5")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(refused, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(|req: &wiremock::Request| {
+                body_has(req, "model", Some("claude-opus-4-8"))
+                    && body_has(req, "fallback_credit_token", Some("credit-1"))
+            })
+            .respond_with(ResponseTemplate::new(200).set_body_raw(retried, "text/event-stream"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = AnthropicProvider::new_with_client(
+            "test-key".to_string(),
+            models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+            reqwest::Client::builder().no_proxy().build().expect("test client should build"),
+            format!("{}/v1", server.uri()),
+            vtcode_config::TimeoutsConfig::default(),
+        );
+        let mut stream = LLMProvider::stream(
+            &provider,
+            LLMRequest {
+                model: models::anthropic::CLAUDE_OPUS_5_5.to_string(),
+                messages: vec![Message::user("hello".to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("stream request should succeed");
+
+        let mut completed = Vec::new();
+        while let Some(event) = stream.next().await {
+            if let LLMStreamEvent::Completed { response } = event.expect("stream event") {
+                completed.push(*response);
+            }
+        }
+
+        assert_eq!(completed.len(), 1, "the refused attempt is replaced, not surfaced");
+        assert_eq!(completed[0].content.as_deref(), Some("retried"));
+        assert!(matches!(completed[0].finish_reason, crate::provider::FinishReason::Stop));
     }
 
     #[test]

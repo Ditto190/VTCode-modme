@@ -6,7 +6,10 @@ use vtcode_config::types::{ReasoningEffortLevel, VerbosityLevel};
 use super::{Message, ToolDefinition};
 
 /// Fallback model configuration for Anthropic server-side fallback.
-/// Used with the `server-side-fallback-2026-07-01` beta header.
+/// The explicit-list form of `fallbacks`, sent with the
+/// `server-side-fallback-2026-06-01` beta header (the `"default"` keyword form
+/// uses `server-side-fallback-2026-07-01`; pairing a header with the other form
+/// is rejected).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FallbackModel {
     /// The model identifier to fall back to (e.g., "claude-opus-5")
@@ -185,14 +188,16 @@ pub struct LLMRequest {
     /// Optional request-scoped prompt cache profile for provider-specific TTL overrides.
     pub prompt_cache_profile: Option<PromptCacheProfile>,
 
-    /// Optional fallback models for Anthropic server-side fallback (Claude Fable 5).
-    /// Requires the `server-side-fallback-2026-07-01` beta header.
+    /// Optional explicit fallback models for Anthropic server-side fallback.
+    /// Overrides `provider.anthropic.fallbacks`; sent with the
+    /// `server-side-fallback-2026-06-01` beta header.
     pub fallbacks: Option<Vec<FallbackModel>>,
 
     /// Optional opaque credit token from a refused request's `stop_details.fallback_credit_token`.
     /// Echoed on the retry to avoid paying the prompt-cache cost twice.
-    /// Requires the `fallback-credit-2026-06-01` beta header on both the refused request and
-    /// the retry.
+    /// Sent with the `fallback-credit-2026-07-01` beta header. The refused request must have
+    /// carried that header or `server-side-fallback-2026-07-01`, which grants the same
+    /// `stop_details` fields.
     pub fallback_credit_token: Option<String>,
 
     /// Optional Anthropic-specific request overrides used when request semantics must

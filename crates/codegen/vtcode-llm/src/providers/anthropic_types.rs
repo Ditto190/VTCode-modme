@@ -48,12 +48,38 @@ pub struct AnthropicRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context_management: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) fallbacks: Option<Vec<AnthropicFallbackParam>>,
+    pub(crate) fallbacks: Option<AnthropicFallbacksParam>,
     /// Opaque credit token returned by a refused request's `stop_details.fallback_credit_token`.
     /// Echoed on the retry to avoid paying the prompt-cache cost twice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) fallback_credit_token: Option<String>,
     pub(crate) stream: bool,
+}
+
+/// The `fallbacks` request parameter: the `"default"` keyword (Anthropic picks
+/// the fallback by refusal category) or an explicit list of entries. Each form
+/// needs its own beta header; see `headers::ServerSideFallbackForm`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum AnthropicFallbacksParam {
+    Mode(AnthropicFallbacksKeyword),
+    Models(Vec<AnthropicFallbackParam>),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AnthropicFallbacksKeyword {
+    Default,
+}
+
+impl AnthropicFallbacksParam {
+    /// Explicit entries, or an empty slice for the `"default"` form.
+    pub(crate) fn models(&self) -> &[AnthropicFallbackParam] {
+        match self {
+            Self::Mode(_) => &[],
+            Self::Models(models) => models,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
