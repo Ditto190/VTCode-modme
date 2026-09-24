@@ -430,7 +430,8 @@ pub struct UiConfig {
     pub screen_reader_mode: bool,
 
     /// Reduce motion mode: keeps progress labels visible without animated effects.
-    /// Defaults from VTCODE_REDUCE_MOTION when the setting is omitted.
+    /// If omitted, defaults from VTCODE_REDUCE_MOTION, then a supported OS
+    /// accessibility preference; unknown or unavailable preferences default to false.
     #[serde(default = "default_reduce_motion_mode")]
     pub reduce_motion_mode: bool,
 
@@ -604,10 +605,9 @@ fn default_screen_reader_mode() -> bool {
 }
 
 fn default_reduce_motion_mode() -> bool {
-    crate::accessibility::resolve_reduce_motion_default(
-        env_bool_var("VTCODE_REDUCE_MOTION"),
-        reduce_motion_preference(),
-    )
+    env_bool_var("VTCODE_REDUCE_MOTION")
+        .or_else(reduce_motion_preference)
+        .unwrap_or(false)
 }
 
 fn default_reduce_motion_keep_progress_animation() -> bool {

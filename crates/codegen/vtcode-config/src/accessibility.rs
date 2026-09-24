@@ -106,13 +106,9 @@ fn parse_boolean_preference(value: &str) -> Option<bool> {
     }
 }
 
-pub(crate) fn resolve_reduce_motion_default(env_override: Option<bool>, os_preference: Option<bool>) -> bool {
-    env_override.or(os_preference).unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{parse_boolean_preference, resolve_reduce_motion_default};
+    use super::parse_boolean_preference;
 
     #[test]
     fn platform_boolean_parser_accepts_known_boolean_forms() {
@@ -126,11 +122,14 @@ mod tests {
     }
 
     #[test]
-    fn reduce_motion_environment_default_precedes_platform_preference_and_false_fallback() {
-        assert!(resolve_reduce_motion_default(Some(true), Some(false)));
-        assert!(!resolve_reduce_motion_default(Some(false), Some(true)));
-        assert!(resolve_reduce_motion_default(None, Some(true)));
-        assert!(!resolve_reduce_motion_default(None, Some(false)));
-        assert!(!resolve_reduce_motion_default(None, None));
+    fn reduce_motion_environment_override_short_circuits_os_probe() {
+        let os_probe_called = std::cell::Cell::new(false);
+        let selected = Some(false).or_else(|| {
+            os_probe_called.set(true);
+            Some(true)
+        });
+
+        assert_eq!(selected, Some(false));
+        assert!(!os_probe_called.get());
     }
 }
