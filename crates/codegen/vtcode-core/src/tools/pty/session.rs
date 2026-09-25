@@ -55,6 +55,12 @@ fn escalate_child_kill(child: &mut Box<dyn Child + Send>, child_pid: Option<u32>
 /// Never calls `Child::wait`. Returns whether the child was observed exited.
 /// A false return means the child is still live after both budgets (unkillable
 /// or stuck in uninterruptible sleep); callers must still release capacity.
+///
+/// Platform note: escalation uses `kill_process_group_by_pid` /
+/// `kill_process_group` / `child.kill()`. Process-group kill is exercised on
+/// Unix (`#[cfg(unix)]` tests in `force_terminate_reaps_live_pty_child`);
+/// Windows uses `child.kill()` only — group semantics are not covered by those
+/// tests and remain unverified on Windows CI.
 fn reap_child_bounded(child: &mut Box<dyn Child + Send>, child_pid: Option<u32>) -> bool {
     if reap_child_poll(child, Duration::from_millis(CHILD_REAP_TIMEOUT_MS)) {
         return true;

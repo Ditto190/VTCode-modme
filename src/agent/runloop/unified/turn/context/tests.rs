@@ -143,3 +143,23 @@ fn clarifying_question_detected_for_exact_checkpoint_turn_856_phrase() {
         "Next open decision: Do you want me to implement this in a single unified runloop branch, or first create a reviewable exec-plan document under docs/harness/exec-plans/?"
     ));
 }
+
+#[test]
+fn prepared_tool_call_maps_shell_aliases_to_exec_command() {
+    let call = uni::ToolCall::function(
+        "call_test".to_string(),
+        "bash".to_string(),
+        r#"{"command": ["echo", "hi"], "action": "run"}"#.to_string(),
+    );
+    let prepared = PreparedAssistantToolCall::new(call);
+    assert_eq!(prepared.tool_name(), "exec_command");
+    assert!(prepared.args_error().is_none() || prepared.args().is_some());
+}
+
+#[test]
+fn prepared_tool_call_rejects_prose_blob_names() {
+    let call =
+        uni::ToolCall::function("call_test".to_string(), "` in content — could a skill".to_string(), "{}".to_string());
+    let prepared = PreparedAssistantToolCall::new(call);
+    assert!(prepared.args().is_none() || prepared.args_error().is_some());
+}
