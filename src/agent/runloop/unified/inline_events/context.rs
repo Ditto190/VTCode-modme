@@ -222,7 +222,7 @@ impl<'a> InlineEventContext<'a> {
                 }
             },
             InlineEvent::Cancel => self.control_processor().cancel()?,
-            InlineEvent::ForceCancelPtySession => self.control_processor().force_cancel_pty_session()?,
+            InlineEvent::ForceCancelPtySession => self.handle_force_cancel_pty_session().await?,
             InlineEvent::Exit => self.control_processor().exit()?,
             InlineEvent::Interrupt => self.handle_interrupt(),
             InlineEvent::BackgroundOperation => {
@@ -361,6 +361,49 @@ impl<'a> InlineEventContext<'a> {
                     &format!("Failed to send input to exec session {session_id}: {error}"),
                 )?;
             }
+        }
+        Ok(self.input_processor().passive())
+    }
+
+    /// Escape hatch: force-stop foreground exec sessions so a stuck PTY
+    /// cannot keep the runloop loading and the composer locked. Background
+    /// sessions are user-owned and stay untouched.
+    async fn handle_force_cancel_pty_session(&mut self) -> Result<InlineLoopAction> {
+        self.state.reset_interrupt_state();
+        let Some(exec_sessions) = self.exec_sessions.clone() else {
+            self.state
+                .renderer()
+                .line(MessageStyle::Warning, "No exec session manager is available to force-cancel.")?;
+            return Ok(self.input_processor().passive());
+        };
+
+        self.state
+            .renderer()
+            .line(MessageStyle::Status, "Force-cancelling foreground exec sessions...")?;
+        let (stopped, closed, failed) = exec_sessions.force_cancel_foreground_sessions().await;
+        if stopped + closed + failed == 0 {
+            self.state
+                .renderer()
+                .line(MessageStyle::Info, "No foreground exec sessions to force-cancel.")?;
+        } else {
+            let mut parts = Vec::new();
+            if stopped > 0 {
+                parts.push(format!("{stopped} force-terminated"));
+            }
+            if closed > 0 {
+                parts.push(format!("{closed} closed"));
+            }
+            if failed > 0 {
+                parts.push(format!("{failed} failed"));
+            }
+            let style = if failed > 0 {
+                MessageStyle::Warning
+            } else {
+                MessageStyle::Info
+            };
+            self.state
+                .renderer()
+                .line(style, &format!("Force-cancel complete: {}.", parts.join(", ")))?;
         }
         Ok(self.input_processor().passive())
     }
