@@ -3,7 +3,7 @@ feature: plan-mode-header-handoff
 status: delivered
 updated: 2026-09-26
 branch: fix/plan-mode-header-handoff
-commits: ab236aa54..57d6435d4
+commits: ab236aa54..9c85c67c9
 ---
 
 # Plan Mode Header + Modes Handoff Sync
