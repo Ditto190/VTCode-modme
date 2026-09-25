@@ -973,6 +973,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Module Structure, Usage Examples, Process Group Management, Security Features
   - **User Questions**: "What can you tell me about PTY and Pipe Infrastructure?", "How does Overview work?", "How does Module Structure work?"
 
+- **File**: `docs/compose/spec/plan-rejection-model-feedback.md`
+  - **Content**: Plan Rejection Must Reach Model History
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Plan Rejection Must Reach Model History?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/plan-mode-tracker-continuity.md`
   - **Content**: Planning Workflow + Tracker Continuity (Dedupe, Scope/Task, Continuation, Progress)
   - **Topics**: Report, [S1] Problem, [S2] Design, Follow-up (2026-09-21) — auto-continue directive misread as a user stay signal, [S3] Out of Scope
