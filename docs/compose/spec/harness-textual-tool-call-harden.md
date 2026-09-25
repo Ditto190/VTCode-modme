@@ -3,7 +3,7 @@ feature: harness-textual-tool-call-harden
 status: delivered
 updated: 2026-09-25
 branch: fix/harness-textual-tool-call-harden
-commits:
+commits: f79ec288f..60959f8ee
 ---
 
 # Harness Textual Tool-Call Harden
