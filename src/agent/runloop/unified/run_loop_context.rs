@@ -2185,9 +2185,11 @@ mod tests {
 
     #[test]
     fn model_visible_tool_preview_budget_returns_bounded_metadata_after_exhaustion() {
+        // Sizes assume the 64 KiB exec budget: the 48 KiB first preview fits
+        // while the ~21 KiB second preview exhausts the remainder.
         let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 2, 10, 1);
-        let first = state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(20 * 1024));
-        assert_eq!(first.len(), 20 * 1024);
+        let first = state.bound_model_visible_tool_preview(Some("exec_command"), "a".repeat(48 * 1024));
+        assert_eq!(first.len(), 48 * 1024);
 
         let second = state.bound_model_visible_tool_preview(
             Some("run_pty_cmd"),
@@ -2409,7 +2411,9 @@ mod tests {
 
     #[test]
     fn planning_preview_budget_keeps_midsize_payload_exec_strips_it() {
-        let payload = "a".repeat(60 * 1024);
+        // Midsize payload sits between the exec (64 KiB) and planning (96 KiB)
+        // budgets: execution strips it while planning keeps it model-visible.
+        let payload = "a".repeat(80 * 1024);
         assert!(payload.len() > TURN_PREVIEW_BUDGET_BYTES);
         assert!(payload.len() < TURN_PREVIEW_BUDGET_BYTES_PLANNING);
 
