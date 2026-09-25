@@ -89,7 +89,11 @@ You can also press `Tab` on an empty idle composer to cycle to the `plan` primar
 
 ### Use `/plan`
 
-`/plan` starts or continues the planning workflow. It is a workflow command, not a session state selector.
+`/plan` starts or continues the planning workflow. Entering planning is a full
+switch to the built-in `plan` primary agent: the session header badge shows
+Plan, and the prompt, tool catalog, and permissions match plan mode. `/plan off`
+finishes planning and restores the previous execution agent (`build`/`auto`)
+when one was recorded.
 
 While a turn is actively processing, `/plan` is dropped with a notice (mode switches are locked for the duration of a turn). The automatic in-turn planning intent detection still engages on its own; only explicit `/plan` entry while busy is deferred.
 
@@ -111,8 +115,10 @@ Enter Planning workflow?
 ```
 
 - **Enter Planning workflow** — starts planning; read-only research begins and
-  mutating tools stay disabled until you approve execution. The runtime persists
-  the validated plan after the final `<proposed_plan>` is emitted.
+  mutating tools stay disabled until you approve execution. The header badge
+  switches to Plan immediately, and the plan primary agent is selected after
+  the turn so prompt/tools match. The runtime persists the validated plan after
+  the final `<proposed_plan>` is emitted.
 - **Continue without Planning workflow** — the agent proceeds without planning
   (mutating tools remain enabled).
 
@@ -123,7 +129,7 @@ policies accept the suggestion directly, including in an interactive UI.
 Execution agents such as `build`, `auto`, and `duck` can invoke the
 `start_planning` tool when a request is demanding, ambiguous, or has multiple
 phases. The tool only presents the entry prompt; it does not silently change
-mode. Straightforward requests continue directly in the active execution
+mode until you confirm. Straightforward requests continue directly in the active execution
 agent. In a headless session without an automatic execution policy, the
 suggestion is reported as pending and the turn stops safely; use `/plan` on the
 next turn to confirm entry. Full-auto or skip-confirmations policies may accept

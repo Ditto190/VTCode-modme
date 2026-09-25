@@ -8,7 +8,8 @@ use vtcode_core::tools::registry::ExecSettlementMode;
 use vtcode_core::utils::ansi::MessageStyle;
 
 use crate::agent::runloop::unified::planning_workflow_state::{
-    render_planning_workflow_next_step_hint, transition_to_planning_workflow,
+    PLAN_PRIMARY_AGENT_NAME, apply_plan_agent_header, render_planning_workflow_next_step_hint,
+    transition_to_planning_workflow,
 };
 use crate::agent::runloop::unified::run_loop_context::RunLoopContext;
 use crate::agent::runloop::unified::state::CtrlCState;
@@ -103,6 +104,12 @@ pub(crate) async fn handle_start_planning(
 
         if status == Some(PLAN_STATUS_SUCCESS) {
             enter_planning_workflow_after_start(ctx).await;
+            let mut outcome = ToolPipelineOutcome::from_status(tool_result);
+            // Mid-turn entry cannot mutate `ActivePrimaryAgentState`; queue the
+            // full plan-agent switch on the existing post-turn modes handoff so
+            // prompt/tools match the Plan badge already shown in the header.
+            outcome.pending_primary_agent = Some(PLAN_PRIMARY_AGENT_NAME.to_string());
+            return Some(outcome);
         }
     }
 
@@ -126,6 +133,9 @@ async fn enter_planning_workflow_after_start(ctx: &mut RunLoopContext<'_>) {
         false,
     )
     .await;
+    // Header must show Plan as soon as the user confirms; the full primary-agent
+    // switch is queued on `pending_primary_agent` for the post-turn handoff.
+    apply_plan_agent_header(ctx.handle);
     if let Err(err) = render_planning_workflow_next_step_hint(ctx.renderer) {
         tracing::warn!("failed to render planning workflow next-step hint: {}", err);
     }
@@ -206,6 +216,9 @@ async fn handle_enter_pending_confirmation(
         let status = output.get("status").and_then(|s| s.as_str());
         if status == Some(PLAN_STATUS_SUCCESS) {
             enter_planning_workflow_after_start(ctx).await;
+            let mut outcome = ToolPipelineOutcome::from_status(tool_result);
+            outcome.pending_primary_agent = Some(PLAN_PRIMARY_AGENT_NAME.to_string());
+            return outcome;
         }
     }
 
@@ -214,7 +227,10 @@ async fn handle_enter_pending_confirmation(
 
 #[cfg(test)]
 mod tests {
-    use super::{headless_planning_entry_requires_confirmation, inline_planning_entry_requires_confirmation};
+    use super::{
+        PLAN_PRIMARY_AGENT_NAME, headless_planning_entry_requires_confirmation,
+        inline_planning_entry_requires_confirmation,
+    };
 
     #[test]
     fn headless_entry_waits_for_confirmation_under_interactive_policy() {
@@ -234,5 +250,12 @@ mod tests {
         assert!(!inline_planning_entry_requires_confirmation(true, true, false));
         assert!(!inline_planning_entry_requires_confirmation(true, false, true));
         assert!(!inline_planning_entry_requires_confirmation(false, false, false));
+    }
+
+    #[test]
+    fn plan_entry_handoff_targets_plan_primary_agent() {
+        // Confirmed start_planning must queue the plan agent on the post-turn
+        // modes handoff so the header and active agent agree after the switch.
+        assert_eq!(PLAN_PRIMARY_AGENT_NAME, "plan");
     }
 }

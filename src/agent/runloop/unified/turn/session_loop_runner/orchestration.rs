@@ -83,6 +83,45 @@ fn persist_primary_agent(
     }
 }
 
+/// Startup planning entry: select the plan primary agent and refresh the
+/// header so prompt/tools match Plan mode (not just the ActivityState).
+async fn apply_startup_plan_agent_selection(
+    active_primary_agent: &mut vtcode_core::primary_agent::ActivePrimaryAgentState,
+    tool_registry: &vtcode_core::tools::registry::ToolRegistry,
+    config: &vtcode_core::config::types::AgentConfig,
+    handle: &vtcode_ui::tui::app::InlineHandle,
+) {
+    use crate::agent::runloop::unified::planning_workflow_state::{PLAN_PRIMARY_AGENT_NAME, apply_plan_agent_header};
+    use crate::agent::runloop::unified::turn::primary_agent_runtime::{
+        builtin_primary_agent_specs, load_primary_agent_specs,
+    };
+
+    if active_primary_agent
+        .active()
+        .identity
+        .name
+        .eq_ignore_ascii_case(PLAN_PRIMARY_AGENT_NAME)
+    {
+        apply_plan_agent_header(handle);
+        return;
+    }
+    let specs = match load_primary_agent_specs(tool_registry, &config.workspace).await {
+        Ok(specs) if !specs.is_empty() => specs,
+        _ => builtin_primary_agent_specs(),
+    };
+    match active_primary_agent.select_from_specs(&specs, PLAN_PRIMARY_AGENT_NAME) {
+        Ok(active) => {
+            let display = active.display_name.clone();
+            let color = active.color.clone().filter(|c| !c.trim().is_empty());
+            handle.set_primary_agent(Some(display), color);
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Startup planning entry could not select plan primary agent");
+            apply_plan_agent_header(handle);
+        }
+    }
+}
+
 pub(super) fn resolve_thread_completion_status(
     session_end_reason: &SessionEndReason,
     budget_limit_reached: bool,
@@ -646,6 +685,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 true,
             )
             .await;
+            apply_startup_plan_agent_selection(&mut active_primary_agent, &tool_registry, &config, &handle).await;
             harness_try!(render_planning_workflow_next_step_hint(&mut renderer));
         } else if planning_entry_source.requires_startup_prompt() && resume_ref.is_none() {
             let should_enter = harness_try!(
@@ -664,6 +704,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     true,
                 )
                 .await;
+                apply_startup_plan_agent_selection(&mut active_primary_agent, &tool_registry, &config, &handle).await;
                 harness_try!(render_planning_workflow_next_step_hint(&mut renderer));
             }
         }
@@ -1609,66 +1650,128 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 // `InteractionLoopContext`, which is unavailable here because the
                 // plan-confirmation popup is rendered inside the turn loop rather
                 // than the inline interaction loop.
+                //
+                // Plan *entry* (`start_planning` confirmation) also lands here via
+                // `pending_primary_agent = "plan"`. That destination is the plan
+                // agent itself, not an approved-plan execution agent, so it uses
+                // direct selection instead of the write-capable resolver.
                 let requested_agent_for_handoff = plan_execution_target
                     .map(|target| target.agent_name().to_owned())
                     .or(switch_primary_agent);
                 if let Some(requested_agent) = requested_agent_for_handoff {
-                    let configured_default = vt_cfg
-                        .as_ref()
-                        .map(|cfg| cfg.default_primary_agent.as_str())
-                        .filter(|name| !name.trim().is_empty());
-                    let execution_agent = select_approved_plan_execution_agent(
-                        &mut active_primary_agent,
-                        &tool_registry,
-                        &config.workspace,
-                        Some(requested_agent.as_str()),
-                        configured_default,
-                    )
-                    .await;
-                    let execution_agent = harness_try!(execution_agent);
-                    if execution_agent != requested_agent {
-                        tracing::warn!(
-                            requested_agent = %requested_agent,
-                            resolved_agent = %execution_agent,
-                            "Approved plan requested a non-executable primary agent; using a write-capable agent"
+                    let plan_entry =
+                        crate::agent::runloop::unified::turn::turn_loop::is_plan_entry_handoff(&requested_agent)
+                            && plan_execution_target.is_none();
+                    if plan_entry {
+                        use crate::agent::runloop::unified::planning_workflow_state::PLAN_PRIMARY_AGENT_NAME;
+                        use crate::agent::runloop::unified::turn::primary_agent_runtime::{
+                            builtin_primary_agent_specs, load_primary_agent_specs,
+                        };
+                        let specs = match load_primary_agent_specs(&tool_registry, &config.workspace).await {
+                            Ok(specs) if !specs.is_empty() => specs,
+                            _ => builtin_primary_agent_specs(),
+                        };
+                        match active_primary_agent.select_from_specs(&specs, PLAN_PRIMARY_AGENT_NAME) {
+                            Ok(active) => {
+                                let display = active.display_name.clone();
+                                let color = active.color.clone().filter(|c| !c.trim().is_empty());
+                                let policy_overrides = active.tool_policy_overrides.clone();
+                                for (tool_name, policy) in policy_overrides {
+                                    if let Err(err) = tool_registry.set_tool_policy(&tool_name, policy).await {
+                                        tracing::warn!("Failed to apply tool policy override on plan entry: {err}");
+                                    }
+                                }
+                                sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
+                                let mut runtime_sync = PrimaryAgentRuntimeSyncContext {
+                                    config: &config,
+                                    vt_cfg: vt_cfg.as_ref(),
+                                    thread_id: &turn_run_id.0,
+                                    active_primary_agent: active_primary_agent.active(),
+                                    lifecycle_hooks: &mut lifecycle_hooks,
+                                    async_mcp_manager: async_mcp_manager.as_ref(),
+                                    tool_registry: &mut tool_registry,
+                                    tools: &tools,
+                                    tool_catalog: &tool_catalog,
+                                    mcp_catalog_initialized: &mut mcp_catalog_initialized,
+                                    pending_mcp_refresh: &mut pending_mcp_refresh,
+                                    provider_client: &*provider_client,
+                                };
+                                harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
+                                handle.set_primary_agent(Some(display), color);
+                                tracing::info!(
+                                    target: "vtcode.planning_workflow",
+                                    "Switched primary agent to plan after confirmed planning entry"
+                                );
+                                persist_primary_agent(&mut session_archive, &active_primary_agent);
+                            }
+                            Err(err) => {
+                                harness_try!(renderer.line(
+                                    MessageStyle::Warning,
+                                    &format!("Could not select plan primary agent after planning entry: {err}"),
+                                ));
+                            }
+                        }
+                    } else {
+                        let configured_default = vt_cfg
+                            .as_ref()
+                            .map(|cfg| cfg.default_primary_agent.as_str())
+                            .filter(|name| !name.trim().is_empty());
+                        let execution_agent = select_approved_plan_execution_agent(
+                            &mut active_primary_agent,
+                            &tool_registry,
+                            &config.workspace,
+                            Some(requested_agent.as_str()),
+                            configured_default,
+                        )
+                        .await;
+                        let execution_agent = harness_try!(execution_agent);
+                        if execution_agent != requested_agent {
+                            tracing::warn!(
+                                requested_agent = %requested_agent,
+                                resolved_agent = %execution_agent,
+                                "Approved plan requested a non-executable primary agent; using a write-capable agent"
+                            );
+                            harness_try!(renderer.line(
+                                MessageStyle::Info,
+                                &format!(
+                                    "Approved plan requires a write-capable agent; switching to {}.",
+                                    execution_agent
+                                ),
+                            ));
+                        }
+                        // The approval choice, rather than the destination agent
+                        // name, owns confirmation policy. This keeps a manual
+                        // Execute/Switch Build handoff prompting even if an
+                        // earlier agent or fallback happens to be named `auto`.
+                        session_skip_confirmations = plan_skip_confirmations;
+                        handle.set_skip_confirmations(session_skip_confirmations);
+                        sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
+                        apply_primary_agent_tool_policy_overrides(&tool_registry, active_primary_agent.active()).await;
+                        let mut runtime_sync = PrimaryAgentRuntimeSyncContext {
+                            config: &config,
+                            vt_cfg: vt_cfg.as_ref(),
+                            thread_id: &turn_run_id.0,
+                            active_primary_agent: active_primary_agent.active(),
+                            lifecycle_hooks: &mut lifecycle_hooks,
+                            async_mcp_manager: async_mcp_manager.as_ref(),
+                            tool_registry: &mut tool_registry,
+                            tools: &tools,
+                            tool_catalog: &tool_catalog,
+                            mcp_catalog_initialized: &mut mcp_catalog_initialized,
+                            pending_mcp_refresh: &mut pending_mcp_refresh,
+                            provider_client: &*provider_client,
+                        };
+                        harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
+                        let display = active_primary_agent.active().display_name.clone();
+                        let color = active_primary_agent.active().color.clone().filter(|c| !c.trim().is_empty());
+                        handle.set_primary_agent(Some(display), color);
+                        tracing::info!(
+                            target: "vtcode.planning_workflow",
+                            agent = %execution_agent,
+                            "Switched primary agent after plan approval"
                         );
-                        harness_try!(renderer.line(
-                            MessageStyle::Info,
-                            &format!("Approved plan requires a write-capable agent; switching to {}.", execution_agent),
-                        ));
+                        persist_primary_agent(&mut session_archive, &active_primary_agent);
                     }
-                    // The approval choice, rather than the destination agent
-                    // name, owns confirmation policy. This keeps a manual
-                    // Execute/Switch Build handoff prompting even if an
-                    // earlier agent or fallback happens to be named `auto`.
-                    session_skip_confirmations = plan_skip_confirmations;
-                    handle.set_skip_confirmations(session_skip_confirmations);
-                    sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
-                    apply_primary_agent_tool_policy_overrides(&tool_registry, active_primary_agent.active()).await;
-                    let mut runtime_sync = PrimaryAgentRuntimeSyncContext {
-                        config: &config,
-                        vt_cfg: vt_cfg.as_ref(),
-                        thread_id: &turn_run_id.0,
-                        active_primary_agent: active_primary_agent.active(),
-                        lifecycle_hooks: &mut lifecycle_hooks,
-                        async_mcp_manager: async_mcp_manager.as_ref(),
-                        tool_registry: &mut tool_registry,
-                        tools: &tools,
-                        tool_catalog: &tool_catalog,
-                        mcp_catalog_initialized: &mut mcp_catalog_initialized,
-                        pending_mcp_refresh: &mut pending_mcp_refresh,
-                        provider_client: &*provider_client,
-                    };
-                    harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
-                    let display = active_primary_agent.active().display_name.clone();
-                    let color = active_primary_agent.active().color.clone().filter(|c| !c.trim().is_empty());
-                    handle.set_primary_agent(Some(display), color);
-                    tracing::info!(
-                        target: "vtcode.planning_workflow",
-                        agent = %execution_agent,
-                        "Switched primary agent after plan approval"
-                    );
-                    persist_primary_agent(&mut session_archive, &active_primary_agent);
                 }
                 if plan_approved_execution_pending && !has_primary_agent_switch {
                     session_skip_confirmations = plan_skip_confirmations;

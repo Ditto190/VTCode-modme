@@ -251,6 +251,16 @@ fn approved_plan_handoff_bypasses_final_response_guard() {
 }
 
 #[test]
+fn plan_entry_handoff_is_not_approved_plan_execution() {
+    use super::is_plan_entry_handoff;
+
+    assert!(is_plan_entry_handoff("plan"));
+    assert!(is_plan_entry_handoff("Plan"));
+    assert!(!is_plan_entry_handoff("build"));
+    assert!(!is_plan_entry_handoff("auto"));
+}
+
+#[test]
 fn completed_fallback_reason_preserves_planning_specificity() {
     use super::completed_fallback_reason;
 

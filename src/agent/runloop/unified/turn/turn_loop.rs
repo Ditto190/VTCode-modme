@@ -495,6 +495,13 @@ fn completed_turn_requires_final_response(result: &TurnLoopResult) -> bool {
     matches!(result, TurnLoopResult::Completed { plan_approved_execution_pending: false })
 }
 
+/// True when a `SwitchPrimaryAgent` handoff is *entering* plan mode rather than
+/// leaving it for an approved-plan execution agent. Plan entry must not claim
+/// `plan_approved_execution_pending` (that flag starts implementation).
+pub(crate) fn is_plan_entry_handoff(agent: &str) -> bool {
+    agent.eq_ignore_ascii_case("plan")
+}
+
 pub(crate) struct TurnLoopOutcome {
     pub result: TurnLoopResult,
     pub turn_modified_files: BTreeSet<PathBuf>,
@@ -1804,10 +1811,12 @@ pub(crate) async fn run_turn_loop(
         match turn_outcome {
             TurnHandlerOutcome::Continue => continue,
             TurnHandlerOutcome::SwitchPrimaryAgent(agent) => {
-                // Plan-mode "switch to build/auto agent" decision: end the turn
-                // normally and let the interaction loop perform the handoff.
+                // Primary-agent handoff after the turn. Plan *entry* selects the
+                // plan agent without claiming an approved-plan execution turn;
+                // plan→build/auto still uses the approved-plan path below.
+                let plan_entry = is_plan_entry_handoff(&agent);
                 pending_primary_agent = Some(agent);
-                result = TurnLoopResult::Completed { plan_approved_execution_pending: true };
+                result = TurnLoopResult::Completed { plan_approved_execution_pending: !plan_entry };
                 break;
             }
             TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { target } => {
