@@ -24,6 +24,7 @@
 <summary><strong>Contents</strong></summary>
 
 - [Overview](#overview)
+- [Spotlight](#spotlight)
 - [Quick start](#quick-start)
   - [1. Install](#1-install)
   - [2. Configure](#2-configure)
@@ -67,6 +68,18 @@ review changes before they land.
 > OAuth login for ChatGPT and GitHub Copilot reuses the Codex CLI's public
 > client identity (unofficial); prefer your own API key for supported paths.
 > See [OAuth authentication](./docs/guides/oauth-authentication.md).
+
+### Spotlight
+
+- Memcode wrote up how VT Code's memory works across threads:
+  [read the post](https://memcode.in/blogs/vt-code-memory-across-threads).
+  The setup it walks through is documented in the
+  [Memcode MCP guide](./docs/guides/memcode-mcp.md)
+  ([PR #763](https://github.com/vinhnx/VTCode/pull/763)).
+  > "Memory is what creates that compounding loop: each finished task can
+  > leave behind a little less uncertainty for the next one, while the
+  > developer stays in control of what is saved and when it is used."
+  > — Vivek Gupta, Memcode
 
 ## Quick start
 
@@ -393,14 +406,6 @@ reports, and feedback are all welcome.
   [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o)
 
 </details>
-
-### Spotlight
-
-- Memcode wrote up how VT Code's memory works across threads:
-  [read the post](https://memcode.in/blogs/vt-code-memory-across-threads).
-  The setup it walks through is documented in the
-  [Memcode MCP guide](./docs/guides/memcode-mcp.md)
-  ([PR #763](https://github.com/vinhnx/VTCode/pull/763)).
 
 ### Contact
 
