@@ -639,8 +639,15 @@ impl AppSession {
     fn append_tool_output_line(&mut self, id: ToolOutputId, kind: InlineMessageKind, segments: Vec<InlineSegment>) {
         self.handle_core_command(crate::tui::core_tui::types::InlineCommand::AppendLine { kind, segments });
         let line_index = self.core.lines.len().saturating_sub(1);
+        // An expand notice must win over an earlier live-PTY header anchor:
+        // the notice is the row the user clicks to open this capture.
+        let is_expand_notice = self
+            .core
+            .lines
+            .get(line_index)
+            .is_some_and(|line| line.segments.iter().any(|segment| segment.text.contains("click to expand")));
         if let Some(block) = self.tool_output_blocks.iter_mut().find(|block| block.id == id)
-            && block.anchor_line.is_none()
+            && (block.anchor_line.is_none() || is_expand_notice)
         {
             block.anchor_line = Some(line_index);
             self.tool_output_revision = self.tool_output_revision.wrapping_add(1);

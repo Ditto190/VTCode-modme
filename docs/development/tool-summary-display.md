@@ -83,14 +83,21 @@ Output-token caps, yield windows, and the raw stdin payload are not rendered;
 the model still receives the full arguments and result.
 
 The captured stdin/stdout body is capped at 10 visible rows, taken from the
-tail, followed by the same `… +N lines (/share html for full transcript)` notice
-used for bounded command previews. A session body is terminal text, so it renders
-plain in the subdued PTY body color from the active theme: git-diff detection and
-`LS_COLORS` per-line styling are skipped, because both misfire on build logs
-(`PASS … .rs` picked up file-type colors). The spooled branch already bounds to
-six rows (three head, three tail). Complete output stays in the session-local
-Transcript Review and the spool file referenced in the spool message; only the
-rendered preview is bounded.
+tail (streaming polls keep the newest output — head+tail excerpts are reserved
+for finished command previews). Overflow shows a trailing
+`… +N lines · click to expand` notice instead of the command-preview share
+hint. The action phrase is underlined so it is a click target: activating it
+opens the Tool Output Viewer on that call's recorded complete capture. A
+session body is terminal text, so it renders plain in the theme's PTY body
+color plus `DIMMED`, matching the design-system dim tier used by reasoning:
+git-diff detection and `LS_COLORS` per-line styling are skipped, because both
+misfire on build logs (`PASS … .rs` picked up file-type colors). Stdin echo
+rows (`$ …`) sit on the same dim tier. Headers (`• Send command input`,
+`└ Session …`) keep normal tool brightness so the call stays identifiable.
+The spooled branch already bounds to six rows (three head, three tail).
+Complete output stays in the tool-output viewer, Transcript Review, and the
+spool file referenced in the spool message; only the rendered preview is
+bounded.
 
 The redundant stream label is only dropped for the generic capture label
 (`output`), which repeats the body already shown below the row. Diagnostic labels
