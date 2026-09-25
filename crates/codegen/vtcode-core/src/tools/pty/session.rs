@@ -2,7 +2,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use parking_lot::Mutex;
@@ -16,6 +16,54 @@ use super::scrollback::PtyScrollback;
 
 /// Maximum time to wait for reader thread to finish (ms)
 const READER_THREAD_TIMEOUT_MS: u64 = 5000;
+
+/// Maximum time to poll `try_wait` after kill before abandoning the reap (ms).
+/// `Child::wait` is unbounded and can stall the close path forever; kill +
+/// bounded poll must never hang the runloop.
+const CHILD_REAP_TIMEOUT_MS: u64 = 2000;
+
+/// Poll `try_wait` until the child exits or the budget expires.
+/// Never calls `Child::wait`. Returns whether the child was observed exited.
+fn reap_child_bounded(child: &mut Box<dyn Child + Send>) -> bool {
+    let deadline = Instant::now() + Duration::from_millis(CHILD_REAP_TIMEOUT_MS);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) | Err(_) => {
+                if Instant::now() >= deadline {
+                    warn!("PTY child did not exit within reap timeout");
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+/// Join the PTY reader thread without blocking past `READER_THREAD_TIMEOUT_MS`.
+/// Shared by `close_session` and `Drop` so neither path can hang on `join`.
+pub(super) fn join_reader_thread_bounded(reader_thread: JoinHandle<()>) {
+    let join_result = std::thread::spawn(move || {
+        let start = Instant::now();
+        let timeout = Duration::from_millis(READER_THREAD_TIMEOUT_MS);
+        loop {
+            if reader_thread.is_finished() {
+                let _ = reader_thread.join();
+                break;
+            }
+            if start.elapsed() > timeout {
+                warn!("PTY reader thread did not finish within timeout");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    })
+    .join();
+
+    if join_result.is_err() {
+        warn!("PTY reader thread cleanup panicked");
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct CommandEchoState {
@@ -215,7 +263,7 @@ impl PtySessionHandle {
         }
 
         if child_running {
-            let _ = child.wait();
+            reap_child_bounded(&mut child);
         }
     }
 
@@ -244,7 +292,7 @@ impl PtySessionHandle {
             let _ = child.kill();
         }
         if child_running {
-            let _ = child.wait();
+            reap_child_bounded(&mut child);
         }
     }
 }
@@ -292,27 +340,7 @@ impl Drop for PtySessionHandle {
         {
             let mut thread_guard = self.reader_thread.lock();
             if let Some(reader_thread) = thread_guard.take() {
-                // Use timeout to prevent infinite hang in Drop
-                let join_result = std::thread::spawn(move || {
-                    let start = std::time::Instant::now();
-                    let timeout = Duration::from_millis(READER_THREAD_TIMEOUT_MS);
-                    loop {
-                        if reader_thread.is_finished() {
-                            let _ = reader_thread.join();
-                            break;
-                        }
-                        if start.elapsed() > timeout {
-                            warn!("PTY reader thread did not finish within timeout");
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                })
-                .join();
-
-                if join_result.is_err() {
-                    warn!("PTY reader thread cleanup panicked");
-                }
+                join_reader_thread_bounded(reader_thread);
             }
         }
     }
