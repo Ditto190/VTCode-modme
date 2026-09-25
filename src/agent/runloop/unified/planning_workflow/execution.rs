@@ -129,6 +129,12 @@ async fn enter_planning_workflow_after_start(ctx: &mut RunLoopContext<'_>) {
     if let Err(err) = render_planning_workflow_next_step_hint(ctx.renderer) {
         tracing::warn!("failed to render planning workflow next-step hint: {}", err);
     }
+    if let Err(err) = crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+        ctx.renderer,
+        crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
+    ) {
+        tracing::warn!("failed to render planning progress indicator: {}", err);
+    }
     tracing::info!(
         target: "vtcode.planning_workflow",
         "Agent entered Planning workflow with planner profile (read-only, mutating tools blocked)"

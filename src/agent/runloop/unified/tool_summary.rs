@@ -66,6 +66,24 @@ fn file_operation_action(args: &Value) -> &'static str {
     }
 }
 
+/// Transcript indicator shown immediately when plan synthesis starts.
+///
+/// Plan synthesis can run for a long time with no tool calls (research is
+/// done, the model is writing one `<proposed_plan>` block). Without a
+/// transcript row the TUI looks stalled: only the footer status moves. This
+/// mirrors the `❋ Applying patch to …` pre-execution indicator so the user
+/// sees plan work start, and the TUI sweeps a shimmer across the row while
+/// the footer status (`Drafting plan...`, `Validating plan...`, …) stays
+/// live. Sends are non-blocking (`renderer.line` → unbounded inline channel)
+/// and planning stays a foreground non-busy stage, so input remains enabled.
+pub(crate) const PLANNING_RESEARCHING_INDICATOR: &str = "❋ Drafting plan — researching codebase...";
+pub(crate) const PLANNING_VALIDATING_INDICATOR: &str = "❋ Validating plan...";
+pub(crate) const PLANNING_PERSISTING_INDICATOR: &str = "❋ Persisting plan...";
+
+pub(crate) fn render_planning_progress_indicator(renderer: &mut AnsiRenderer, text: &str) -> Result<()> {
+    renderer.line(MessageStyle::Tool, text)
+}
+
 /// Pre-execution indicators for file modification operations
 /// These provide visual feedback before the actual edit/write/patch is applied
 pub(crate) fn render_file_operation_indicator(
@@ -1357,6 +1375,47 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(activities.len(), 2);
         assert!(activities.iter().all(|activity| activity.command_count == 1));
+    }
+
+    #[test]
+    fn planning_indicators_carry_spinner_marker() {
+        // The TUI transcript spinner matches indicator rows by their `❋`
+        // text prefix (`transcript.rs::FILE_OPERATION_INDICATORS`). If an
+        // indicator loses the marker, the planning row goes static while the
+        // long synthesis runs — the exact stall this feature fixes.
+        for indicator in [
+            super::PLANNING_RESEARCHING_INDICATOR,
+            super::PLANNING_VALIDATING_INDICATOR,
+            super::PLANNING_PERSISTING_INDICATOR,
+        ] {
+            assert!(indicator.contains('❋'), "missing spinner marker in {indicator:?}");
+            assert!(
+                indicator.to_ascii_lowercase().contains("plan"),
+                "indicator must name the plan phase: {indicator:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_planning_progress_indicator_emits_transcript_line() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(sender);
+        let mut renderer = AnsiRenderer::with_inline_ui(handle, Default::default());
+
+        super::render_planning_progress_indicator(&mut renderer, super::PLANNING_RESEARCHING_INDICATOR)
+            .expect("planning indicator should render");
+
+        let text = std::iter::from_fn(|| receiver.try_recv().ok())
+            .filter_map(|command| match command {
+                InlineCommand::AppendLine { segments, .. } => {
+                    Some(segments.into_iter().map(|s| s.text).collect::<String>())
+                }
+                InlineCommand::Inline { segment, .. } => Some(segment.text),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Drafting plan"), "got: {text:?}");
     }
 
     #[test]

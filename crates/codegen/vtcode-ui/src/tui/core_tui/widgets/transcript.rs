@@ -2,12 +2,13 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Clear, Paragraph, Widget, Wrap},
 };
 
 use crate::tui::config::constants::ui;
-use crate::tui::ui::tui::session::{Session, TranscriptLine, pulse_spinner_frame_for_phase};
+use crate::tui::ui::tui::session::{Session, TranscriptLine};
+use tui_shimmer::shimmer_spans_with_style_at_phase;
 use vtcode_config::constants::tools;
 
 /// Widget for rendering the transcript area with conversation history
@@ -155,66 +156,63 @@ const FILE_OPERATION_INDICATORS: &[&str] = &[
     "❋ Applying patch to ",
     "❋ Search/replace in ",
     "❋ Deleting ",
+    "❋ Drafting plan",
+    "❋ Validating plan",
+    "❋ Persisting plan",
+    "❋ Preparing approval",
 ];
 
 fn apply_active_file_operation_spinner(session: &Session, lines: &mut [Line<'static>]) {
-    let Some(frame) = active_file_operation_spinner_frame(session) else {
+    let Some(phase) = active_indicator_shimmer_phase(session) else {
         return;
     };
 
+    // Sweep a shimmer across the whole indicator line (icon + verb + target)
+    // at the shared shimmer phase, so the transcript pulses in sync with the
+    // footer. Only the newest indicator row animates and only while its work
+    // is live; the cached transcript is never mutated, so the static `❋`
+    // row (with its links/colors) returns untouched when activity ends.
     for line in lines.iter_mut().rev() {
-        if is_file_operation_indicator_line(line) && replace_indicator_icon(line, frame) {
-            break;
+        if !is_file_operation_indicator_line(line) {
+            continue;
         }
+        let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+        let base_style = line.spans.first().map(|span| span.style).unwrap_or_default();
+        line.spans = shimmer_spans_with_style_at_phase(&text, base_style, phase);
+        break;
     }
 }
 
-fn active_file_operation_spinner_frame(session: &Session) -> Option<&'static str> {
+/// Shimmer phase for the active transcript indicator row, if any.
+///
+/// Returns `None` when animation is suppressed (reduced motion, screen
+/// reader) or nothing is live, so idle frames skip the span rebuild
+/// entirely. File tools key off `Running tool: <name>`; planning phases key
+/// off their footer statuses (`Drafting/Validating/Persisting plan...`,
+/// `Preparing approval...`), which the runloop keeps live while the long
+/// synthesis runs.
+fn active_indicator_shimmer_phase(session: &Session) -> Option<f32> {
     if !session.appearance.should_animate_progress_status() {
         return None;
     }
 
     let left = session.input_status_left.as_deref()?.to_ascii_lowercase();
-    let tool_name = left.strip_prefix("running tool: ")?;
-    let is_active_file_tool = FILE_OPERATION_STATUS_TOOLS.contains(&tool_name);
+    if let Some(tool_name) = left.strip_prefix("running tool: ") {
+        return FILE_OPERATION_STATUS_TOOLS
+            .contains(&tool_name)
+            .then(|| session.shimmer_state.phase());
+    }
 
-    is_active_file_tool.then(|| pulse_spinner_frame_for_phase(session.shimmer_state.phase()))
+    let is_planning_status = left.contains("drafting plan")
+        || left.contains("validating plan")
+        || left.contains("persisting plan")
+        || left.contains("preparing approval");
+    is_planning_status.then(|| session.shimmer_state.phase())
 }
 
 fn is_file_operation_indicator_line(line: &Line<'_>) -> bool {
     let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
     FILE_OPERATION_INDICATORS.iter().any(|pattern| text.contains(pattern))
-}
-
-fn replace_indicator_icon(line: &mut Line<'static>, frame: &str) -> bool {
-    let mut replaced = false;
-    let mut new_spans = Vec::with_capacity(line.spans.len() + 2);
-
-    for span in std::mem::take(&mut line.spans) {
-        if replaced {
-            new_spans.push(span);
-            continue;
-        }
-
-        let style = span.style;
-        let text = span.content.into_owned();
-        let Some(icon_index) = text.find('❋') else {
-            new_spans.push(Span::styled(text, style));
-            continue;
-        };
-        let icon_end = icon_index + '❋'.len_utf8();
-        if icon_index > 0 {
-            new_spans.push(Span::styled(text[..icon_index].to_string(), style));
-        }
-        new_spans.push(Span::styled(frame.to_string(), style));
-        if icon_end < text.len() {
-            new_spans.push(Span::styled(text[icon_end..].to_string(), style));
-        }
-        replaced = true;
-    }
-
-    line.spans = new_spans;
-    replaced
 }
 
 /// Full-row tint for a diff line.
@@ -637,5 +635,89 @@ mod tests {
         assert!(!rendered.is_empty());
         assert!(rendered.iter().any(|row| row == "line 1"));
         assert!(rendered.iter().any(|row| row == "line 3"));
+    }
+
+    fn shimmer_session_with_status(status: &str) -> Session {
+        let mut session = Session::new(InlineTheme::default(), None, 12);
+        session.input_status_left = Some(status.to_string());
+        session
+    }
+
+    fn shimmer_line_text(line: &Line) -> String {
+        line.spans.iter().map(|span| span.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn indicator_shimmer_preserves_text_and_restyles_active_row() {
+        use ratatui::text::Line as RatLine;
+        let session = shimmer_session_with_status("Running tool: edit_file");
+        let original = RatLine::from("❋ Editing vtcode.toml...");
+        let mut lines = vec![original.clone()];
+        apply_active_file_operation_spinner(&session, &mut lines);
+
+        assert_eq!(shimmer_line_text(&lines[0]), "❋ Editing vtcode.toml...");
+        assert_ne!(lines[0].spans, original.spans, "active row must shimmer");
+    }
+
+    #[test]
+    fn indicator_shimmer_sweep_moves_with_phase() {
+        use ratatui::text::Line as RatLine;
+        let mut session = shimmer_session_with_status("Drafting plan... (42 chars)");
+        // The sweep head starts off-text (10 chars of padding), so advance
+        // until it has travelled into the line. Bounded: ~12 ticks minimum.
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            session.handle_tick();
+            if session.shimmer_state.phase() >= 0.2 {
+                break;
+            }
+        }
+        assert!(
+            session.shimmer_state.phase() >= 0.2,
+            "phase must advance while drafting, got {}",
+            session.shimmer_state.phase()
+        );
+
+        let mut advanced = vec![RatLine::from("❋ Drafting plan — researching codebase...")];
+        apply_active_file_operation_spinner(&session, &mut advanced);
+
+        let fresh = shimmer_session_with_status("Drafting plan... (42 chars)");
+        let mut at_zero = vec![RatLine::from("❋ Drafting plan — researching codebase...")];
+        apply_active_file_operation_spinner(&fresh, &mut at_zero);
+
+        assert_eq!(shimmer_line_text(&advanced[0]), "❋ Drafting plan — researching codebase...");
+        assert_ne!(advanced[0].spans, at_zero[0].spans, "sweep position must follow the shared shimmer phase");
+    }
+
+    #[test]
+    fn indicator_shimmer_animates_only_the_newest_row() {
+        use ratatui::text::Line as RatLine;
+        let session = shimmer_session_with_status("Validating plan...");
+        let first = RatLine::from("❋ Drafting plan — researching codebase...");
+        let second = RatLine::from("❋ Validating plan...");
+        let mut lines = vec![first.clone(), second.clone()];
+        apply_active_file_operation_spinner(&session, &mut lines);
+
+        assert_eq!(lines[0].spans, first.spans, "older row must stay static");
+        assert_ne!(lines[1].spans, second.spans, "newest row must shimmer");
+    }
+
+    #[test]
+    fn indicator_shimmer_stays_static_without_live_status() {
+        use ratatui::text::Line as RatLine;
+        for status in ["Running tool: code_search", "main*", "Ready"] {
+            let session = shimmer_session_with_status(status);
+            let original = RatLine::from("❋ Drafting plan — researching codebase...");
+            let mut lines = vec![original.clone()];
+            apply_active_file_operation_spinner(&session, &mut lines);
+            assert_eq!(lines[0].spans, original.spans, "stale row must not shimmer for {status:?}");
+        }
+
+        let mut session = shimmer_session_with_status("Drafting plan... (42 chars)");
+        session.appearance.reduce_motion_mode = true;
+        let original = RatLine::from("❋ Drafting plan — researching codebase...");
+        let mut lines = vec![original.clone()];
+        apply_active_file_operation_spinner(&session, &mut lines);
+        assert_eq!(lines[0].spans, original.spans, "reduced motion must keep the row static");
     }
 }

@@ -647,6 +647,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             )
             .await;
             harness_try!(render_planning_workflow_next_step_hint(&mut renderer));
+            harness_try!(crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+                &mut renderer,
+                crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
+            ));
         } else if planning_entry_source.requires_startup_prompt() && resume_ref.is_none() {
             let should_enter = harness_try!(
                 prompt_startup_planning_workflow(&handle, &mut session, &ctrl_c_state, &ctrl_c_notify).await
@@ -665,6 +669,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 )
                 .await;
                 harness_try!(render_planning_workflow_next_step_hint(&mut renderer));
+                harness_try!(crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+                    &mut renderer,
+                    crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
+                ));
             }
         }
         let mut linked_directories: Vec<LinkedDirectory> = Vec::with_capacity(4);

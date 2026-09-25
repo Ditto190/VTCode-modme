@@ -1015,6 +1015,12 @@ pub(crate) async fn handle_select_primary_agent(
                     true,
                 )
                 .await;
+                if let Err(err) = crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+                    ctx.renderer,
+                    crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
+                ) {
+                    tracing::warn!("failed to render planning progress indicator: {}", err);
+                }
             }
         }
         Err(vtcode_core::primary_agent::PrimaryAgentResolutionError::UnknownAgent { requested }) => {

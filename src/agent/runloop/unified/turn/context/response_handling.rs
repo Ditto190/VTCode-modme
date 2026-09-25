@@ -978,6 +978,15 @@ impl<'a> TurnProcessingContext<'a> {
             self.handle
                 .set_input_status(Some("Validating plan...".to_string()), self.input_status_state.right.clone());
             self.handle.force_redraw();
+            // Mirror the footer status into the transcript so the long
+            // synthesis-to-approval gap stays visibly live. Non-blocking
+            // send; a closed UI surface logs and continues validation.
+            if let Err(err) = crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+                self.renderer,
+                crate::agent::runloop::unified::tool_summary::PLANNING_VALIDATING_INDICATOR,
+            ) {
+                tracing::warn!("failed to render planning validating indicator: {}", err);
+            }
             // Persist before publishing the approval request so consumers that
             // follow the event's plan_file can read the completed draft.
             let validation = validate_plan_content(&plan_text);
@@ -991,6 +1000,12 @@ impl<'a> TurnProcessingContext<'a> {
             self.handle
                 .set_input_status(Some("Persisting plan...".to_string()), self.input_status_state.right.clone());
             self.handle.force_redraw();
+            if let Err(err) = crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+                self.renderer,
+                crate::agent::runloop::unified::tool_summary::PLANNING_PERSISTING_INDICATOR,
+            ) {
+                tracing::warn!("failed to render planning persisting indicator: {}", err);
+            }
 
             // Execution-mode first drafts have no planning workflow behind
             // them, so `persist_plan_draft` would bail with "No active plan

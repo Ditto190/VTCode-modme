@@ -46,6 +46,10 @@ pub(crate) async fn handle_toggle_planning_workflow(
         .await;
         sync_workspace_trust_prompt_policy(&mut ctx, false).await?;
         ctx.renderer.line(MessageStyle::Info, "Planning workflow started")?;
+        crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+            ctx.renderer,
+            crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
+        )?;
         ctx.renderer
             .line(MessageStyle::Output, "  The agent will focus on analysis and planning with a structured plan.")?;
         ctx.renderer.line(
