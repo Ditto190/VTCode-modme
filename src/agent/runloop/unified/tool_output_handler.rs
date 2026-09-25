@@ -20,7 +20,8 @@ use vtcode_ui::tui::app::{InlineHandle, InlineMessageKind, InlineSegment, Inline
 
 use crate::agent::runloop::unified::run_loop_context::RunLoopContext;
 use crate::agent::runloop::unified::tool_pipeline::{
-    ToolDisplayStatus, ToolExecutionStatus, ToolPipelineOutcome, renders_pty_command_header, streams_pty_output,
+    ToolDisplayStatus, ToolExecutionStatus, ToolPipelineOutcome, is_exec_session_call, renders_pty_command_header,
+    streams_pty_output,
 };
 use crate::agent::runloop::unified::tool_summary_helpers::{
     COMPACT_PREVIEW_LEN, display_command_text, preview_command, relativize_command_paths,
@@ -1366,8 +1367,18 @@ async fn render_tool_output_common(
         return Ok(());
     }
 
-    let viewer_id = if renderer.supports_inline_ui() && is_command_output_call(name, args_val) {
-        let mut viewer_lines = if inline_run_tool || has_spool_path {
+    // Session follow-ups need a viewer capture too: the inline body is capped
+    // at 10 rows and the expand notice opens this record, so the complete
+    // stdin/stdout capture stays reachable without leaving the TUI.
+    let is_session_followup = is_exec_session_call(name, args_val);
+    // Drop any unused expand anchor from a prior call that did not overflow.
+    let _ = renderer.take_session_expand_anchor();
+    renderer.set_session_body(is_session_followup);
+    let viewer_id = if renderer.supports_inline_ui() && (is_command_output_call(name, args_val) || is_session_followup)
+    {
+        let mut viewer_lines = if is_session_followup {
+            build_pipe_command_output_lines(name, args_val, output, workspace_root, status)
+        } else if inline_run_tool || has_spool_path {
             complete_capture.as_deref().map_or_else(
                 || build_merged_command_output_lines(name, args_val, "", workspace_root, output, status),
                 |capture| build_merged_command_output_lines(name, args_val, capture, workspace_root, output, status),
@@ -1377,7 +1388,12 @@ async fn render_tool_output_common(
         };
         append_capture_status_line(&mut viewer_lines, output, complete_capture.as_deref());
         append_follow_up_capture_lines(&mut viewer_lines, output, complete_capture.as_deref());
-        Some(handle.record_tool_output(viewer_lines))
+        let viewer_id = handle.record_tool_output(viewer_lines);
+        // Session expand notices consume this when the 10-row body overflows.
+        if is_session_followup {
+            renderer.set_session_expand_anchor(viewer_id);
+        }
+        Some(viewer_id)
     } else {
         None
     };
