@@ -157,9 +157,8 @@ pub(super) fn visible_delegated_local_agents(entries: Vec<SubagentStatusEntry>) 
 /// `Stopped`, `Error`) so the window can show what finished. There is no
 /// dismissed/closed status on this type today.
 pub(super) fn visible_background_local_agents(
-    entries: Vec<BackgroundSubprocessEntry>,
+    mut entries: Vec<BackgroundSubprocessEntry>,
 ) -> Vec<BackgroundSubprocessEntry> {
-    let mut entries = entries;
     entries.sort_by_key(|left| std::cmp::Reverse(left.updated_at));
     entries
 }

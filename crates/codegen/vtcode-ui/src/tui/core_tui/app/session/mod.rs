@@ -998,6 +998,12 @@ impl AppSession {
                 let has_delegated_entries = entries
                     .iter()
                     .any(|entry| entry.kind == crate::tui::core_tui::types::LocalAgentKind::Delegated);
+                // Auto-open is for live delegated work attention. Finished rows
+                // stay listed for history, so close the auto-opened window when
+                // nothing delegated is still loading (not when the list empties).
+                let has_live_delegated = entries.iter().any(|entry| {
+                    entry.kind == crate::tui::core_tui::types::LocalAgentKind::Delegated && entry.is_loading()
+                });
                 let update = self.local_agents_state.set_entries(entries.clone());
                 let background_count = self.local_agents_state.loading_count();
                 let finished_count = self.local_agents_state.finished_count();
@@ -1007,7 +1013,7 @@ impl AppSession {
                 if update.has_new_delegated_entries && self.should_auto_open_local_agents() {
                     self.ensure_inline_lists_visible_for_trigger();
                     self.open_local_agents_drawer(true);
-                } else if self.local_agents_auto_opened && !has_delegated_entries {
+                } else if self.local_agents_auto_opened && !has_live_delegated {
                     self.close_local_agents_drawer(true);
                 } else if !self.local_agents_visible() && !has_delegated_entries {
                     self.local_agents_auto_opened = false;

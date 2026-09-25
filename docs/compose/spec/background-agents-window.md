@@ -28,6 +28,7 @@ Finished history is retained: delegated `Completed`/`Failed` stay listed (`Close
 3. Status indicator hits are a `Vec<Rect>` (disjoint), not one min/max-merged rect. Only the activity text and `{key} background` are hot; `Alt+S local agents` is not.
 4. `LocalAgentEntry::is_finished` is `!is_loading()` for header counts, not a positive terminal-status match.
 5. Spec S2 originally listed `Closed` as retained; T1 and the implementation hide it. Text aligned to T1.
+6. Post-delivery review: auto-opened window must close when live delegated work ends (not when history empties); hint hit widths use `measure_text_width`; `Rect::contains` replaces manual hit math; hits past truncation are dropped.
 
 ## [S1] Problem
 

@@ -947,13 +947,21 @@ impl Session {
             return None;
         }
 
+        let total_width: u16 = spans.iter().map(|s| measure_text_width(&s.content)).sum();
         let mut line = Line::from(spans);
         // Apply ellipsis truncation to prevent status line from overflowing
         line = truncate_line_with_ellipsis_if_overflow(line, usize::from(width));
+        // Hits are measured pre-truncation. Keep only columns that still map to
+        // real content (exclude the ellipsis and anything dropped).
+        let content_width = if total_width > width {
+            width.saturating_sub(1)
+        } else {
+            width
+        };
         let hits = background_hits
             .into_iter()
             .filter_map(|(start, end)| {
-                let clamped_end = end.min(width);
+                let clamped_end = end.min(content_width);
                 (start < clamped_end).then_some((start, clamped_end))
             })
             .collect::<Vec<_>>();
@@ -1054,7 +1062,8 @@ impl Session {
     ) -> Option<(u16, u16)> {
         let mut appended_width = 0_u16;
         let mut key_hit: Option<(u16, u16)> = None;
-        let mut record = |width: u16, mark: bool| {
+        let mut push = |spans: &mut Vec<Span<'static>>, text: &str, style: Style, mark: bool| {
+            let width = measure_text_width(text);
             let start = appended_width;
             let end = appended_width.saturating_add(width);
             if mark {
@@ -1064,6 +1073,7 @@ impl Session {
                 });
             }
             appended_width = end;
+            spans.push(Span::styled(text.to_owned(), style));
         };
 
         // PTY-only hint has the exact shape "{key} background".
@@ -1071,14 +1081,10 @@ impl Session {
             && prefix == key_label
         {
             if !spans.is_empty() {
-                spans.push(Span::styled(" · ", dim_style));
-                record(3, false);
+                push(spans, " · ", dim_style, false);
             }
-            let key_width = measure_text_width(key_label);
-            spans.push(Span::styled(key_label.to_owned(), key_style));
-            record(key_width, true);
-            spans.push(Span::styled(" background", label_style));
-            record(measure_text_width(" background"), true);
+            push(spans, key_label, key_style, true);
+            push(spans, " background", label_style, true);
             return key_hit;
         }
         // Combined drawer hint has the exact shape
@@ -1088,33 +1094,22 @@ impl Session {
             && prefix == key_label
         {
             if !spans.is_empty() {
-                spans.push(Span::styled(" · ", dim_style));
-                record(3, false);
+                push(spans, " · ", dim_style, false);
             }
-            spans.push(Span::styled("↓ or ", label_style));
-            record(5, false);
-            spans.push(Span::styled("Alt+S", key_style));
-            record(5, false);
-            spans.push(Span::styled(" local agents", label_style));
-            record(13, false);
-            spans.push(Span::styled(" · ", dim_style));
-            record(3, false);
-            let key_width = measure_text_width(key_label);
-            spans.push(Span::styled(key_label.to_owned(), key_style));
-            record(key_width, true);
-            spans.push(Span::styled(" background", label_style));
-            record(measure_text_width(" background"), true);
+            push(spans, "↓ or ", label_style, false);
+            push(spans, "Alt+S", key_style, false);
+            push(spans, " local agents", label_style, false);
+            push(spans, " · ", dim_style, false);
+            push(spans, key_label, key_style, true);
+            push(spans, " background", label_style, true);
             return key_hit;
         }
         if !spans.is_empty() {
-            spans.push(Span::styled(" · ", dim_style));
-            record(3, false);
+            push(spans, " · ", dim_style, false);
         }
         // Unrecognized hint shape: render it dim but do not make it a hit
         // target. Only the known `{key} background` shapes are clickable.
-        let width = measure_text_width(hint);
-        spans.push(Span::styled(hint.to_owned(), dim_style));
-        record(width, false);
+        push(spans, hint, dim_style, false);
         key_hit
     }
 

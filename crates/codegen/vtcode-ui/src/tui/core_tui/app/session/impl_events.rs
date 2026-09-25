@@ -317,21 +317,15 @@ impl Session {
         let column = mouse_event.column;
         let row = mouse_event.row;
         if self.local_agents_visible() {
+            let pos = Position { x: column, y: row };
             let Some(window) = self.local_agents_state.window_area() else {
                 return false;
             };
-            let in_window = row >= window.y
-                && row < window.y.saturating_add(window.height)
-                && column >= window.x
-                && column < window.x.saturating_add(window.width);
-            if !in_window {
+            if !window.contains(pos) {
                 return false;
             }
             if let Some(list_area) = self.local_agents_state.list_area()
-                && row >= list_area.y
-                && row < list_area.y.saturating_add(list_area.height)
-                && column >= list_area.x
-                && column < list_area.x.saturating_add(list_area.width)
+                && list_area.contains(pos)
             {
                 let local_index = usize::from(row.saturating_sub(list_area.y));
                 let actual_index = self.local_agents_state.scroll_offset().saturating_add(local_index);

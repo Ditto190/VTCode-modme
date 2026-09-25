@@ -143,11 +143,10 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, viewpor
         "↑↓ Navigate · Enter inspect · Alt+O transcript · Ctrl+K stop · Ctrl+X close · Esc close".to_string()
     };
 
-    let title = "Background".to_string();
     let block = Block::bordered()
         .border_type(BorderType::Plain)
         .border_style(local_agents_divider_style(session, selected_index, &entries))
-        .title(Span::styled(title, highlight_style));
+        .title(Span::styled("Background", highlight_style));
     let inner = block.inner(window);
     frame.render_widget(block, window);
 

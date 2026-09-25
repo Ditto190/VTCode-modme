@@ -11,7 +11,7 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::super::types::{
@@ -532,12 +532,8 @@ impl Session {
     }
 
     pub(crate) fn background_indicator_contains(&self, column: u16, row: u16) -> bool {
-        self.background_indicator_hits.iter().any(|area| {
-            row >= area.y
-                && row < area.y.saturating_add(area.height)
-                && column >= area.x
-                && column < area.x.saturating_add(area.width)
-        })
+        let pos = Position { x: column, y: row };
+        self.background_indicator_hits.iter().any(|area| area.contains(pos))
     }
 
     /// Input-status indicator while background tasks run. The wording contains

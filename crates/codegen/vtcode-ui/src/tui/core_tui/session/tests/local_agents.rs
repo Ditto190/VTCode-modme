@@ -219,6 +219,20 @@ fn ctrl_r_still_opens_history_picker_for_non_exec_local_agents() {
 }
 
 #[test]
+fn auto_opened_local_agents_window_closes_when_delegated_work_finishes() {
+    let mut running = sample_local_agent_entry_with_id("a1", "running-agent", app_types::LocalAgentKind::Delegated);
+    running.status = "running".to_string();
+    let mut session = app_session_with_input("", 0);
+    session.handle_command(app_types::InlineCommand::SetLocalAgents { entries: vec![running.clone()] });
+    assert!(session.local_agents_visible());
+
+    let mut done = running;
+    done.status = "completed".to_string();
+    session.handle_command(app_types::InlineCommand::SetLocalAgents { entries: vec![done] });
+    assert!(!session.local_agents_visible(), "auto-opened window should close once live delegated work finishes");
+}
+
+#[test]
 fn auto_opened_local_agents_drawer_closes_after_last_delegated_entry_is_removed() {
     let mut session = app_session_with_input("", 0);
     session.handle_command(app_types::InlineCommand::SetLocalAgents {
