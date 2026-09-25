@@ -389,6 +389,15 @@ fn find_skill_json_end(text: &str, start: usize) -> Option<usize> {
 /// Returns `None` when no parseable markup is present so callers fall back to
 /// treating the text as the final answer. Only the first `<tool_call>` block
 /// is converted; the loop drives subsequent calls one iteration at a time.
+/// Parse tool-call markup from skill sub-LLM text into a native-equivalent
+/// tool call.
+///
+/// Returns `None` when no parseable markup is present so callers fall back to
+/// treating the text as the final answer. Only the first **unfenced** clean
+/// tagged block is converted; the loop drives subsequent calls one iteration
+/// at a time. Markup inside fenced code blocks is documentation (skill docs,
+/// quoted examples) and is never executed. Mid-prose mentions that yield a
+/// non-identifier name are skipped.
 fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
     const TOOL_TAG: &str = "<tool_call>";
     const ARG_KEY_TAG: &str = "<arg_key>";
@@ -396,26 +405,153 @@ fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
     const ARG_KEY_CLOSE: &str = "</arg_key>";
     const ARG_VALUE_CLOSE: &str = "</arg_value>";
 
-    let start = text.find(TOOL_TAG)?;
-    let rest_initial = &text[start + TOOL_TAG.len()..];
-    let name_end = rest_initial
-        .find(|c: char| c == '<' || c == '{' || c.is_whitespace())
-        .unwrap_or(rest_initial.len());
-    let raw_name = rest_initial[..name_end].trim();
-    let canonical = canonicalize_skill_textual_tool_name(raw_name)?;
+    let mut search_from = 0usize;
+    loop {
+        let start = find_unfenced_from(text, TOOL_TAG, search_from)?;
+        let rest_initial = &text[start + TOOL_TAG.len()..];
+        let name_end = rest_initial
+            .find(|c: char| c == '<' || c == '{' || c.is_whitespace())
+            .unwrap_or(rest_initial.len());
+        let raw_name = rest_initial[..name_end].trim();
+        if !is_clean_skill_tool_name(raw_name) {
+            search_from = start + TOOL_TAG.len();
+            continue;
+        }
+        let Some(canonical) = canonicalize_skill_textual_tool_name(raw_name) else {
+            search_from = start + TOOL_TAG.len();
+            continue;
+        };
+        if let Some(parsed) = finish_parse_textual_skill_tool_call(
+            rest_initial,
+            name_end,
+            canonical,
+            ARG_KEY_TAG,
+            ARG_VALUE_TAG,
+            ARG_KEY_CLOSE,
+            ARG_VALUE_CLOSE,
+            TOOL_TAG,
+        ) {
+            return Some(parsed);
+        }
+        search_from = start + TOOL_TAG.len();
+    }
+}
+
+/// Clean tool identifier: ASCII letter then alphanumerics/underscore, length <= 64.
+fn is_clean_skill_tool_name(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 64 {
+        return false;
+    }
+    let mut chars = trimmed.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+/// Classify a line as a fenced-code-block delimiter.
+fn fence_delimiter_line(line: &str, open_char: Option<char>) -> Option<(char, bool)> {
+    let trimmed = line.trim();
+    let mut chars = trimmed.chars();
+    let first = chars.next()?;
+    if first != '`' && first != '~' {
+        return None;
+    }
+    let mut count = 1usize;
+    let mut closed_run = false;
+    for ch in chars {
+        if ch == first {
+            count += 1;
+        } else {
+            closed_run = true;
+            break;
+        }
+    }
+    if count < 3 {
+        return None;
+    }
+    if closed_run {
+        return Some((first, false));
+    }
+    let only_whitespace = trimmed.chars().skip(count).all(char::is_whitespace);
+    match open_char {
+        Some(open) if open == first && only_whitespace => Some((first, true)),
+        Some(_) => None,
+        None => Some((first, false)),
+    }
+}
+
+/// First byte offset of `needle` at or after `from`, outside fenced code blocks.
+fn find_unfenced_from(text: &str, needle: &str, from: usize) -> Option<usize> {
+    let mut open_char: Option<char> = None;
+    let mut segment_start = 0usize;
+    let mut cursor = 0usize;
+    let mut search_from = from;
+    for line in text.split_inclusive('\n') {
+        let line_start = cursor;
+        cursor += line.len();
+        let Some((fence_char, is_closing)) = fence_delimiter_line(line, open_char) else {
+            continue;
+        };
+        if is_closing {
+            // Fenced body stays excluded; only the region before the opener
+            // and after the closer are searchable.
+            open_char = None;
+        } else if open_char.is_none() {
+            if let Some(found) = find_in_span(text, needle, search_from.max(segment_start), line_start) {
+                return Some(found);
+            }
+            open_char = Some(fence_char);
+        }
+        segment_start = cursor;
+        search_from = search_from.max(segment_start);
+    }
+    if open_char.is_none() {
+        return find_in_span(text, needle, search_from.max(segment_start), text.len());
+    }
+    None
+}
+
+fn find_in_span(text: &str, needle: &str, start: usize, end: usize) -> Option<usize> {
+    if start >= end {
+        return None;
+    }
+    text.get(start..end)
+        .and_then(|slice| slice.find(needle))
+        .map(|index| start + index)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Tag constants passed from the outer scanner loop."
+)]
+fn finish_parse_textual_skill_tool_call(
+    rest_initial: &str,
+    name_end: usize,
+    canonical: String,
+    arg_key_tag: &str,
+    arg_value_tag: &str,
+    arg_key_close: &str,
+    arg_value_close: &str,
+    tool_tag: &str,
+) -> Option<(String, Value)> {
     let mut rest = &rest_initial[name_end..];
     let mut object = serde_json::Map::new();
     let mut found_arg_tags = false;
 
-    while let Some(key_index) = rest.find(ARG_KEY_TAG) {
+    while let Some(key_index) = rest.find(arg_key_tag) {
         found_arg_tags = true;
-        rest = &rest[key_index + ARG_KEY_TAG.len()..];
+        rest = &rest[key_index + arg_key_tag.len()..];
         // Keys never legitimately contain `<`, but values can (e.g. shell
         // redirections or `<verified-target>` placeholders), so always read
         // up to the explicit close tag when present instead of stopping at
         // the next `<` (which would truncate the value).
-        let (raw_key, after_key) = match rest.find(ARG_KEY_CLOSE) {
-            Some(close_index) => (rest[..close_index].trim().to_string(), &rest[close_index + ARG_KEY_CLOSE.len()..]),
+        let (raw_key, after_key) = match rest.find(arg_key_close) {
+            Some(close_index) => (rest[..close_index].trim().to_string(), &rest[close_index + arg_key_close.len()..]),
             None => {
                 let (key, after) = read_skill_tag_text(rest);
                 if key.is_empty() {
@@ -430,12 +566,12 @@ fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
             continue;
         }
         rest = after_key;
-        let Some(value_index) = rest.find(ARG_VALUE_TAG) else {
+        let Some(value_index) = rest.find(arg_value_tag) else {
             break;
         };
-        rest = &rest[value_index + ARG_VALUE_TAG.len()..];
-        let (raw_value, after_value) = match rest.find(ARG_VALUE_CLOSE) {
-            Some(close_index) => (rest[..close_index].trim().to_string(), &rest[close_index + ARG_VALUE_CLOSE.len()..]),
+        rest = &rest[value_index + arg_value_tag.len()..];
+        let (raw_value, after_value) = match rest.find(arg_value_close) {
+            Some(close_index) => (rest[..close_index].trim().to_string(), &rest[close_index + arg_value_close.len()..]),
             None => {
                 let (value, after) = read_skill_tag_text(rest);
                 (value, after)
@@ -448,7 +584,7 @@ fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
     if !found_arg_tags {
         let after_name = &rest_initial[name_end..];
         let content_end = after_name
-            .find(TOOL_TAG)
+            .find(tool_tag)
             .or_else(|| after_name.find("</tool_call>"))
             .unwrap_or(after_name.len());
         let content = after_name[..content_end].trim();
@@ -472,13 +608,14 @@ fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
     if canonical == tool_constants::EXEC_COMMAND {
         let needs_default = match object.get("action") {
             None => true,
-            Some(payload) => payload.is_null(),
+            Some(Value::String(action)) => action.is_empty(),
+            Some(Value::Null) => true,
+            Some(_) => false,
         };
         if needs_default {
             object.insert("action".to_string(), Value::String("run".to_string()));
         }
     }
-
     Some((canonical, Value::Object(object)))
 }
 
@@ -2156,6 +2293,37 @@ fn textual_skill_tool_call_ignores_trailing_text_after_json() {
     let (name, args) = parse_textual_skill_tool_call(text).expect("json payload should parse");
     assert_eq!(name, tool_constants::EXEC_COMMAND);
     assert_eq!(args["command"], serde_json::json!("git diff"));
+}
+
+#[test]
+fn textual_skill_tool_call_ignores_fenced_documentation_example() {
+    // Skill docs / test fixtures quoting markup must not execute.
+    let text = "The skill documentation quotes this example:\n\n```sh\n<tool_call>bash<arg_key>command</arg_key><arg_value>rm -rf /tmp/demo</arg_value></tool_call>\n```\n\nDo not run it; summarize instead.";
+    assert!(parse_textual_skill_tool_call(text).is_none(), "fenced tagged markup must not become a tool call");
+}
+
+#[test]
+fn textual_skill_tool_call_ignores_mid_prose_tag_mention() {
+    let text = "containing `<tool_call>` example markup trigger unintended tool execution? Possibly. Now check remaining commits.";
+    assert!(parse_textual_skill_tool_call(text).is_none(), "prose mention must not bind");
+}
+
+#[test]
+fn textual_skill_tool_call_skips_dirty_name_and_parses_clean_call() {
+    let text = "Docs mention `<tool_call>` as a tag. Then:\n<tool_call>exec_command<arg_key>command</arg_key><arg_value>echo hi</arg_value></tool_call>";
+    let (name, args) = parse_textual_skill_tool_call(text).expect("clean call after prose mention should parse");
+    assert_eq!(name, tool_constants::EXEC_COMMAND);
+    assert_eq!(args["command"], serde_json::json!("echo hi"));
+}
+
+#[test]
+fn is_clean_skill_tool_name_rejects_prose() {
+    assert!(is_clean_skill_tool_name("exec_command"));
+    assert!(is_clean_skill_tool_name("bash"));
+    assert!(!is_clean_skill_tool_name(""));
+    assert!(!is_clean_skill_tool_name("` in content"));
+    assert!(!is_clean_skill_tool_name("has space"));
+    assert!(!is_clean_skill_tool_name(&"x".repeat(65)));
 }
 
 #[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]

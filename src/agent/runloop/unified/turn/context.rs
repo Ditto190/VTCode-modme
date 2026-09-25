@@ -69,6 +69,24 @@ pub(crate) struct PreparedAssistantToolCall {
 
 impl PreparedAssistantToolCall {
     pub(crate) fn new(raw_call: uni::ToolCall) -> Self {
+        let mut raw_call = raw_call;
+        if let Some(function) = raw_call.function.as_mut() {
+            if let Some(mapped) = crate::agent::runloop::text_tools::canonicalize_shell_tool_alias(&function.name) {
+                function.name = mapped;
+            }
+            // Prose-blob names (model put analysis text in the name field)
+            // must not reach the registry as dispatchable calls.
+            if !crate::agent::runloop::text_tools::is_dispatchable_tool_name(&function.name) {
+                let name = function.name.clone();
+                return Self {
+                    raw_call,
+                    parsed_args: None,
+                    args_error: Some(format!("tool name is not a clean identifier: {name}")),
+                    is_parallel_safe: false,
+                    is_command_execution: false,
+                };
+            }
+        }
         let tool_name = raw_call.tool_name().unwrap_or(raw_call.call_type.as_str());
 
         let (parsed_args, args_error, is_parallel_safe, is_command_execution) = if raw_call.function.is_none() {
