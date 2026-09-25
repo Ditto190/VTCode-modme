@@ -8,21 +8,6 @@ screenshot: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09
 
 ===
 
-check /review command doesn't work
-
-input: "/review Review the full diff and nearby code for correctness, regressions, unintended behavior changes, and
-unnecessary complexity. Reuse existing patterns where possible. Rank confirmed issues by severity, filter false
-positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
-stop, start implement fixes for each one "
-
-response: "
-Running /review...
-I can’t access the repository or run tests in this session, so I can’t review or
-modify the diff. Share the diff and relevant surrounding code, or enable
-repository tools, and I can identify issues and propose fixes."
-
-===
-
 for multi agent or multi background queue/process handling and UI in TUI.
 
 --> also consider implement a and more expanded background window for better visibility and management of multiple agents and background processes in the TUI when click/ on the background task indicator or relevant UI element.
@@ -52,9 +37,3 @@ defaults
 Rejected plan revision:"
 
 session: session-vtcode-20260924T133543Z_155288-07964
-
-====
-
-don't dispay 1 line condensed command like this, always show full for user visibility.
-
-'/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-25 at 14.22.41.png'
