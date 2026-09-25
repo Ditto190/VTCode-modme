@@ -29,7 +29,7 @@
   - [3. Run](#3-run)
 - [Why VT Code](#why-vt-code)
 - [Architecture](#architecture)
-- [What's inside](#whats-inside)
+- [Usage](#usage)
   - [Commands](#commands)
   - [Everyday recipes](#everyday-recipes)
   - [WebMCP browser bridge (opt-in)](#webmcp-browser-bridge-opt-in)
@@ -196,11 +196,9 @@ sandboxing in `vtcode-safety`); the `ThreadEvent` contract in
 
 Layer-by-layer details: [Architecture guide](./docs/ARCHITECTURE.md).
 
-## What's inside
+## Usage
 
 One binary: TUI, session tools, provider integrations, and an eval runner.
-MCP servers and plugins need their own setup; see the
-[extension guides](#documentation).
 
 ### Commands
 
@@ -342,8 +340,6 @@ alongside me. Thank you, all of you.
 <details>
 <summary><strong>Show all contributors</strong></summary>
 
-<div align="center">
-
 <!-- CONTRIBUTORS:START -->
 
 **Security Advisors**
@@ -385,11 +381,8 @@ alongside me. Thank you, all of you.
   <a href="https://github.com/diegosouzapw"><img src="https://avatars.githubusercontent.com/u/8016841?v=4&s=60" width="40" height="40" alt="@diegosouzapw" title="@diegosouzapw Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
 
 <!-- CONTRIBUTORS:END -->
-</div>
 
 </details>
-
-<div align="center">
 
 **Want to see your avatar here?** Every bit counts: one-line fixes, bug
 reports, and feedback are all welcome.
@@ -399,8 +392,6 @@ reports, and feedback are all welcome.
 [Share feedback](https://github.com/vinhnx/vtcode/discussions) ·
 [Star the repo](https://github.com/vinhnx/vtcode/stargazers) ·
 [Contribute](./docs/CONTRIBUTING.md)
-
-</div>
 
 ## Support
 
@@ -417,34 +408,29 @@ never open a public issue. Details: [security policy](./docs/SECURITY.md).
 If VT Code helped you ship something, telling other developers is the
 easiest way to support the project:
 
-<div align="center">
-
 [Share on X](https://twitter.com/intent/tweet?text=VT%20Code%20is%20an%20open-source%20coding%20agent%20for%20your%20terminal&url=https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode) ·
 [Share on Hacker News](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode&t=VT%20Code%20%E2%80%93%20Open-source%20coding%20agent%20for%20your%20terminal) ·
 [Share on LinkedIn](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode) ·
 [Share via Email](mailto:?subject=VT%20Code%3A%20open-source%20coding%20agent%20for%20your%20terminal&body=Check%20out%20VT%20Code%2C%20an%20open-source%20coding%20agent%20for%20your%20terminal%3A%20https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode) ·
 [Share via SMS](sms:?&body=Check%20out%20VT%20Code%2C%20an%20open-source%20coding%20agent%20for%20your%20terminal%3A%20https%3A%2F%2Fgithub.com%2Fvinhnx%2Fvtcode)
 
-</div>
-
 ### Sponsorship
 
 VT Code is maintained in spare time. A [sponsorship](https://github.com/sponsors/vinhnx)
 keeps the project independent.
 
-<div align="center">
-  <a href="https://github.com/dnhn"><img src="https://avatars.githubusercontent.com/u/2561973" width="80" height="80" alt="@dnhn" style="border-radius: 50%" /></a>
-  <a href="https://github.com/codemod"><img src="https://avatars.githubusercontent.com/u/78830094" width="80" height="80" alt="@codemod" style="border-radius: 50%" /></a>
-  <a href="https://github.com/coderabbitai"><img src="https://avatars.githubusercontent.com/u/132028505" width="80" height="80" alt="@coderabbitai" style="border-radius: 50%" /></a>
-  <a href="https://github.com/KhaiRyth"><img src="https://avatars.githubusercontent.com/u/273723951" width="80" height="80" alt="@KhaiRyth" style="border-radius: 50%" /></a>
-</div>
+<details>
+<summary><strong>Sponsors</strong></summary>
 
-<div align="center">
+<a href="https://github.com/dnhn"><img src="https://avatars.githubusercontent.com/u/2561973" width="80" height="80" alt="@dnhn" style="border-radius: 50%" /></a>
+<a href="https://github.com/codemod"><img src="https://avatars.githubusercontent.com/u/78830094" width="80" height="80" alt="@codemod" style="border-radius: 50%" /></a>
+<a href="https://github.com/coderabbitai"><img src="https://avatars.githubusercontent.com/u/132028505" width="80" height="80" alt="@coderabbitai" style="border-radius: 50%" /></a>
+<a href="https://github.com/KhaiRyth"><img src="https://avatars.githubusercontent.com/u/273723951" width="80" height="80" alt="@KhaiRyth" style="border-radius: 50%" /></a>
+
+</details>
 
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-30363D?style=for-the-badge&logo=github-sponsors&logoColor=%23EA4AAA)](https://github.com/sponsors/vinhnx)
-<a href="https://buymeacoffee.com/vinhnx"><img src="./resources/screenshots/qr_donate.png" alt="Buy Me a Coffee" width="100" /></a>
-
-</div>
+[![Buy Me a Coffee](./resources/screenshots/qr_donate.png)](https://buymeacoffee.com/vinhnx)
 
 ## License
 
