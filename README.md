@@ -394,6 +394,14 @@ reports, and feedback are all welcome.
 
 </details>
 
+### Spotlight
+
+- Memcode wrote up how VT Code's memory works across threads:
+  [read the post](https://memcode.in/blogs/vt-code-memory-across-threads).
+  The setup it walks through is documented in the
+  [Memcode MCP guide](./docs/guides/memcode-mcp.md)
+  ([PR #763](https://github.com/vinhnx/VTCode/pull/763)).
+
 ### Contact
 
 Partnership and collaboration: `vinhnguyen2308 [at] gmail [dot] com`.
