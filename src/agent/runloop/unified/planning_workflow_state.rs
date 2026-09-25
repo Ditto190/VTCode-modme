@@ -281,9 +281,15 @@ impl PlanningWorkflowSessionState {
 
     /// Execution agent to restore when planning is cancelled without an
     /// approved-plan handoff. Prefers the agent that was active before
-    /// planning began, then the configured default.
+    /// planning began, then the configured default. The plan agent itself is
+    /// never a restore target: `/plan off` must land on an execution agent,
+    /// not hand back the read-only planner (reachable when planning was
+    /// toggled while the plan agent was already active).
     pub(crate) fn restore_agent_after_planning(&self) -> Option<&str> {
-        self.previous_primary_agent().or_else(|| self.fallback_primary_agent())
+        let not_plan = |name: &str| !name.eq_ignore_ascii_case(PLAN_PRIMARY_AGENT_NAME);
+        self.previous_primary_agent()
+            .filter(|name| not_plan(name))
+            .or_else(|| self.fallback_primary_agent().filter(|name| not_plan(name)))
     }
 
     pub(crate) fn mark_plan_approval_pending(&mut self, thread_id: String, turn_id: String) {
@@ -462,6 +468,21 @@ mod tests {
         assert_eq!(state.restore_agent_after_planning(), Some("auto"));
 
         state.set_fallback_primary_agent(None);
+        assert_eq!(state.restore_agent_after_planning(), None);
+    }
+
+    #[test]
+    fn restore_agent_after_planning_never_returns_plan_agent() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::UserRequest);
+        // `/plan on` while the plan agent was already active records "plan" as
+        // previous; restoring must fall through to the execution fallback
+        // instead of re-selecting the read-only planner.
+        state.set_previous_primary_agent(Some("plan".to_string()));
+        state.set_fallback_primary_agent(Some("build".to_string()));
+        assert_eq!(state.restore_agent_after_planning(), Some("build"));
+
+        state.set_fallback_primary_agent(Some("plan".to_string()));
         assert_eq!(state.restore_agent_after_planning(), None);
     }
 
