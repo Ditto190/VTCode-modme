@@ -12,6 +12,7 @@
 [![Model Context Protocol](https://img.shields.io/badge/Model_Context_Protocol-A63333?style=flat-square&logo=modelcontextprotocol&logoColor=white)](./docs/guides/mcp-integration.md)
 [![Agent Plugins](https://img.shields.io/badge/Agent_Plugins-5865F2?style=flat-square)](./docs/guides/agent-plugins.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vinhnx/VTCode)
+<a href="https://www.producthunt.com/products/vt-code?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-vt-code" target="_blank" rel="noopener noreferrer"><img alt="VT Code - Open-source coding agent harness built for long-running work | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1248210&amp;theme=light&amp;t=1789739815450"></a>
 
 </div>
 
@@ -37,7 +38,7 @@
 - [Development](#development)
 - [Contributing](#contributing)
   - [Contributors](#contributors)
-- [Support](#support)
+- [Community](#community)
   - [Contact](#contact)
   - [Share VT Code](#share-vt-code)
   - [Sponsorship](#sponsorship)
@@ -54,8 +55,6 @@ review changes before they land.
 
 <div align="center">
 
-<a href="https://www.producthunt.com/products/vt-code?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-vt-code" target="_blank" rel="noopener noreferrer"><img alt="VT Code - Open-source coding agent harness built for long-running work | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1248210&amp;theme=light&amp;t=1789739815450"></a>
-
 <img src="./resources/gif/vtcode.gif" alt="VT Code demo" width="60%" />
 <br />
 
@@ -63,23 +62,11 @@ review changes before they land.
 
 </div>
 
-Full docs catalog: [docs overview](./docs/README.md).
-
 > [!NOTE]
 > **Status:** Active development; some automation flows are experimental.
 > OAuth login for ChatGPT and GitHub Copilot reuses the Codex CLI's public
 > client identity (unofficial); prefer your own API key for supported paths.
 > See [OAuth authentication](./docs/guides/oauth-authentication.md).
-
-<details>
-<summary><strong>Behind the build</strong></summary>
-
-- [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
-  covering harness design, evals, security, and lessons learned.
-- [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
-  [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o)
-
-</details>
 
 ## Quick start
 
@@ -276,15 +263,17 @@ Hosts and deployment: [WebMCP user guide](./docs/user-guide/webmcp.md).
 Per-subcommand details are in the
 [command reference](./docs/user-guide/commands.md).
 
-| Layer   | Guides                                                                                                                                                                                                                                                                                   |
-| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Start   | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [FAQ](./docs/FAQ.md) · [Compatibility](./docs/COMPATIBILITY.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)                                                                  |
-| Use     | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [Exec mode](./docs/user-guide/exec-mode.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [WebMCP](./docs/user-guide/webmcp.md) |
-| Automate | [Automation](./docs/guides/full-automation.md) · [Hooks](./docs/guides/hooks-guide.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md) |
-| Extend  | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md)                                                                                                                |
-| Operate | [Safety](./docs/security/SECURITY_MODEL.md) · [Evals](./docs/guides/eval.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md) |
+| Layer    | Guides                                                                                                                                                                                                                                                                                   |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Start    | [Installation](./docs/installation/README.md) · [Getting started](./docs/user-guide/getting-started.md) · [OAuth login](./docs/guides/oauth-authentication.md) · [FAQ](./docs/FAQ.md) · [Compatibility](./docs/COMPATIBILITY.md) · [Wiki](https://github.com/vinhnx/VTCode/wiki)            |
+| Use      | [TUI](./docs/user-guide/interactive-mode.md) · [CLI](./docs/user-guide/commands.md) · [Exec mode](./docs/user-guide/exec-mode.md) · [Scheduled tasks](./docs/user-guide/scheduled-tasks.md) · [WebMCP](./docs/user-guide/webmcp.md)                                                        |
+| Automate | [Automation](./docs/guides/full-automation.md) · [Hooks](./docs/guides/hooks-guide.md) · [Planning](./docs/guides/planning-workflow.md) · [Configuration](./docs/config/CONFIG_FIELD_REFERENCE.md)                                                                                         |
+| Extend   | [Skills](./docs/skills/SKILLS_GUIDE.md) · [Plugins](./docs/guides/agent-plugins.md) · [MCP](./docs/guides/mcp-integration.md) · [Editors (ACP)](./docs/guides/zed-acp.md)                                                                                                                 |
+| Operate  | [Safety](./docs/security/SECURITY_MODEL.md) · [Evals](./docs/guides/eval.md) · [Protocols](./docs/protocols/OPEN_RESPONSES.md) · [Loop engineering](./docs/project/PLAN-loop-engineering.md) · [Architecture](./docs/ARCHITECTURE.md)                                                     |
 
 Can't find a topic? [Documentation Index](./docs/INDEX.md).
+
+Full docs catalog: [docs overview](./docs/README.md).
 
 The [WebMCP hosted app](https://vtcode.vinhnx.chatgpt.site/)
 ([mirror](https://vinhnx.github.io/VTCode/)) pairs with the TUI bridge;
@@ -393,7 +382,17 @@ reports, and feedback are all welcome.
 [Star the repo](https://github.com/vinhnx/vtcode/stargazers) ·
 [Contribute](./docs/CONTRIBUTING.md)
 
-## Support
+## Community
+
+<details>
+<summary><strong>Behind the build</strong></summary>
+
+- [Building VT Code, a year in](https://huggingface.co/blog/vinhnx90/building-vtcode-a-year-in)
+  covering harness design, evals, security, and lessons learned.
+- [Podcast](https://www.youtube.com/watch?v=XLoswcd5rH0) ·
+  [Video](https://www.youtube.com/watch?v=PvL_kPjgU6o)
+
+</details>
 
 ### Contact
 
