@@ -249,6 +249,18 @@ impl Session {
     }
 
     fn handle_bottom_panel_scroll(&mut self, down: bool) -> bool {
+        if self.local_agents_visible() {
+            let changed = if down {
+                self.local_agents_state.move_selection_down()
+            } else {
+                self.local_agents_state.move_selection_up()
+            };
+            if changed {
+                self.mark_dirty();
+            }
+            return true;
+        }
+
         if self.core.bottom_panel_area().is_none() {
             return false;
         }
@@ -289,18 +301,6 @@ impl Session {
             return true;
         }
 
-        if self.local_agents_visible() {
-            let changed = if down {
-                self.local_agents_state.move_selection_down()
-            } else {
-                self.local_agents_state.move_selection_up()
-            };
-            if changed {
-                self.mark_dirty();
-            }
-            return true;
-        }
-
         if slash::slash_navigation_available(self) {
             if down {
                 slash::move_slash_selection_down(self);
@@ -316,6 +316,25 @@ impl Session {
     fn handle_bottom_panel_click(&mut self, mouse_event: MouseEvent) -> bool {
         let column = mouse_event.column;
         let row = mouse_event.row;
+        if self.local_agents_visible() {
+            let pos = Position { x: column, y: row };
+            let Some(window) = self.local_agents_state.window_area() else {
+                return false;
+            };
+            if !window.contains(pos) {
+                return false;
+            }
+            if let Some(list_area) = self.local_agents_state.list_area()
+                && list_area.contains(pos)
+            {
+                let local_index = usize::from(row.saturating_sub(list_area.y));
+                let actual_index = self.local_agents_state.scroll_offset().saturating_add(local_index);
+                if self.local_agents_state.select_index(actual_index) {
+                    self.mark_dirty();
+                }
+            }
+            return true;
+        }
         if !self.bottom_panel_contains(column, row) {
             return false;
         }
@@ -411,19 +430,6 @@ impl Session {
                     self.finish_history_picker_interaction(was_active);
                     self.mark_dirty();
                 } else if self.history_picker_state.select_index(actual_index) {
-                    self.mark_dirty();
-                }
-            }
-            return true;
-        }
-
-        if self.local_agents_visible() {
-            let Some(layout) = render::local_agents_panel_layout(self) else {
-                return true;
-            };
-            if let Some(local_index) = self.panel_row_index(&layout, column, row) {
-                let actual_index = self.local_agents_state.scroll_offset().saturating_add(local_index);
-                if self.local_agents_state.select_index(actual_index) {
                     self.mark_dirty();
                 }
             }
@@ -853,6 +859,17 @@ impl Session {
     fn handle_input_click(&mut self, mouse_event: MouseEvent) -> bool {
         if !matches!(mouse_event.kind, MouseEventKind::Down(crossterm::event::MouseButton::Left)) {
             return false;
+        }
+
+        if self.core.background_indicator_contains(mouse_event.column, mouse_event.row) {
+            if self.local_agents_visible() {
+                self.close_local_agents_drawer(true);
+            } else {
+                self.ensure_inline_lists_visible_for_trigger();
+                self.open_local_agents_drawer(false);
+            }
+            self.mark_dirty();
+            return true;
         }
 
         if !self.input_area_contains(mouse_event.column, mouse_event.row) {

@@ -11,7 +11,7 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::super::types::{
@@ -504,19 +504,56 @@ impl Session {
         }
     }
 
+    /// Retained finished agents/processes (completed, failed, stopped, exited).
+    pub(crate) fn set_background_finished_count(&mut self, count: usize) {
+        if self.background_finished_count != count {
+            self.background_finished_count = count;
+            self.mark_dirty();
+        }
+    }
+
     pub(crate) fn has_background_activity(&self) -> bool {
         self.background_activity_count > 0
     }
 
+    pub(crate) fn has_background_history(&self) -> bool {
+        self.background_finished_count > 0
+    }
+
+    pub(crate) fn set_background_indicator_hits(&mut self, hits: Vec<Rect>) {
+        if self.background_indicator_hits != hits {
+            self.background_indicator_hits = hits;
+            self.mark_dirty();
+        }
+    }
+
+    pub(crate) fn background_indicator_hits(&self) -> &[Rect] {
+        &self.background_indicator_hits
+    }
+
+    pub(crate) fn background_indicator_contains(&self, column: u16, row: u16) -> bool {
+        let pos = Position { x: column, y: row };
+        self.background_indicator_hits.iter().any(|area| area.contains(pos))
+    }
+
     /// Input-status indicator while background tasks run. The wording contains
     /// a shimmer needle (`running `) so [`status_requires_shimmer`] animates it
-    /// through the shared loading path.
+    /// through the shared loading path. When nothing is live but finished
+    /// history remains, show a finished summary instead so the indicator stays
+    /// openable.
     pub(crate) fn background_activity_status_text(&self) -> Option<String> {
-        self.has_background_activity().then(|| {
-            format!(
+        if self.has_background_activity() {
+            return Some(format!(
                 "Running {} background task{}...",
                 self.background_activity_count,
                 if self.background_activity_count == 1 { "" } else { "s" }
+            ));
+        }
+        self.has_background_history().then(|| {
+            format!(
+                "{} agent{} finished",
+                self.background_finished_count,
+                if self.background_finished_count == 1 { "" } else { "s" }
             )
         })
     }

@@ -813,6 +813,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: System Architecture Diagram, Data Flow: Style Parsing and Application, Module Dependencies, Effect Support Matrix, InlineTextStyle Evolution
   - **User Questions**: "What can you tell me about Architecture: Anstyle Integration in Vtcode?", "How does System Architecture Diagram work?", "How does Data Flow: Style Parsing and Application work?"
 
+- **File**: `docs/compose/spec/background-agents-window.md`
+  - **Content**: Background Agents Expanded Window
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Background Agents Expanded Window?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/analysis/BLOATY_ANALYSIS.md`
   - **Content**: Bloaty Analysis Report for vtcode
   - **Topics**: Overview, Binary Size Summary, Release-fast Binary Analysis (32 MiB), Debug Binary Analysis (84 MiB), Recommendations

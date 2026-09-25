@@ -326,6 +326,11 @@ pub struct Session {
     /// global loading shimmer so background work is visible without opening
     /// the drawer; it never feeds the turn-busy guards.
     pub(crate) background_activity_count: usize,
+    /// Retained finished background rows (completed/failed/stopped/exited).
+    pub(crate) background_finished_count: usize,
+    /// Absolute hit rects for clickable background-indicator spans on the
+    /// input status line (activity text and the `{key} background` hint only).
+    pub(crate) background_indicator_hits: Vec<Rect>,
 
     // --- Keybinding store ---
     bindings: BindingStore,
