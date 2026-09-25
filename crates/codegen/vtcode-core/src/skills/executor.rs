@@ -2341,3 +2341,120 @@ async fn skill_executor_forces_final_synthesis_after_textual_unknown_tool() {
 
     assert_eq!(result, "finalized after textual unknown tool");
 }
+
+#[allow(dead_code, reason = "Intentional compatibility, platform, or test-only suppression.")]
+struct TextualOutOfScopeToolThenFinalizeProvider {
+    calls: Mutex<usize>,
+}
+
+#[async_trait]
+impl LLMProvider for TextualOutOfScopeToolThenFinalizeProvider {
+    fn name(&self) -> &str {
+        "textual-out-of-scope-tool-then-finalize"
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        vec!["gpt-5.1-codex".to_string()]
+    }
+
+    fn validate_request(&self, _request: &LLMRequest) -> Result<(), LLMError> {
+        Ok(())
+    }
+
+    async fn generate(&self, request: LLMRequest) -> Result<LLMResponse, LLMError> {
+        let mut calls = self.calls.lock().expect("provider calls mutex");
+        *calls += 1;
+
+        match *calls {
+            1 => Ok(LLMResponse {
+                content: Some(
+                    "Trying to run a command.<tool_call>bash<arg_key>command</arg_key><arg_value>rm -rf /</arg_value><arg_key>action</arg_key><arg_value>run</arg_value></tool_call>"
+                        .to_string(),
+                ),
+                model: request.model,
+                tool_calls: None,
+                finish_reason: FinishReason::Stop,
+                ..Default::default()
+            }),
+            2 => {
+                assert!(request.tools.is_none());
+                let prompt = request
+                    .messages
+                    .last()
+                    .map(|message| message.content.as_text().to_string())
+                    .unwrap_or_default();
+                assert!(
+                    prompt.contains("exec_command") || prompt.contains("bash"),
+                    "forced synthesis must name the denied tool, got: {prompt}"
+                );
+                assert!(prompt.contains(SKILL_TOOL_FREE_SYNTHESIS_PROMPT));
+
+                Ok(LLMResponse {
+                    content: Some("finalized after out-of-scope textual tool".to_string()),
+                    model: request.model,
+                    finish_reason: FinishReason::Stop,
+                    ..Default::default()
+                })
+            }
+            _ => panic!("unexpected provider call count: {}", *calls),
+        }
+    }
+}
+
+/// Textual `tool_call` markup must not bypass skill tool scope: a call for a tool
+/// absent from the skill's tool definitions is denied before registry dispatch
+/// (even when the registry has the tool registered and allowed) and forces
+/// tool-free synthesis.
+#[tokio::test]
+async fn skill_executor_denies_textual_tool_markup_outside_skill_scope() {
+    let manifest = SkillManifest {
+        name: "test-skill".to_string(),
+        description: "Test skill".to_string(),
+        vtcode_native: Some(true),
+        ..Default::default()
+    };
+    let skill =
+        Skill::new(manifest, PathBuf::from("/tmp"), "# Test Instructions".to_string()).expect("failed to create skill");
+    let workspace = tempdir().expect("temp workspace");
+    let mut registry = ToolRegistry::new(workspace.path().to_path_buf()).await;
+    // Registry has exec_command available; skill scope must still deny it.
+    let tool_name = tool_constants::EXEC_COMMAND;
+    let tool_calls = Arc::new(Mutex::new(0usize));
+    registry
+        .register_tool(
+            ToolRegistration::from_tool_instance(
+                tool_name,
+                CapabilityLevel::CodeSearch,
+                CountingSkillTool { calls: Arc::clone(&tool_calls) },
+            )
+            .with_network_access(ToolNetworkAccess::Local),
+        )
+        .await
+        .expect("register tool");
+    registry.allow_all_tools().await.expect("allow tools");
+    let provider = TextualOutOfScopeToolThenFinalizeProvider { calls: Mutex::new(0) };
+
+    let result = execute_skill_with_sub_llm(
+        &skill,
+        "review".to_string(),
+        &provider,
+        &mut registry,
+        // Skill only sees read_file; textual bash/exec_command must be denied.
+        vec![ToolDefinition::function(
+            "read_file".to_string(),
+            "Read".to_string(),
+            json!({"type": "object"}),
+        )],
+        "gpt-5.1-codex".to_string(),
+    )
+    .await
+    .expect("out-of-scope textual tool should force final synthesis");
+
+    assert_eq!(result, "finalized after out-of-scope textual tool");
+    assert_eq!(
+        *tool_calls.lock().expect("tool calls mutex"),
+        0,
+        "out-of-scope textual tool must never reach the registry"
+    );
+    assert_eq!(*provider.calls.lock().expect("provider calls mutex"), 2);
+}

@@ -1023,6 +1023,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Session Close Harden (Unresponsive UI)?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/session-close-and-skill-markup-harden.md`
+  - **Content**: Session Close and Skill Markup Harden
+  - **Topics**: Report, [S1] Problem, [S2] Design, Tasks
+  - **User Questions**: "What can you tell me about Session Close and Skill Markup Harden?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/harness/SESSION_LOG_REVIEW.md`
   - **Content**: Session Log Review
   - **Topics**: 2026-09-19 | Post-merge review: inspection verify allowlist tightening, 2026-09-19 | Planning recovery rejects inspection-command verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse (turns 912–913)

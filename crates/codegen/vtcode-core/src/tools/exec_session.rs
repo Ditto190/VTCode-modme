@@ -2745,6 +2745,51 @@ mod tests {
         Ok(())
     }
 
+    /// Regression: force_terminate on a live PTY child must return within the
+    /// bounded reap budget and observe an exit status via try_wait (the child
+    /// is reaped, not abandoned).
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn force_terminate_reaps_live_pty_child() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+        let workspace_root = canonicalize_workspace(temp_dir.path());
+        let pty_sessions = PtySessionManager::new(workspace_root.clone(), PtyConfig::default());
+        let manager = ExecSessionManager::new(workspace_root.clone(), pty_sessions);
+        let size = PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+
+        manager
+            .create_pty_session(
+                "pty-live-reap".to_string().into(),
+                vec!["/bin/sh".to_string(), "-c".to_string(), "sleep 30".to_string()],
+                workspace_root,
+                size,
+                HashMap::new(),
+                None,
+            )
+            .await?;
+
+        timeout(Duration::from_secs(8), manager.force_terminate_session("pty-live-reap"))
+            .await
+            .expect("force_terminate_session must return within the bounded reap budget")?;
+
+        // try_wait after kill must observe the child exited (i.e. it was reaped),
+        // not merely that the terminate call returned.
+        let exit = timeout(Duration::from_secs(2), manager.is_session_completed("pty-live-reap"))
+            .await
+            .expect("completion poll must not hang")?;
+        assert!(exit.is_some(), "force_terminate must reap the child to an exit status, got {exit:?}");
+
+        timeout(Duration::from_secs(8), manager.close_session("pty-live-reap"))
+            .await
+            .expect("close_session must return after force-terminate")?;
+        Ok(())
+    }
+
     #[tokio::test]
     #[cfg(all(unix, feature = "tui"))]
     async fn foreground_watcher_promotes_requested_pty_without_wait_polling() -> anyhow::Result<()> {
