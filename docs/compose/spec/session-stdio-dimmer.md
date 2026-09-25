@@ -3,7 +3,7 @@ feature: session-stdio-dimmer
 status: delivered
 updated: 2026-09-25
 branch: feat/session-stdio-dimmer
-commits: 21c2ab545..e99b2b136
+commits: 21c2ab545..15474018d
 ---
 
 # Session Stdin/Stdout Dimmer and Expand
