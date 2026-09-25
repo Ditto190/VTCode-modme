@@ -267,8 +267,29 @@ impl PlanningWorkflowSessionState {
         self.previous_primary_agent = agent.filter(|name| !name.trim().is_empty());
     }
 
+    pub(crate) fn previous_primary_agent(&self) -> Option<&str> {
+        self.previous_primary_agent.as_deref()
+    }
+
     pub(crate) fn set_fallback_primary_agent(&mut self, agent: Option<String>) {
         self.fallback_primary_agent = agent.filter(|name| !name.trim().is_empty());
+    }
+
+    pub(crate) fn fallback_primary_agent(&self) -> Option<&str> {
+        self.fallback_primary_agent.as_deref()
+    }
+
+    /// Execution agent to restore when planning is cancelled without an
+    /// approved-plan handoff. Prefers the agent that was active before
+    /// planning began, then the configured default. The plan agent itself is
+    /// never a restore target: `/plan off` must land on an execution agent,
+    /// not hand back the read-only planner (reachable when planning was
+    /// toggled while the plan agent was already active).
+    pub(crate) fn restore_agent_after_planning(&self) -> Option<&str> {
+        let not_plan = |name: &str| !name.eq_ignore_ascii_case(PLAN_PRIMARY_AGENT_NAME);
+        self.previous_primary_agent()
+            .filter(|name| not_plan(name))
+            .or_else(|| self.fallback_primary_agent().filter(|name| not_plan(name)))
     }
 
     pub(crate) fn mark_plan_approval_pending(&mut self, thread_id: String, turn_id: String) {
@@ -298,6 +319,34 @@ pub(crate) fn render_planning_workflow_next_step_hint(renderer: &mut AnsiRendere
     renderer.line(MessageStyle::Info, PLANNING_WORKFLOW_KEEP_PLANNING_HINT)?;
     renderer.line(MessageStyle::Info, PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT)?;
     Ok(())
+}
+
+/// Canonical plan-agent display identity used when planning entry cannot
+/// mutate `ActivePrimaryAgentState` yet (mid-turn `start_planning`). Matches
+/// the built-in plan primary agent name and color so the header badge agrees
+/// with the post-turn modes handoff.
+pub(crate) const PLAN_PRIMARY_AGENT_NAME: &str = "plan";
+
+/// Refresh the session header badge to the plan agent so the user sees Plan
+/// mode as soon as planning is confirmed, not only after the turn ends.
+pub(crate) fn apply_plan_agent_header(handle: &InlineHandle) {
+    let color = vtcode_config::constants::ui::AGENT_COLOR_PLAN.to_string();
+    handle.set_primary_agent(Some(PLAN_PRIMARY_AGENT_NAME.to_string()), Some(color));
+}
+
+/// Refresh the session header badge to an arbitrary primary agent. Used for
+/// execution restore after planning and for selected plan agents that carry a
+/// custom display name.
+pub(crate) fn apply_agent_header(handle: &InlineHandle, name: &str, color: Option<String>) {
+    let color = color.filter(|c| !c.trim().is_empty());
+    handle.set_primary_agent(Some(name.to_string()), color);
+}
+
+/// Header display name to apply when planning ends. Prefer the restore target
+/// when present; otherwise fall back to the active agent so a Plan badge cannot
+/// stick after a no-op restore.
+pub(crate) fn plan_exit_header_name<'a>(restore: Option<&'a str>, active_display: &'a str) -> &'a str {
+    restore.map(str::trim).filter(|name| !name.is_empty()).unwrap_or(active_display)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,6 +454,56 @@ mod tests {
         state.enter(PlanningEntrySource::UserRequest);
         assert_eq!(state.interview_cycles_completed(), 0);
         assert!(!state.last_interview_cancelled());
+    }
+
+    #[test]
+    fn restore_agent_after_planning_prefers_previous_then_fallback() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::AgentSuggestion);
+        state.set_previous_primary_agent(Some("build".to_string()));
+        state.set_fallback_primary_agent(Some("auto".to_string()));
+        assert_eq!(state.restore_agent_after_planning(), Some("build"));
+
+        state.set_previous_primary_agent(None);
+        assert_eq!(state.restore_agent_after_planning(), Some("auto"));
+
+        state.set_fallback_primary_agent(None);
+        assert_eq!(state.restore_agent_after_planning(), None);
+    }
+
+    #[test]
+    fn restore_agent_after_planning_never_returns_plan_agent() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::UserRequest);
+        // `/plan on` while the plan agent was already active records "plan" as
+        // previous; restoring must fall through to the execution fallback
+        // instead of re-selecting the read-only planner.
+        state.set_previous_primary_agent(Some("plan".to_string()));
+        state.set_fallback_primary_agent(Some("build".to_string()));
+        assert_eq!(state.restore_agent_after_planning(), Some("build"));
+
+        state.set_fallback_primary_agent(Some("plan".to_string()));
+        assert_eq!(state.restore_agent_after_planning(), None);
+    }
+
+    #[test]
+    fn exit_clears_restore_agent_targets() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::UserRequest);
+        state.set_previous_primary_agent(Some("build".to_string()));
+        state.set_fallback_primary_agent(Some("auto".to_string()));
+
+        state.exit();
+        assert_eq!(state.restore_agent_after_planning(), None);
+    }
+
+    #[test]
+    fn plan_exit_header_name_falls_back_to_active_display() {
+        use super::plan_exit_header_name;
+
+        assert_eq!(plan_exit_header_name(Some("build"), "auto"), "build");
+        assert_eq!(plan_exit_header_name(Some("  "), "auto"), "auto");
+        assert_eq!(plan_exit_header_name(None, "build"), "build");
     }
 
     #[test]
