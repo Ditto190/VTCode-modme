@@ -2,6 +2,48 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.169.3 - 2026-09-25
+
+### Highlights
+#### Bug Fixes
+
+- Add blank line between agent message and tool block (0bf474a6) 
+- Render full command in transcript headers without truncation (821a9c35) 
+- Cap live preview at 10 rows to match session body budget (bc1465e0) 
+- Stop double-charging spooled previews and raise turn budgets (fee1c55f) 
+- Execution-mode plan repair with allocation and path-scoped read cap (18e516a6) 
+- Prefer bundled system skill for command skills (0fdd25b7) 
+#### Documentation
+
+- Fix broken loop-engineering link and split dense Use table row (7b3195df) 
+- Update TODO - drop completed TUI item, add plan-mode rejection entry (b63d585e) 
+- Document auth, schema, analyze, check, and man subcommands (39390a61) 
+- Finalize instant-tui-startup regression report (00da2b35) 
+- Record reviewed range for instant-tui-startup (5a7a1fca) 
+- Move Quick start before Why/Architecture and trim docs intro (3cddde52) 
+- Finalize static-first-paint report (56a72870) 
+- Finalize registry-light-critical report (6f9f8259) 
+- Record registry-light-critical commit range (f12c4de0) 
+- Record registry-light-critical reviewed range (b406ab90) 
+### Other Changes
+#### Other
+
+- Fix(instant-tui-startup-regression) keep maintenance and palette probe off first paint (f4863b9d) 
+- Feat(static-first-paint) paint typeable shell before session critical init (696442c9) 
+- Update TODO (656da492) 
+- Feat(registry-light-critical) complete tool registry after first paint (302d97f7) 
+#### Performance
+
+- Keep maintenance and palette probe off the first-paint path (8575924f) 
+- Paint typeable shell before session critical init (fd52538c) 
+- Registry-light critical path after first paint (0913c42b) 
+- Registry-light critical path after first paint (a9eb9792) 
+#### Refactors
+
+- Concise user-facing diagnostics, keep forensics file-only (cf4211c0) 
+#### Tests
+
+- Harden Ran command full-display regressions with exact screenshot bytes (caff413b) 
 
 ### Highlights
 #### Bug Fixes
