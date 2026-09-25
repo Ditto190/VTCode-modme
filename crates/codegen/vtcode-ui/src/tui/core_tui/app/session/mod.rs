@@ -1000,8 +1000,10 @@ impl AppSession {
                     .any(|entry| entry.kind == crate::tui::core_tui::types::LocalAgentKind::Delegated);
                 let update = self.local_agents_state.set_entries(entries.clone());
                 let background_count = self.local_agents_state.loading_count();
+                let finished_count = self.local_agents_state.finished_count();
                 self.core.set_local_agents(entries);
                 self.core.set_background_activity_count(background_count);
+                self.core.set_background_finished_count(finished_count);
                 if update.has_new_delegated_entries && self.should_auto_open_local_agents() {
                     self.ensure_inline_lists_visible_for_trigger();
                     self.open_local_agents_drawer(true);

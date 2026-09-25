@@ -203,7 +203,7 @@ fn apply_persistent_memory_header_guide_sets_badge_and_highlight() {
 }
 
 #[test]
-fn background_local_agent_visibility_hides_stopped_entries() {
+fn background_local_agent_visibility_keeps_stopped_entries() {
     let entry = vtcode_core::subagents::BackgroundSubprocessEntry {
         id: "background-default".to_string(),
         session_id: "session-456".to_string(),
@@ -226,7 +226,39 @@ fn background_local_agent_visibility_hides_stopped_entries() {
         transcript_path: None,
     };
 
-    assert!(visible_background_local_agents(vec![entry]).is_empty());
+    let visible = visible_background_local_agents(vec![entry]);
+    assert_eq!(visible.len(), 1, "finished background rows stay visible for history");
+}
+
+#[test]
+fn delegated_local_agent_visibility_keeps_completed_and_hides_closed() {
+    let base = SubagentStatusEntry {
+        id: "thread-1".to_string(),
+        session_id: "session-123".to_string(),
+        parent_thread_id: "main".to_string(),
+        agent_name: "rust-engineer".to_string(),
+        display_label: "rust-engineer".to_string(),
+        description: "Review Rust changes".to_string(),
+        source: "project".to_string(),
+        color: None,
+        status: vtcode_core::subagents::SubagentStatus::Completed,
+        background: false,
+        depth: 1,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        completed_at: Some(chrono::Utc::now()),
+        summary: Some("done".to_string()),
+        error: None,
+        transcript_path: None,
+        nickname: None,
+    };
+    let mut closed = base.clone();
+    closed.id = "thread-2".to_string();
+    closed.status = vtcode_core::subagents::SubagentStatus::Closed;
+
+    let visible = visible_delegated_local_agents(vec![base, closed]);
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].status, vtcode_core::subagents::SubagentStatus::Completed);
 }
 
 #[test]

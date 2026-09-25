@@ -18,10 +18,7 @@ impl Session {
         // input + double cursor, so hand the full input region to the panel and
         // suppress the base input (and its status line) while it is open.
         let panel_captures_input = self.inline_lists_visible()
-            && matches!(
-                self.visible_bottom_docked_surface(),
-                Some(TransientSurface::LocalAgents) | Some(TransientSurface::SlashPalette)
-            );
+            && matches!(self.visible_bottom_docked_surface(), Some(TransientSurface::SlashPalette));
         let panel = resolve_bottom_panel_spec(
             self,
             viewport,
@@ -42,15 +39,14 @@ impl Session {
             .then(|| core_render::floating_modal_area(layout.viewport));
         let transcript_area = modal_area
             .map_or(layout.main_area, |modal_area| core_render::clip_transcript_area(layout.main_area, modal_area));
-        let (input_area, bottom_panel_area) =
-            if matches!(panel.kind, BottomPanelKind::LocalAgents | BottomPanelKind::SlashPalette) {
-                (
-                    Rect::new(layout.input_area.x, layout.input_area.y, layout.input_area.width, 0),
-                    Some(layout.input_area),
-                )
-            } else {
-                split_input_and_bottom_panel_area(layout.input_area, panel.height)
-            };
+        let (input_area, bottom_panel_area) = if matches!(panel.kind, BottomPanelKind::SlashPalette) {
+            (
+                Rect::new(layout.input_area.x, layout.input_area.y, layout.input_area.width, 0),
+                Some(layout.input_area),
+            )
+        } else {
+            split_input_and_bottom_panel_area(layout.input_area, panel.height)
+        };
         self.core.set_bottom_panel_area(bottom_panel_area);
         self.core.render_base_frame(frame, &layout, transcript_area);
         {
@@ -75,9 +71,6 @@ impl Session {
                 BottomPanelKind::TaskPanel => {
                     render_task_panel(self, frame, panel_area);
                 }
-                BottomPanelKind::LocalAgents => {
-                    render::render_local_agents(self, frame, panel_area);
-                }
                 BottomPanelKind::None => {
                     frame.render_widget(Clear, panel_area);
                 }
@@ -88,6 +81,9 @@ impl Session {
             core_render::render_modal(self, frame, modal_area);
         }
 
+        if self.local_agents_visible() {
+            render::render_local_agents(self, frame, layout.viewport);
+        }
         if self.diff_preview_state().is_some() {
             diff_preview::render_diff_preview(self, frame, layout.viewport);
         }

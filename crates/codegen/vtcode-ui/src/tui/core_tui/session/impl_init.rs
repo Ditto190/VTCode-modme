@@ -173,6 +173,8 @@ impl Session {
 
             // --- Background Activity ---
             background_activity_count: 0,
+            background_finished_count: 0,
+            background_indicator_hits: Vec::new(),
 
             // --- Keybinding store ---
             bindings: bindings.unwrap_or_default(),

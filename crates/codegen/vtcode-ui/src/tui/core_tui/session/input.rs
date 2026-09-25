@@ -227,6 +227,7 @@ impl Session {
     pub(crate) fn render_input(&mut self, frame: &mut Frame<'_>, area: Rect) {
         if area.height == 0 {
             self.set_input_area(None);
+            self.set_background_indicator_hits(Vec::new());
             return;
         }
 
@@ -285,11 +286,22 @@ impl Session {
         }
 
         if let Some(status_area) = status_area {
-            let status_line = self.render_input_status_line(status_area.width).unwrap_or_default();
+            let (status_line, background_hits) = self
+                .render_input_status_line_with_hit(status_area.width)
+                .unwrap_or((Line::default(), Vec::new()));
             let status = Paragraph::new(status_line)
                 .style(self.styles.default_style())
                 .wrap(Wrap { trim: false });
             frame.render_widget(status, status_area);
+            let hits = background_hits
+                .into_iter()
+                .map(|(start, end)| {
+                    Rect::new(status_area.x.saturating_add(start), status_area.y, end.saturating_sub(start), 1)
+                })
+                .collect();
+            self.set_background_indicator_hits(hits);
+        } else {
+            self.set_background_indicator_hits(Vec::new());
         }
     }
 
@@ -775,6 +787,13 @@ impl Session {
     }
 
     pub(crate) fn render_input_status_line(&self, width: u16) -> Option<Line<'static>> {
+        self.render_input_status_line_with_hit(width).map(|(line, _hits)| line)
+    }
+
+    /// Status line plus column ranges (relative to the status area) of the
+    /// clickable background indicator spans: the activity text and the
+    /// `{key} background` hint only.
+    pub(crate) fn render_input_status_line_with_hit(&self, width: u16) -> Option<(Line<'static>, Vec<(u16, u16)>)> {
         if width == 0 {
             return None;
         }
@@ -825,6 +844,10 @@ impl Session {
             return None;
         }
 
+        let background_status = (!self.is_running_activity())
+            .then(|| self.background_activity_status_text())
+            .flatten();
+
         let dim_style = {
             let mut style = self.styles.default_style().add_modifier(Modifier::DIM);
             if let Some(secondary) = self.theme.secondary.or(self.theme.foreground) {
@@ -846,10 +869,12 @@ impl Session {
             }
             style
         };
-        let mut spans = Vec::new();
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut background_hits: Vec<(u16, u16)> = Vec::new();
 
         // Add left content (git status or shimmered activity)
         if let Some(left_value) = left.as_ref() {
+            let before: u16 = spans.iter().map(|s| measure_text_width(&s.content)).sum();
             if status_requires_shimmer(left_value) && self.appearance.should_animate_progress_status() {
                 spans.extend(shimmer_spans_with_style_at_phase(
                     left_value,
@@ -859,6 +884,15 @@ impl Session {
             } else {
                 spans.extend(self.create_git_status_spans(left_value, dim_style));
             }
+            if let Some(status) = background_status.as_deref()
+                && let Some(rel_start) = left_value.find(status).map(|idx| measure_text_width(&left_value[..idx]))
+            {
+                let start = before.saturating_add(rel_start);
+                let end = start.saturating_add(measure_text_width(status));
+                if start < end {
+                    background_hits.push((start, end));
+                }
+            }
         } else if self.thinking_spinner.is_active {
             spans.push(Span::styled(self.thinking_spinner.current_frame(), dim_style));
             spans.push(Span::raw(" "));
@@ -866,7 +900,8 @@ impl Session {
         }
 
         if let Some(hint) = background_hint.as_deref() {
-            Self::append_background_hint_spans(
+            let hint_start = spans.iter().map(|s| measure_text_width(&s.content)).sum::<u16>();
+            let key_hit_rel = Self::append_background_hint_spans(
                 &mut spans,
                 hint,
                 self.background_shortcut_label(),
@@ -874,6 +909,13 @@ impl Session {
                 key_style,
                 label_style,
             );
+            if let Some((rel_start, rel_end)) = key_hit_rel {
+                let start = hint_start.saturating_add(rel_start);
+                let end = hint_start.saturating_add(rel_end);
+                if start < end {
+                    background_hits.push((start, end));
+                }
+            }
         }
 
         // Build right side spans (scroll indicator + optional right content)
@@ -908,7 +950,14 @@ impl Session {
         let mut line = Line::from(spans);
         // Apply ellipsis truncation to prevent status line from overflowing
         line = truncate_line_with_ellipsis_if_overflow(line, usize::from(width));
-        Some(line)
+        let hits = background_hits
+            .into_iter()
+            .filter_map(|(start, end)| {
+                let clamped_end = end.min(width);
+                (start < clamped_end).then_some((start, clamped_end))
+            })
+            .collect::<Vec<_>>();
+        Some((line, hits))
     }
 
     fn input_uses_shell_prefix(&self) -> bool {
@@ -992,6 +1041,9 @@ impl Session {
         Some(format!("↓ or Alt+S local agents · {} background", self.background_shortcut_label()))
     }
 
+    /// Appends the local-agents hint spans. Returns the column range of the
+    /// `{key} background` span only (relative to the start of the appended
+    /// content) so click hit-testing ignores `Alt+S local agents` and separators.
     fn append_background_hint_spans(
         spans: &mut Vec<Span<'static>>,
         hint: &str,
@@ -999,17 +1051,35 @@ impl Session {
         dim_style: Style,
         key_style: Style,
         label_style: Style,
-    ) {
+    ) -> Option<(u16, u16)> {
+        let mut appended_width = 0_u16;
+        let mut key_hit: Option<(u16, u16)> = None;
+        let mut record = |width: u16, mark: bool| {
+            let start = appended_width;
+            let end = appended_width.saturating_add(width);
+            if mark {
+                key_hit = Some(match key_hit {
+                    Some((s, e)) => (s.min(start), e.max(end)),
+                    None => (start, end),
+                });
+            }
+            appended_width = end;
+        };
+
         // PTY-only hint has the exact shape "{key} background".
         if let Some(prefix) = hint.strip_suffix(" background")
             && prefix == key_label
         {
             if !spans.is_empty() {
                 spans.push(Span::styled(" · ", dim_style));
+                record(3, false);
             }
+            let key_width = measure_text_width(key_label);
             spans.push(Span::styled(key_label.to_owned(), key_style));
+            record(key_width, true);
             spans.push(Span::styled(" background", label_style));
-            return;
+            record(measure_text_width(" background"), true);
+            return key_hit;
         }
         // Combined drawer hint has the exact shape
         // "↓ or Alt+S local agents · {key} background".
@@ -1019,19 +1089,33 @@ impl Session {
         {
             if !spans.is_empty() {
                 spans.push(Span::styled(" · ", dim_style));
+                record(3, false);
             }
             spans.push(Span::styled("↓ or ", label_style));
+            record(5, false);
             spans.push(Span::styled("Alt+S", key_style));
+            record(5, false);
             spans.push(Span::styled(" local agents", label_style));
+            record(13, false);
             spans.push(Span::styled(" · ", dim_style));
+            record(3, false);
+            let key_width = measure_text_width(key_label);
             spans.push(Span::styled(key_label.to_owned(), key_style));
+            record(key_width, true);
             spans.push(Span::styled(" background", label_style));
-            return;
+            record(measure_text_width(" background"), true);
+            return key_hit;
         }
         if !spans.is_empty() {
             spans.push(Span::styled(" · ", dim_style));
+            record(3, false);
         }
+        // Unrecognized hint shape: render it dim but do not make it a hit
+        // target. Only the known `{key} background` shapes are clickable.
+        let width = measure_text_width(hint);
         spans.push(Span::styled(hint.to_owned(), dim_style));
+        record(width, false);
+        key_hit
     }
 
     /// Builds the footer scroll indicator.
