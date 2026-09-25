@@ -48,6 +48,7 @@ description: Explain what this skill does and when to use it.
 license: Apache-2.0
 compatibility: Requires git and network access
 allowed-tools: Read Write Bash
+argument-hint: "[expected argument]"
 metadata:
   owner: platform-team
 ---
@@ -64,6 +65,7 @@ Optional fields:
 - `compatibility`
 - `metadata`
 - `allowed-tools`
+- `argument-hint`
 - `disable-model-invocation`
 
 Legacy VT Code frontmatter such as `version`, `author`, `when-to-use`, `when-not-to-use`, `model`, `mode`, `context`, `agent`, `network`, `permissions`, container flags, and similar extensions is rejected.

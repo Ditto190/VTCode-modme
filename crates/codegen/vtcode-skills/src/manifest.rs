@@ -5,13 +5,10 @@
 use crate::file_references::FileReferenceValidator;
 use crate::types::{SkillManifest, SkillManifestMetadata};
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-static ALLOWED_TOOLS_ARRAY_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Supported YAML frontmatter keys for SKILL.md validation.
 pub(crate) const SUPPORTED_FRONTMATTER_KEYS: &[&str] = &[
@@ -19,11 +16,45 @@ pub(crate) const SUPPORTED_FRONTMATTER_KEYS: &[&str] = &[
     "description",
     "license",
     "allowed-tools",
+    "argument-hint",
     "disable-model-invocation",
     "compatibility",
     "hooks",
     "metadata",
 ];
+
+/// Coerce `argument-hint` to a string.
+///
+/// Claude Code coerces non-string values (e.g. YAML sequences such as
+/// `[topic: foo | bar]`) to a string instead of failing; match that so
+/// third-party skills do not fail to parse here.
+fn deserialize_argument_hint_opt<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<JsonValue>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| match value {
+        JsonValue::Null => None,
+        JsonValue::String(s) => Some(s),
+        JsonValue::Bool(b) => Some(b.to_string()),
+        JsonValue::Number(n) => Some(n.to_string()),
+        JsonValue::Array(items) => {
+            let parts: Vec<String> = items
+                .into_iter()
+                .filter_map(|item| match item {
+                    JsonValue::Null => None,
+                    JsonValue::String(s) => Some(s),
+                    JsonValue::Bool(b) => Some(b.to_string()),
+                    JsonValue::Number(n) => Some(n.to_string()),
+                    other => Some(other.to_string()),
+                })
+                .collect();
+            if parts.is_empty() { None } else { Some(parts.join(" ")) }
+        }
+        // Objects have no scalar form; keep compact JSON rather than failing.
+        other => Some(other.to_string()),
+    }))
+}
 
 /// YAML frontmatter structure for SKILL.md
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +66,14 @@ pub struct SkillYaml {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "allowed-tools")]
     allowed_tools: Option<AllowedToolsField>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "deserialize_argument_hint_opt"
+    )]
+    #[serde(rename = "argument-hint")]
+    #[serde(alias = "argument_hint")]
+    argument_hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "disable-model-invocation")]
     #[serde(alias = "disable_model_invocation")]
@@ -182,8 +221,15 @@ pub fn parse_skill_content(content: &str) -> anyhow::Result<(SkillManifest, Stri
     let description = yaml.description.trim().to_string();
     anyhow::ensure!(!description.is_empty(), "description is required and must not be empty");
 
-    // Convert allowed-tools into space-delimited string for compatibility
+    // Convert allowed-tools into space-delimited string for compatibility.
+    // Both the space-delimited string and the YAML list forms are accepted
+    // (Claude Code supports YAML lists); normalization is silent.
     let allowed_tools_string = yaml.allowed_tools.map(normalize_allowed_tools).transpose()?;
+
+    let argument_hint = yaml
+        .argument_hint
+        .map(|hint| hint.trim().to_string())
+        .filter(|hint| !hint.is_empty());
 
     let manifest = SkillManifest {
         name,
@@ -200,7 +246,7 @@ pub fn parse_skill_content(content: &str) -> anyhow::Result<(SkillManifest, Stri
         disable_model_invocation: yaml.disable_model_invocation,
         when_to_use: None,
         when_not_to_use: None,
-        argument_hint: None,
+        argument_hint,
         user_invocable: None,
         context: None,
         agent: None,
@@ -288,10 +334,12 @@ fn fold_bare_description_to_block_scalar(yaml_str: &str) -> Option<String> {
 fn normalize_allowed_tools(field: AllowedToolsField) -> anyhow::Result<String> {
     match field {
         AllowedToolsField::List(tools) => {
-            if !tools.is_empty() && !ALLOWED_TOOLS_ARRAY_WARNED.swap(true, Ordering::Relaxed) {
-                tracing::warn!("allowed-tools uses deprecated array format, please use a string instead");
+            let normalized = tools.join(" ");
+            if normalized.trim().is_empty() {
+                return Err(anyhow::anyhow!("allowed-tools must not be empty if specified"));
             }
-            Ok(tools.join(" "))
+            tracing::debug!("normalized allowed-tools from YAML list to space-delimited string");
+            Ok(normalized)
         }
         AllowedToolsField::String(value) => {
             let trimmed = value.trim();
@@ -300,7 +348,7 @@ fn normalize_allowed_tools(field: AllowedToolsField) -> anyhow::Result<String> {
             }
             let has_commas = trimmed.contains(',');
             if has_commas {
-                tracing::warn!("allowed-tools uses comma-separated format; normalizing to space-delimited");
+                tracing::debug!("normalized allowed-tools from comma-separated to space-delimited");
             }
             let parts = if has_commas {
                 trimmed
@@ -339,6 +387,7 @@ license: Apache-2.0
 # Optional fields (uncomment to use):
 # compatibility: "Requires git and network access"
 # allowed-tools: "Read Write Bash"
+# argument-hint: "[expected argument]"
 # disable-model-invocation: true
 # metadata:
 #   author: your-team
@@ -573,5 +622,44 @@ description: Use this skill when: the user asks about PDFs
         let yaml = "name: test\ndescription: test\nzee: 1\nalpha: 2\nmid: 3\n";
         let unknown = collect_unknown_frontmatter_keys(yaml);
         assert_eq!(unknown, vec!["zee", "alpha", "mid"]);
+    }
+
+    #[test]
+    fn collect_unknown_frontmatter_keys_accepts_argument_hint() {
+        let yaml = "name: test\ndescription: test\nargument-hint: \"<input>\"\n";
+        let unknown = collect_unknown_frontmatter_keys(yaml);
+        assert!(unknown.is_empty(), "argument-hint is supported, got {unknown:?}");
+    }
+
+    #[test]
+    fn parse_skill_content_accepts_codemod_style_frontmatter() {
+        let content = r#"---
+name: codemod
+description: Use Codemod CLI whenever the user wants to migrate something.
+allowed-tools:
+  - Bash(codemod *)
+argument-hint: "<migration-intent>"
+---
+
+# Codemod
+"#;
+        let (manifest, _) = parse_skill_content(content).expect("codemod-style frontmatter should parse");
+        assert_eq!(manifest.allowed_tools.as_deref(), Some("Bash(codemod *)"));
+        assert_eq!(manifest.argument_hint.as_deref(), Some("<migration-intent>"));
+    }
+
+    #[test]
+    fn parse_skill_content_coerces_sequence_argument_hint() {
+        let content =
+            "---\nname: seq-skill\ndescription: Test skill\nargument-hint:\n  - topic\n  - foo\n---\n\n# Body\n";
+        let (manifest, _) = parse_skill_content(content).expect("sequence argument-hint should coerce");
+        assert_eq!(manifest.argument_hint.as_deref(), Some("topic foo"));
+    }
+
+    #[test]
+    fn parse_skill_content_rejects_empty_allowed_tools_list() {
+        let content = "---\nname: empty-tools\ndescription: Test skill\nallowed-tools: []\n---\n\n# Body\n";
+        let err = parse_skill_content(content).expect_err("empty allowed-tools list must fail");
+        assert!(err.to_string().contains("allowed-tools"), "got: {err:#}");
     }
 }

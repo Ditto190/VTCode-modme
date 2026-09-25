@@ -25,9 +25,10 @@ Optional:
 - `compatibility`
 - `metadata`
 - `allowed-tools`
+- `argument-hint`
 - `disable-model-invocation`
 
-Any other frontmatter key is rejected during parsing and validation.
+Any other frontmatter key warns during parsing (forward-compatible, value ignored) and fails `vtcode skills validate`.
 
 ## Validation Rules
 
@@ -49,7 +50,8 @@ Any other frontmatter key is rejected during parsing and validation.
 
 - `license`: maximum 512 characters
 - `compatibility`: 1 to 500 characters if present
-- `allowed-tools`: normalized to a space-delimited string and limited to 16 tools
+- `allowed-tools`: space-delimited string or YAML list, normalized to a space-delimited string and limited to 16 tools
+- `argument-hint`: slash-command style argument hint; non-string YAML values are coerced to a string
 
 ## Discovery Precedence
 
