@@ -103,9 +103,15 @@ pub fn parse_skill_file(skill_path: &Path) -> anyhow::Result<(SkillManifest, Str
 
     let (manifest, instructions) = parse_skill_content(&content)?;
 
-    // Validate directory name matches per Agent Skills spec
-    // For traditional skills (not CLI tools), the name must match the directory
-    manifest.validate_directory_name_match(&skill_md)?;
+    // Directory-name match is a spec SHOULD, not a load gate: warn and load
+    // anyway so skills authored for other clients (whose directory was renamed
+    // on install) still work. `vtcode skills validate` still surfaces the
+    // mismatch via the comprehensive validator. Safe to load: `Skill::new`
+    // does not depend on the directory name, and discovery keys collisions by
+    // manifest name.
+    if let Err(err) = manifest.validate_directory_name_match(&skill_md) {
+        tracing::warn!("{}; loading skill anyway", err);
+    }
 
     // Validate file references in instructions
     // For traditional skills (SKILL.md files), validate references
@@ -661,5 +667,19 @@ argument-hint: "<migration-intent>"
         let content = "---\nname: empty-tools\ndescription: Test skill\nallowed-tools: []\n---\n\n# Body\n";
         let err = parse_skill_content(content).expect_err("empty allowed-tools list must fail");
         assert!(err.to_string().contains("allowed-tools"), "got: {err:#}");
+    }
+
+    #[test]
+    fn parse_skill_file_loads_despite_directory_name_mismatch() {
+        // Agent Skills client guide: directory-name mismatch warns but loads,
+        // so skills renamed on install (cross-client) still work.
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let skill_dir = tmp.path().join("renamed-dir");
+        fs::create_dir(&skill_dir).expect("create skill dir");
+        fs::write(skill_dir.join("SKILL.md"), "---\nname: original-name\ndescription: Test skill\n---\n\n# Body\n")
+            .expect("write SKILL.md");
+
+        let (manifest, _) = parse_skill_file(&skill_dir).expect("mismatched directory must still load");
+        assert_eq!(manifest.name, "original-name");
     }
 }

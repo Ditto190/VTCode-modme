@@ -59,12 +59,15 @@ Required fields:
 - `name`
 - `description`
 
-Optional fields:
+Optional spec fields:
 
 - `license`
 - `compatibility`
 - `metadata`
-- `allowed-tools`
+- `allowed-tools` (experimental per the spec)
+
+Client extensions (parsed, not part of the spec):
+
 - `argument-hint`
 - `disable-model-invocation`
 
