@@ -32,12 +32,15 @@ const EXEC_SESSION_PREVIEW_TAIL_BYTES: usize = 8 * 1024;
 const EXEC_SESSION_COMPLETION_COMMAND_MAX_BYTES: usize = 512;
 const EXEC_SESSION_COMPLETION_DRAIN_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(1);
 const EXEC_SESSION_COMPLETION_DRAIN_POLL: tokio::time::Duration = tokio::time::Duration::from_millis(15);
-/// Upper bound for watcher abort + backend close. PTY close uses bounded
-/// child/reader waits (5s + 2s); this wraps them so the async runloop can
-/// never park on a stuck session close and lock the composer.
-const EXEC_SESSION_CLOSE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(8);
+/// Upper bound for watcher abort + backend close. Must cover the sum of inner
+/// bounds (2s watch abort x2 + 2s child reap + 5s reader join) plus margin so
+/// the outer timeout is not spurious while `spawn_blocking` finishes residual work.
+const EXEC_SESSION_CLOSE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(12);
 /// Budget for aborting a lifecycle watcher before abandoning it.
 const EXEC_SESSION_WATCH_ABORT_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(1);
+/// Budget for acquiring the output-read lock during close. An in-flight peek
+/// that never releases must not park close (and therefore the runloop).
+const EXEC_SESSION_OUTPUT_READ_LOCK_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(1);
 
 /// Maximum number of live background command sessions owned by one runtime.
 pub const MAX_BACKGROUND_PROCESSES: usize = 3;
@@ -1272,7 +1275,13 @@ impl ExecSessionManager {
         record.termination_requested.store(true, Ordering::Release);
         let result = match record.backend {
             ExecSessionBackend::Pipe => self.pipe_sessions.terminate_session(session_id).await,
-            ExecSessionBackend::Pty => self.pty_sessions.manager().terminate_session(session_id),
+            ExecSessionBackend::Pty => {
+                let manager = self.pty_sessions.manager().clone();
+                let id = session_id.to_string();
+                tokio::task::spawn_blocking(move || manager.terminate_session(&id))
+                    .await
+                    .map_err(|join_error| anyhow!("exec session terminate task failed: {join_error}"))?
+            }
         };
         if result.is_err() {
             record.termination_requested.store(false, Ordering::Release);
@@ -1286,7 +1295,16 @@ impl ExecSessionManager {
         record.termination_requested.store(true, Ordering::Release);
         let result = match record.backend {
             ExecSessionBackend::Pipe => self.pipe_sessions.force_terminate_session(session_id).await,
-            ExecSessionBackend::Pty => self.pty_sessions.manager().force_terminate_session(session_id),
+            ExecSessionBackend::Pty => {
+                // PTY terminate performs a bounded child reap that sleeps;
+                // keep it off the async worker so ForceCancel over N sessions
+                // cannot stall the runloop.
+                let manager = self.pty_sessions.manager().clone();
+                let id = session_id.to_string();
+                tokio::task::spawn_blocking(move || manager.force_terminate_session(&id))
+                    .await
+                    .map_err(|join_error| anyhow!("exec session force-terminate task failed: {join_error}"))?
+            }
         };
         if result.is_err() {
             record.termination_requested.store(false, Ordering::Release);
@@ -1358,8 +1376,20 @@ impl ExecSessionManager {
 
         // Do not close the backend while an output peek/drain is still using
         // it. The unified record has already been removed, so this lock only
-        // waits for in-flight readers acquired before close.
-        let _output_read_guard = record.output_read_lock.lock().await;
+        // waits for in-flight readers acquired before close. The acquire is
+        // itself time-bounded: an abandoned peek holding the lock must not
+        // make close (and the runloop) wait forever.
+        let _output_read_guard =
+            match tokio::time::timeout(EXEC_SESSION_OUTPUT_READ_LOCK_TIMEOUT, record.output_read_lock.lock()).await {
+                Ok(guard) => Some(guard),
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        %session_id,
+                        "output read lock not available within timeout; closing session anyway"
+                    );
+                    None
+                }
+            };
         let metadata = match record.backend {
             ExecSessionBackend::Pipe => {
                 let pipe_sessions = self.pipe_sessions.clone();
