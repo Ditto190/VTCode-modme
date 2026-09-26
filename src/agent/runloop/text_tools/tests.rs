@@ -195,6 +195,20 @@ fn test_detect_textual_tool_call_rejects_excessive_bracketed_nesting() {
 }
 
 #[test]
+fn unclosed_fence_tail_still_parses_tool_call() {
+    // Truncated streaming output can leave a fence opener without a closer.
+    // Fail-open: the tail after the opener is treated as unfenced so a real
+    // tool call there still parses instead of being silently dropped.
+    let tag = '\u{24B8}';
+    let text = format!(
+        "Partial output:\n```sh\necho demo\n{tag}exec_command\n{tag}command\necho hi\n{tag}\n{tag}action\nrun\n{tag}\n"
+    );
+    let (name, args) = detect_textual_tool_call(&text).expect("call after unclosed fence opener must parse");
+    assert_eq!(name, tools::EXEC_COMMAND);
+    assert_eq!(args["action"], "run");
+}
+
+#[test]
 fn test_detect_textual_tool_call_rejects_excessive_function_nesting() {
     let mut nested = String::new();
     for _ in 0..260 {

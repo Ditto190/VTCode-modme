@@ -66,9 +66,11 @@ pub(crate) fn unfenced_byte_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
         }
         segment_start = cursor;
     }
-    if open_char.is_none() {
-        ranges.push(segment_start..text.len());
-    }
+    // Fail-open: an unclosed fence opener (truncated streaming output, a
+    // model that forgot the closer) must not swallow the text tail. The tail
+    // after the last opener is treated as unfenced so a real tool call there
+    // still parses, matching the pre-gating whole-text search.
+    ranges.push(segment_start..text.len());
     ranges.retain(|range| range.start < range.end);
     ranges
 }
