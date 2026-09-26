@@ -470,12 +470,12 @@ impl SnapshotManager {
             self.retire_recovery_record(&entry.snapshot).await;
         }
         atomic_json(&self.navigation_path(session)?, &state)?;
-        // Prune unreferenced turn files so checkpoints stay inside the
-        // configured snapshot budget (native writes never hit the
-        // `save_snapshot` cleanup path). Navigation-referenced turns are
-        // protected inside `cleanup_old_snapshots`.
-        if let Err(error) = self.cleanup_old_snapshots().await {
-            tracing::debug!(%error, "checkpoint retention prune failed");
+        // Cheap count-budget prune so checkpoints stay bounded on the per-turn
+        // hot path. Navigation-referenced turns are protected inside the prune.
+        // Age expiry (which reads every checkpoint body) stays on the cold
+        // `cleanup_old_snapshots` path.
+        if let Err(error) = self.prune_snapshot_budget().await {
+            tracing::debug!(%error, "checkpoint budget prune failed");
         }
         active_map()
             .lock()

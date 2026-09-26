@@ -905,16 +905,6 @@ impl ToolOutputSpooler {
         Ok(removed)
     }
 
-    /// Prune leftovers from prior sessions at registry construction.
-    ///
-    /// Periodic cleanup only runs every [`CLEANUP_EVERY_N_SPOOLS`] spool ops
-    /// inside one session, so short sessions never reached the threshold and
-    /// stale files piled up (414 files / 2 MB after one long session). A
-    /// startup prune restores the budget immediately.
-    pub async fn prune_stale_spools_on_startup(&self) -> Result<usize> {
-        self.cleanup_old_files().await
-    }
-
     /// Get the output directory path
     pub fn output_dir(&self) -> &Path {
         &self.output_dir
@@ -1498,7 +1488,7 @@ mod tests {
             ..Default::default()
         };
         let spooler = ToolOutputSpooler::with_config(temp.path(), config);
-        let removed = spooler.prune_stale_spools_on_startup().await.unwrap();
+        let removed = spooler.cleanup_old_files().await.unwrap();
         assert_eq!(removed, 5, "startup prune must drop overflow past max_files");
 
         let remaining = std::fs::read_dir(&output_dir).unwrap().count();

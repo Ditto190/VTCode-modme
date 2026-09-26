@@ -754,14 +754,17 @@ pub(crate) fn quoted_heredoc_skip_len(rest: &str) -> Option<usize> {
 
 /// Skip a quoted heredoc body in a `CharIndices` iterator that peeks at the
 /// second `<` of `<<` (the first was already consumed). Returns true when a
-/// body was skipped.
+/// body was skipped. Leaves the iterator unchanged when the form is not a
+/// quoted heredoc.
 pub(crate) fn skip_quoted_heredoc(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> bool {
-    // Consume the second `<`; `quoted_heredoc_skip_len` starts after `<<`.
-    let _ = chars.next();
-    let rest: String = chars.clone().map(|(_, c)| c).collect();
+    // Probe without mutating so a failed guard does not eat the second `<`.
+    let mut probe = chars.clone();
+    let _ = probe.next(); // second '<'
+    let rest: String = probe.map(|(_, c)| c).collect();
     let Some(skip) = quoted_heredoc_skip_len(&rest) else {
         return false;
     };
+    let _ = chars.next(); // second '<'
     let mut consumed = 0usize;
     while consumed < skip
         && let Some((_, ch)) = chars.next()

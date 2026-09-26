@@ -807,21 +807,50 @@ impl SnapshotManager {
         protected
     }
 
+    /// Cheap retention prune: enforce the snapshot count budget without
+    /// reading checkpoint JSON bodies. Safe to call on the per-turn hot path
+    /// (`native::begin_prompt`); age-based expiry stays in
+    /// [`Self::cleanup_old_snapshots`], which needs each file's `created_at`.
+    pub async fn prune_snapshot_budget(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let protected = self.protected_turns();
+        let entries: Vec<(usize, PathBuf)> = self
+            .read_snapshot_files()?
+            .into_iter()
+            .filter(|(turn, _)| !protected.contains(turn))
+            .collect();
+        if self.max_snapshots != 0 && entries.len() > self.max_snapshots {
+            let excess = entries.len() - self.max_snapshots;
+            for (_, path) in entries.into_iter().take(excess) {
+                if let Err(err) = self.retire_snapshot(&path).await {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "Failed to remove old checkpoint"
+                    );
+                }
+            }
+        }
+        self.cleanup_retired_snapshots().await;
+        Ok(())
+    }
+
+    /// Full retention: age-expire checkpoints past `max_age_days`, then apply
+    /// the count budget. Age scan reads each candidate's `created_at`, so prefer
+    /// [`Self::prune_snapshot_budget`] on hot paths.
     pub async fn cleanup_old_snapshots(&self) -> Result<()> {
         if !self.enabled {
             return Ok(());
         }
 
         let protected = self.protected_turns();
-        let mut entries: Vec<(usize, PathBuf)> = self
-            .read_snapshot_files()?
-            .into_iter()
-            .filter(|(turn, _)| !protected.contains(turn))
-            .collect();
-
         if let Some(cutoff) = self.retention_cutoff_secs()? {
-            let stale_entries = entries.clone();
-            for (_, path) in stale_entries {
+            for (turn, path) in self.read_snapshot_files()? {
+                if protected.contains(&turn) {
+                    continue;
+                }
                 let data = match tokio::fs::read(&path).await {
                     Ok(data) => data,
                     Err(err) => {
@@ -854,30 +883,9 @@ impl SnapshotManager {
                     );
                 }
             }
-            entries = self
-                .read_snapshot_files()?
-                .into_iter()
-                .filter(|(turn, _)| !protected.contains(turn))
-                .collect();
         }
 
-        if self.max_snapshots == 0 || entries.len() <= self.max_snapshots {
-            self.cleanup_retired_snapshots().await;
-            return Ok(());
-        }
-
-        let excess = entries.len() - self.max_snapshots;
-        for (_, path) in entries.into_iter().take(excess) {
-            if let Err(err) = self.retire_snapshot(&path).await {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %err,
-                    "Failed to remove old checkpoint"
-                );
-            }
-        }
-        self.cleanup_retired_snapshots().await;
-        Ok(())
+        self.prune_snapshot_budget().await
     }
 
     async fn retire_snapshot(&self, path: &Path) -> Result<()> {

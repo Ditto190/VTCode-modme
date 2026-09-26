@@ -3,7 +3,7 @@ feature: session-audit-harness-fixes
 status: delivered
 updated: 2026-09-26
 branch: fix/session-audit-harness-fixes
-commits: 606f360ba..c98bbf59a
+commits: 606f360ba..d3690926f
 ---
 
 # Session Audit Harness Fixes
@@ -106,22 +106,25 @@ and the session `events.jsonl`:
 `handle_preflight_failure` currently calls `record_preflight_failure()` for every
 preflight reject. Change it to classify the reject first:
 
-- **LLM mistake** (tool name not a clean identifier, unknown tool, missing /
-  malformed arguments, schema mismatch): emit the per-call error response and
-  continue the batch. Do **not** increment `consecutive_preflight_failures` and
-  do **not** trip the circuit. The model already gets `schema_correction` /
-  `next_action` to retry once.
+- **LLM name/identity mistake** (tool name not a clean identifier, unknown tool,
+  empty name): emit the per-call error response and continue the batch. Do
+  **not** increment `consecutive_preflight_failures` and do **not** trip the
+  circuit. The model already gets `schema_correction` / `next_action` to retry
+  once.
+- **Argument-schema failure** (missing required field, malformed JSON, schema
+  mismatch): still counts toward the consecutive cap. A model stuck on bad
+  arguments should trip the recovery fuse rather than retry forever.
 - **Policy / security / safety block** (command-injection pattern, sandbox
   denial, blocked tool): keep today's behavior — count toward the consecutive
   cap and trip the circuit when the cap is hit, because those rejects mean the
   model is fighting the harness.
 
 Classification uses the same vocabulary as `vtcode_commons::ErrorCategory`:
-`InvalidParameters` / `is_llm_mistake()` must not trip; `PolicyViolation` and
-`ExecutionError` may. Helper: `preflight_failure_is_llm_mistake(error: &str) -> bool`
+`InvalidParameters` name/identity forms must not trip; `PolicyViolation` and
+argument-schema failures may. Helper: `preflight_failure_is_llm_mistake(error: &str) -> bool`
 keying off the existing error strings emitted by `PreparedAssistantToolCall::new`
 and the registry preflight (`tool name is not a clean identifier`, `Unknown tool`,
-`Missing required argument`, `Command security check failed` stays non-mistake).
+`Missing required argument` stays non-mistake).
 
 `drain_preflight_circuit_responses` is unchanged: it only runs after a real
 (non-mistake) circuit trip.

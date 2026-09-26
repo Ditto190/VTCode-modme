@@ -203,7 +203,7 @@ impl ToolRegistry {
         // Prune leftovers from prior sessions immediately. Periodic cleanup
         // only fires every N spools inside one session, so short sessions never
         // reached the threshold and stale spools piled up across runs.
-        if let Err(error) = output_spooler.prune_stale_spools_on_startup().await {
+        if let Err(error) = output_spooler.cleanup_old_files().await {
             tracing::debug!(%error, "startup spool prune failed");
         }
 

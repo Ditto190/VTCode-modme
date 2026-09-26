@@ -199,9 +199,12 @@ fn contains_command_substitution(script: &str) -> bool {
             // keeps `cat <<'EOF'` with backticks/`$()` in the payload from
             // looking like command substitution (session-vtcode-20260925).
             if character == '<' && characters.peek() == Some(&'<') {
-                let _ = characters.next(); // second '<'
-                let rest: String = characters.clone().collect();
+                // Probe without mutating so an unquoted `<<` keeps both marks.
+                let mut probe = characters.clone();
+                let _ = probe.next(); // second '<'
+                let rest: String = probe.collect();
                 if let Some(skip) = shell_parser::quoted_heredoc_skip_len(&rest) {
+                    let _ = characters.next(); // second '<'
                     let mut consumed = 0usize;
                     while consumed < skip
                         && let Some(ch) = characters.next()
