@@ -698,6 +698,83 @@ fn pty_wrapped_lines_do_not_exceed_viewport_width() {
 }
 
 #[test]
+fn pty_command_header_wraps_in_full_without_truncation_at_narrow_width() {
+    // Screenshot 2026-09-24 16:37 end to end: the shell-aware pre-wrap
+    // (`wrap_shell_command` at 62/58) emits three logical header lines, and
+    // viewport reflow must keep every pipe segment with no `…` at any width.
+    // Wide viewports preserve the logical rows (and their quote-atomic
+    // breaks) 1:1; narrow viewports may re-break mid-quote to fit, but must
+    // stay lossless and within bounds.
+    let command = "grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \"\\.backup\"";
+    let logical = vtcode_commons::formatting::wrap_shell_command(command, 62, 58);
+    assert_eq!(logical.len(), 3, "fixture must span three header lines: {logical:?}");
+
+    let push_header = |session: &mut Session| {
+        push_pty_line(session, &format!("• Ran {}", logical[0]));
+        for segment in logical.iter().skip(1) {
+            push_pty_line(session, &format!("  │ {segment}"));
+        }
+    };
+    let reflow_all = |session: &Session, width: u16| {
+        let mut rows = Vec::new();
+        for index in 0..session.lines.len() {
+            rows.extend(session.reflow_pty_lines(index, width));
+        }
+        rows
+    };
+
+    // Wide: logical rows survive 1:1 with the quoted pattern intact.
+    let mut wide = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    push_header(&mut wide);
+    let wide_rows = reflow_all(&wide, 80);
+    let wide_texts: Vec<String> = wide_rows
+        .iter()
+        .map(|line| line_text(&line.line))
+        .filter(|text| !text.trim().is_empty())
+        .collect();
+    assert_eq!(
+        wide_texts,
+        vec![
+            format!("• Ran {}", logical[0]),
+            format!("  │ {}", logical[1]),
+            format!("  │ {}", logical[2]),
+        ],
+        "wide viewport must preserve the logical header rows"
+    );
+    let wide_joined = wide_texts.join("\n");
+    assert!(!wide_joined.contains('…'), "wide reflow must not truncate: {wide_joined:?}");
+    assert!(
+        wide_joined.contains("\"@vinhnx/vtcode|npm install -g||npx @vinhnx\""),
+        "quoted pattern lost: {wide_joined:?}"
+    );
+    assert_eq!(wide_joined.matches('|').count(), 6, "pattern + shell pipes must survive: {wide_joined:?}");
+
+    // Narrow: re-breaks are allowed, but nothing may be lost or overflow.
+    let mut narrow = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    push_header(&mut narrow);
+    let narrow_rows = reflow_all(&narrow, 40);
+    let narrow_texts: Vec<String> = narrow_rows.iter().map(|line| line_text(&line.line)).collect();
+    let narrow_joined = narrow_texts.join("\n");
+    assert!(!narrow_joined.contains('…'), "narrow reflow must not truncate: {narrow_joined:?}");
+    let flat: String = narrow_joined.chars().filter(|c| !c.is_whitespace()).collect();
+    let expected_flat: String = wide_texts.join("").chars().filter(|c| !c.is_whitespace()).collect();
+    assert_eq!(flat, expected_flat, "narrow reflow lost content: {narrow_joined:?}");
+    // Substring checks run on the whitespace-stripped text because narrow
+    // viewports may re-break long tokens across rows (e.g. `p`/`ackage-lock`).
+    assert!(flat.contains("package-lock"), "pipe segment lost: {narrow_joined:?}");
+    assert!(flat.contains("\"\\.backup\""), "final pipe arg lost: {narrow_joined:?}");
+    assert!(narrow_joined.contains('│'), "continuation glyph lost: {narrow_joined:?}");
+    for line in &narrow_rows {
+        let row_width: usize = line.line.spans.iter().map(|span| span.width()).sum();
+        assert!(
+            row_width <= 40,
+            "reflowed header row exceeded viewport width: {row_width} > 40: {:?}",
+            line_text(&line.line)
+        );
+    }
+}
+
+#[test]
 fn tool_diff_numbered_lines_keep_hanging_indent_when_wrapped() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(
