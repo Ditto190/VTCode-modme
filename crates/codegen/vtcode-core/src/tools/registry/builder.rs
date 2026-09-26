@@ -200,6 +200,12 @@ impl ToolRegistry {
         let hot_cache_size = std::num::NonZeroUsize::new(optimization_config.tool_registry.hot_cache_size)
             .unwrap_or(std::num::NonZeroUsize::MIN);
         let output_spooler = Arc::new(ToolOutputSpooler::with_config(&workspace_root, spooler_config));
+        // Prune leftovers from prior sessions immediately. Periodic cleanup
+        // only fires every N spools inside one session, so short sessions never
+        // reached the threshold and stale spools piled up across runs.
+        if let Err(error) = output_spooler.prune_stale_spools_on_startup().await {
+            tracing::debug!(%error, "startup spool prune failed");
+        }
 
         // Pre-allocate FxHashMaps with expected capacity for typical MCP tool sets.
         // Most sessions register 10-50 MCP tools; start with room for 32 to

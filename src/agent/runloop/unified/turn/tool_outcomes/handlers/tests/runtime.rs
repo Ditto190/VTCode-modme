@@ -570,6 +570,80 @@ async fn preflight_circuit_drains_remaining_batch_tool_responses() {
 }
 
 #[tokio::test]
+async fn prose_blob_tool_names_do_not_trip_circuit_or_skip_valid_siblings() {
+    // Session session-vtcode-20260925T234343Z: the agent's prose about
+    // tool-call tags was parsed as tool invocations with multi-KB reasoning
+    // text as the tool name. Three of those LLM-mistake rejects tripped the
+    // preflight circuit and `drain_preflight_circuit_responses` skipped a
+    // valid `exec_command` sibling. Name mistakes must not advance the streak.
+    let mut backing = TestContextBacking::new(4).await;
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+
+    let prose_blob = |id: &str, name: &str| {
+        PreparedAssistantToolCall::new(uni::ToolCall::function(id.to_string(), name.to_string(), "{}".to_string()))
+    };
+    let valid_call = || {
+        PreparedAssistantToolCall::new(uni::ToolCall::function(
+            "valid_sibling".to_string(),
+            tool_names::CODE_SEARCH.to_string(),
+            serde_json::to_string(&json!({"query": "sibling still runs"})).expect("serialize"),
+        ))
+    };
+
+    let tool_calls = vec![
+        prose_blob("blob_0", "exec_command\n... the fence opener is unclosed, so with my fix"),
+        prose_blob("blob_1", "`. So the arg key tag in my test is"),
+        prose_blob("blob_2", "exec_command\n"),
+        valid_call(),
+    ];
+    let expected_ids = tool_calls.iter().map(|call| call.call_id().to_string()).collect::<Vec<_>>();
+
+    let mut ctx = backing.turn_processing_context();
+    ctx.full_auto = true;
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+    let outcome = handle_tool_calls(&mut outcome_ctx, &tool_calls)
+        .await
+        .expect("name mistakes should be recoverable feedback");
+
+    assert!(outcome.is_none(), "name mistakes must not trip the preflight circuit or arm recovery");
+    assert_eq!(
+        ctx.harness_state.consecutive_preflight_failures, 0,
+        "name mistakes must not advance the preflight failure streak"
+    );
+    // Every call still gets a tool response (providers require one per call).
+    for tool_call_id in expected_ids {
+        assert!(
+            ctx.working_history
+                .iter()
+                .any(|message| message.tool_call_id.as_deref() == Some(tool_call_id.as_str())),
+            "missing tool response for {tool_call_id}"
+        );
+    }
+    // The valid sibling must have been admitted and executed, not drained.
+    assert!(
+        ctx.working_history.iter().any(|message| {
+            let content = message.content.as_text();
+            message.tool_call_id.as_deref() == Some("valid_sibling") && !content.contains("was not executed")
+        }),
+        "valid sibling call must execute rather than be drained by the preflight circuit"
+    );
+    // Name-mistake responses tell the model to correct and retry.
+    assert!(
+        ctx.working_history.iter().any(|message| {
+            message.tool_call_id.as_deref() == Some("blob_0")
+                && message.content.as_text().contains("preflight_validation")
+                && message.content.as_text().contains("schema_correction")
+        }),
+        "name mistakes must report preflight_validation (not circuit_breaker)"
+    );
+}
+
+#[tokio::test]
 async fn preflight_circuit_does_not_block_approved_plan_execution() {
     // Regression for checkpoint turn_874: when the preflight circuit breaker
     // tripped during an approved-plan build turn, the old code returned

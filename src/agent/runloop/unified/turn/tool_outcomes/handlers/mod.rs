@@ -62,6 +62,33 @@ use rate_limit::acquire_adaptive_rate_limit_slot;
 use recovery::try_interactive_circuit_recovery;
 pub(crate) use types::{PreparedToolCall, ToolOutcomeContext, ValidationResult};
 
+/// Whether a preflight reject is a tool-name/identity mistake rather than a
+/// policy block or a repeated argument-schema failure.
+///
+/// Name mistakes (prose-blob tool names, unknown tools, empty names) are
+/// per-call rejects: the model already gets a schema correction and can retry.
+/// Counting them toward the preflight circuit lets one malformed name in an
+/// assistant batch skip every remaining valid sibling
+/// (`drain_preflight_circuit_responses`). Argument-schema failures still count
+/// so a model stuck on bad JSON trips the recovery fuse; policy and security
+/// rejects always count.
+pub(crate) fn preflight_failure_is_llm_mistake(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    // Security / policy blocks must keep tripping the circuit.
+    if lower.contains("command security check failed")
+        || lower.contains("command injection")
+        || lower.contains("sandbox")
+        || lower.contains("policy violation")
+        || lower.contains("not allowed")
+    {
+        return false;
+    }
+    lower.contains("tool name is not a clean identifier")
+        || lower.contains("unknown tool")
+        || lower.contains("empty tool name")
+        || lower.contains("tool call has an empty tool name")
+}
+
 /// Record a malformed or preflight-invalid tool call. When the independent
 /// preflight circuit breaker reaches its cap, arm a bounded tool-free
 /// recovery pass (mirroring budget-exhaustion and interview-denial) so the
@@ -71,6 +98,9 @@ pub(crate) use types::{PreparedToolCall, ToolOutcomeContext, ValidationResult};
 /// so a blocked build turn was never re-queued and the agent could not
 /// continue (checkpoint turn_874). Policy denials intentionally do not use
 /// this path; they remain governed by the existing blocked-call fuse.
+///
+/// LLM-mistake rejects do not advance the circuit streak and never trip it;
+/// valid sibling calls in the same batch continue to execute.
 pub(crate) fn handle_preflight_failure(
     ctx: &mut TurnProcessingContext<'_>,
     tool_call_id: &str,
@@ -78,9 +108,19 @@ pub(crate) fn handle_preflight_failure(
     error: &str,
     fallback: Option<(String, serde_json::Value)>,
 ) -> Option<TurnHandlerOutcome> {
-    let failure_count = ctx.record_preflight_failure();
+    let is_llm_mistake = preflight_failure_is_llm_mistake(error);
+    let failure_count = if is_llm_mistake {
+        // Report the current streak without advancing it so the model still
+        // sees failure_count telemetry, but a prose blob cannot poison the
+        // batch circuit.
+        ctx.harness_state.consecutive_preflight_failures
+    } else {
+        ctx.record_preflight_failure()
+    };
     let max_failures = max_consecutive_blocked_tool_calls_per_turn(ctx);
-    let circuit_tripped = failure_count >= max_failures;
+    // LLM mistakes never trip the circuit, even if a prior policy streak is
+    // already at the cap: one prose blob must not skip valid sibling calls.
+    let circuit_tripped = !is_llm_mistake && failure_count >= max_failures;
     let schema_correction = preflight_schema_correction(tool_name, error);
     let next_action = if circuit_tripped && ctx.is_planning_active() {
         "Stop retrying this malformed call. Tools are disabled for the next pass — synthesize exactly one complete <proposed_plan> from the evidence already gathered."

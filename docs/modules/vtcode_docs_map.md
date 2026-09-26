@@ -1023,6 +1023,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, Tasks
   - **User Questions**: "What can you tell me about Registry-Light Critical Path?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/session-audit-harness-fixes.md`
+  - **Content**: Session Audit Harness Fixes
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Session Audit Harness Fixes?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/session-close-harden.md`
   - **Content**: Session Close Harden (Unresponsive UI)
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks

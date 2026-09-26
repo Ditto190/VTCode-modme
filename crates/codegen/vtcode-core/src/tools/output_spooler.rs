@@ -837,6 +837,10 @@ impl ToolOutputSpooler {
 
     /// Clean up old spooled files and sync the in-memory tracking list.
     /// Pinned blocked-turn outputs are never deleted here.
+    ///
+    /// Also enforces [`SpoolerConfig::max_files`] against the on-disk
+    /// directory (not just this instance's tracking vec) so leftovers from
+    /// prior sessions cannot accumulate past the budget.
     pub async fn cleanup_old_files(&self) -> Result<usize> {
         if !fs::try_exists(&self.output_dir).await.unwrap_or(false) {
             return Ok(0);
@@ -847,6 +851,8 @@ impl ToolOutputSpooler {
 
         // Collect paths to remove (can't modify vec during filesystem iteration)
         let mut paths_to_remove = Vec::new();
+        // Age of each surviving candidate so max_files can drop the oldest.
+        let mut survivors: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
 
         let pinned = self.pinned_files.read().await;
         let mut entries = fs::read_dir(&self.output_dir).await?;
@@ -857,13 +863,26 @@ impl ToolOutputSpooler {
             }
             if let Ok(metadata) = entry.metadata().await
                 && let Ok(modified) = metadata.modified()
-                && let Ok(age) = now.duration_since(modified)
-                && age.as_secs() > self.config.max_age_secs
             {
-                paths_to_remove.push(path);
+                let age = now.duration_since(modified).unwrap_or_default();
+                if age.as_secs() > self.config.max_age_secs {
+                    paths_to_remove.push(path);
+                } else {
+                    survivors.push((path, modified));
+                }
             }
         }
         drop(pinned);
+
+        // Enforce the file-count budget across sessions: drop the oldest
+        // unpinned survivors until at most max_files remain on disk.
+        if survivors.len() > self.config.max_files {
+            survivors.sort_by_key(|(_, modified)| *modified);
+            let overflow = survivors.len() - self.config.max_files;
+            for (path, _) in survivors.into_iter().take(overflow) {
+                paths_to_remove.push(path);
+            }
+        }
 
         // Remove files from disk
         for path in &paths_to_remove {
@@ -884,6 +903,16 @@ impl ToolOutputSpooler {
         }
 
         Ok(removed)
+    }
+
+    /// Prune leftovers from prior sessions at registry construction.
+    ///
+    /// Periodic cleanup only runs every [`CLEANUP_EVERY_N_SPOOLS`] spool ops
+    /// inside one session, so short sessions never reached the threshold and
+    /// stale files piled up (414 files / 2 MB after one long session). A
+    /// startup prune restores the budget immediately.
+    pub async fn prune_stale_spools_on_startup(&self) -> Result<usize> {
+        self.cleanup_old_files().await
     }
 
     /// Get the output directory path
@@ -1446,6 +1475,34 @@ mod tests {
         let removed = spooler.cleanup_old_files().await.unwrap();
         assert_eq!(removed, 1);
         assert!(!full_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_enforces_max_files_across_sessions() {
+        // Simulate leftovers from prior sessions: files exist on disk but are
+        // not in this instance's tracking vec. max_files must still bound them.
+        let temp = tempdir().unwrap();
+        let output_dir = temp.path().join(TOOL_OUTPUT_DIR);
+        std::fs::create_dir_all(&output_dir).unwrap();
+        for index in 0..8 {
+            std::fs::write(output_dir.join(format!("stale_{index}.txt")), b"leftover").unwrap();
+            // Ensure distinct mtimes so oldest-first eviction is deterministic.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let config = SpoolerConfig {
+            threshold_bytes: 1,
+            // Keep everything young so only the count budget applies.
+            max_age_secs: 3600,
+            max_files: 3,
+            ..Default::default()
+        };
+        let spooler = ToolOutputSpooler::with_config(temp.path(), config);
+        let removed = spooler.prune_stale_spools_on_startup().await.unwrap();
+        assert_eq!(removed, 5, "startup prune must drop overflow past max_files");
+
+        let remaining = std::fs::read_dir(&output_dir).unwrap().count();
+        assert_eq!(remaining, 3, "on-disk spool count must respect max_files");
     }
 
     #[tokio::test]

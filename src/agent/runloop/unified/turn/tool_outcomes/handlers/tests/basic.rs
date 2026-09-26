@@ -231,3 +231,31 @@ fn tool_budget_exhausted_directive_demands_synthesis() {
     assert!(directive.contains("Synthesize your final answer now"));
     assert!(exhaustion.skipped_call_message().contains("call skipped"));
 }
+
+#[test]
+fn preflight_name_mistakes_are_llm_mistakes_and_do_not_trip() {
+    // Prose-blob tool names and unknown tools must classify as LLM mistakes
+    // so one malformed name cannot trip the preflight circuit and skip valid
+    // sibling calls in the same assistant batch.
+    assert!(preflight_failure_is_llm_mistake(
+        "tool name is not a clean identifier: exec_command\n... the fence opener is unclosed"
+    ));
+    assert!(preflight_failure_is_llm_mistake("Unknown tool: exec_command\n: Tool error"));
+    assert!(preflight_failure_is_llm_mistake("Tool call has an empty tool name. Provide a valid tool name."));
+    assert!(preflight_failure_is_llm_mistake("Tool preflight validation failed: Unknown tool: ` — `"));
+}
+
+#[test]
+fn preflight_policy_and_argument_failures_still_trip() {
+    // Security/policy blocks and repeated argument-schema failures keep
+    // counting toward the circuit: those mean the model is fighting the
+    // harness or stuck on bad JSON.
+    assert!(!preflight_failure_is_llm_mistake(
+        "Command security check failed: Command injection pattern detected"
+    ));
+    assert!(!preflight_failure_is_llm_mistake(
+        "Tool preflight validation failed for 'exec_command': Missing required argument: command"
+    ));
+    assert!(!preflight_failure_is_llm_mistake("Invalid arguments: expected value"));
+    assert!(!preflight_failure_is_llm_mistake("Policy violation: sandbox denied"));
+}
