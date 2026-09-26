@@ -331,6 +331,15 @@ fn split_shell_words(text: &str) -> Vec<String> {
     words
 }
 
+/// Shared `• Ran` header wrap widths so every tool-call command surface stays
+/// in sync: 62 chars for the first line (`• Ran ` prefix), 58 for
+/// continuations (`  │ ` prefix). All surfaces wrap the full command with
+/// [`wrap_shell_command_with_continuations`] (explicit `\`, no `…`); TUI
+/// reflow owns any residual viewport overflow.
+pub const RAN_COMMAND_FIRST_WIDTH: usize = 62;
+/// Continuation-line budget for [`RAN_COMMAND_FIRST_WIDTH`] headers.
+pub const RAN_COMMAND_CONTINUATION_WIDTH: usize = 58;
+
 /// Word-wrap a shell `command` into lines, allowing `first_width` chars on
 /// the first line and `continuation_width` chars on subsequent lines.
 ///
@@ -404,6 +413,145 @@ pub fn wrap_shell_command(text: &str, first_width: usize, continuation_width: us
         lines.push(current);
     }
     lines
+}
+
+/// Word-wrap a shell `command` into display lines with explicit `\`
+/// continuations, so multi-line tool-call headers read as valid shell.
+///
+/// Operator-aware: when the command does not fit on one line it is first
+/// split at top-level shell list separators (`&&`, `||`, `|`, `|&`, `;`,
+/// `;;`, `&`) — the separator set shared with tree-sitter-bash `list` nodes
+/// and the TUI `is_command_separator` highlighters (verified with
+/// `ast-grep --lang bash`; redirections like `>`, `>>`, `2>` never split).
+/// Each operator chunk starts on a fresh display line with the operator kept
+/// trailing (e.g. `... && \\`), then overlong chunks wrap further with
+/// [`wrap_shell_command`]. Finally `" \\"` is appended to every line except
+/// the last. Commands that fit on one line are returned unchanged: no forced
+/// operator splits, no trailing `\\`.
+///
+/// Joining a multi-line result with a single space does NOT reproduce the
+/// source (use [`wrap_shell_command`] when lossless rejoining is required).
+/// Widths count chars, not bytes, matching [`wrap_shell_command`].
+///
+/// ```
+/// # use vtcode_commons::formatting::wrap_shell_command_with_continuations;
+/// let lines = wrap_shell_command_with_continuations("echo a b c d", 7, 7);
+/// assert_eq!(lines, vec!["echo a \\", "b c d"]);
+/// assert_eq!(wrap_shell_command_with_continuations("git status", 62, 58), vec!["git status"]);
+/// assert!(wrap_shell_command_with_continuations("   ", 5, 5).is_empty());
+/// // Short chains stay on one line; overlong chains break at operators:
+/// assert_eq!(
+///     wrap_shell_command_with_continuations("echo a && echo b", 62, 58),
+///     vec!["echo a && echo b"]
+/// );
+/// let chained = wrap_shell_command_with_continuations("echo a && echo b", 10, 10);
+/// assert_eq!(chained, vec!["echo a && \\", "echo b"]);
+/// ```
+pub fn wrap_shell_command_with_continuations(text: &str, first_width: usize, continuation_width: usize) -> Vec<String> {
+    let lines = wrap_shell_command_lines(text, first_width, continuation_width);
+    let total = lines.len();
+    if total <= 1 {
+        return lines;
+    }
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut line)| {
+            // Last line ends the command; earlier lines continue with `\`.
+            if index + 1 < total {
+                line.push_str(" \\");
+            }
+            line
+        })
+        .collect()
+}
+
+/// Operator-aware word-wrap of a shell `command` without continuation
+/// markers.
+///
+/// Same breaks as [`wrap_shell_command_with_continuations`] but without the
+/// trailing `" \\"` suffixes, for renderers that style the marker
+/// separately (ANSI/TUI highlighting must not feed the marker to the bash
+/// grammar). Prefer this over [`wrap_shell_command`] for `• Ran` headers so
+/// every surface breaks identically.
+pub fn wrap_shell_command_lines(text: &str, first_width: usize, continuation_width: usize) -> Vec<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    // Fast path: fits on one line → return unchanged (no forced operator
+    // splits, so short `a && b` chains stay on a single row).
+    let single = wrap_shell_command(trimmed, first_width.max(1), continuation_width.max(1));
+    if single.len() <= 1 {
+        return single;
+    }
+    // Split into operator chunks first so `&&`/`||`/`|`/`;` boundaries start
+    // a fresh display line; fall back to one chunk when no top-level
+    // separator is present.
+    let chunks = split_shell_operator_chunks(trimmed);
+    let mut lines: Vec<String> = Vec::new();
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let width = if lines.is_empty() {
+            first_width.max(1)
+        } else {
+            continuation_width.max(1)
+        };
+        // First chunk may use the wider first-line budget; every later chunk
+        // (and every wrapped row within a chunk) uses the continuation width.
+        let wrapped = if chunk_idx == 0 {
+            wrap_shell_command(chunk, first_width.max(1), continuation_width.max(1))
+        } else {
+            wrap_shell_command(chunk, width, continuation_width.max(1))
+        };
+        if wrapped.is_empty() {
+            continue;
+        }
+        lines.extend(wrapped);
+    }
+    lines
+}
+
+/// Whether `word` is a top-level shell list separator that should end a
+/// display chunk.
+///
+/// Covers the `&&`/`||`/`|`/`;`/`&` list separators shared with
+/// tree-sitter-bash `list` nodes and the TUI `is_command_separator`
+/// highlighters, plus `|&` (pipe stdout+stderr) and the case-terminator
+/// forms (`;;`, `;&`, `;;&`). Redirections (`>`, `>>`, `2>`, `<`) are intentionally absent:
+/// they belong to the same simple command and must not force a new line.
+/// A trailing `;` attached without whitespace (e.g. `hi;`) also ends a chunk.
+fn is_shell_list_separator(word: &str) -> bool {
+    matches!(word, "&&" | "||" | "|" | "|&" | ";" | ";;" | ";&" | ";;&" | "&")
+        || (word.len() > 1 && word.ends_with(';') && !word.ends_with(";;"))
+}
+
+/// Split `command` into operator chunks at top-level list separators.
+///
+/// Words come from [`split_shell_words`], so separators inside single/double
+/// quotes or backslash-escaped never split (e.g. the `||` inside
+/// `"a||b"` stays atomic). The separator word is kept trailing on its chunk
+/// (`git add a &&` + `git commit`), so each display line after the first
+/// starts with a fresh command rather than a dangling operator.
+fn split_shell_operator_chunks(command: &str) -> Vec<String> {
+    let words = split_shell_words(command);
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in words {
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(&word);
+        if is_shell_list_separator(&word) {
+            chunks.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
 }
 
 /// Push hard-split chunks of an overlong `word` that exceeds `width`,
@@ -678,6 +826,37 @@ mod tests {
     #[test]
     fn wrap_shell_command_splits_overlong_token_at_width() {
         assert_eq!(wrap_shell_command("abcdefghij", 4, 4), vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn wrap_shell_command_with_continuations_marks_wrapped_lines() {
+        // Multi-line headers read as valid shell: every line except the last
+        // ends with ` \`, single-line commands stay bare, blanks stay empty.
+        assert_eq!(wrap_shell_command_with_continuations("echo a b c d", 7, 7), vec!["echo a \\", "b c d"]);
+        assert_eq!(wrap_shell_command_with_continuations("git status --short", 62, 58), vec!["git status --short"]);
+        assert!(wrap_shell_command_with_continuations("   ", 5, 5).is_empty());
+        // Chained git commands (issue screenshot) keep every segment with no
+        // `…` and mark each wrapped row as a continuation.
+        let command = "git add a b && git commit -m \"msg\" && git status --short";
+        let wrapped = wrap_shell_command_with_continuations(command, 20, 20);
+        assert!(wrapped.len() > 1, "expected wrapping: {wrapped:?}");
+        assert!(wrapped[..wrapped.len() - 1].iter().all(|line| line.ends_with(" \\")));
+        assert!(!wrapped.last().unwrap().ends_with(" \\"));
+        assert!(wrapped.iter().all(|line| !line.contains('…')));
+        // Overlong chains break at operators with `&&` trailing, while
+        // quoted `||` never splits.
+        assert_eq!(wrap_shell_command_with_continuations("echo a && echo b", 10, 10), vec!["echo a && \\", "echo b"]);
+        assert_eq!(wrap_shell_command_with_continuations("a | b | c", 7, 5), vec!["a | \\", "b | \\", "c"]);
+        assert_eq!(
+            wrap_shell_command_with_continuations("grep -rn \"a||b\" docs", 62, 58),
+            vec!["grep -rn \"a||b\" docs"]
+        );
+        // Short chains that fit stay on one line (no forced splits).
+        assert_eq!(wrap_shell_command_with_continuations("echo a && echo b", 62, 58), vec!["echo a && echo b"]);
+        assert_eq!(wrap_shell_command_with_continuations("a | b | c", 62, 58), vec!["a | b | c"]);
+        // The marker-free helper breaks identically minus suffixes.
+        assert_eq!(super::wrap_shell_command_lines("echo a && echo b", 10, 10), vec!["echo a &&", "echo b"]);
+        assert_eq!(super::wrap_shell_command_lines("git status", 62, 58), vec!["git status"]);
     }
 
     #[test]

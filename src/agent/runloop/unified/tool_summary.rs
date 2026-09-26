@@ -5,7 +5,7 @@ use anstyle::{Color, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use serde_json::Value;
 use vtcode_commons::color_policy;
-use vtcode_commons::formatting::wrap_shell_command;
+use vtcode_commons::formatting::{wrap_shell_command_lines, wrap_shell_command_with_continuations};
 use vtcode_commons::ui_protocol::{CompactToolSummaryLine, CompactToolSummaryLineKind};
 
 use vtcode_core::config::ToolDisplayMode;
@@ -240,7 +240,8 @@ struct SummaryData {
 fn compact_summary_expanded_lines(data: &SummaryData) -> Vec<CompactToolSummaryLine> {
     let mut lines = Vec::new();
     if let Some(command) = data.summary.strip_prefix("Ran ") {
-        let wrapped = wrap_shell_command(command, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
+        let wrapped =
+            wrap_shell_command_with_continuations(command, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
         let first = wrapped.first().map(String::as_str).unwrap_or("command");
         lines.push(CompactToolSummaryLine {
             kind: CompactToolSummaryLineKind::Info,
@@ -374,12 +375,16 @@ fn render_bullet_line(
 ) -> Option<Vec<String>> {
     let mut wrapped_run_segments: Option<Vec<String>> = None;
     if let Some(command) = data.summary.strip_prefix("Ran ") {
-        let wrapped = wrap_shell_command(command, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
+        let wrapped = wrap_shell_command_lines(command, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
         let first_segment = wrapped.first().cloned().unwrap_or_else(|| "command".to_string());
+        let is_multiline = wrapped.len() > 1;
         wrapped_run_segments = Some(wrapped);
         line.push_str(&render_styled("Ran", main_color, Some("bold".to_string())));
         line.push(' ');
         line.push_str(&render_command_segment(&first_segment, main_color, palette.muted, true));
+        if is_multiline {
+            line.push_str(&render_styled(" \\", palette.muted, Some("dim".to_string())));
+        }
     } else {
         line.push_str(&render_summary_with_highlights(
             &data.summary,
@@ -404,12 +409,19 @@ fn render_continuation_lines(
     palette: &ColorPalette,
 ) -> Result<()> {
     if let Some(wrapped) = wrapped_run_segments {
-        for segment in wrapped.iter().skip(1) {
+        let total = wrapped.len();
+        for (idx, segment) in wrapped.iter().skip(1).enumerate() {
             let mut continuation = String::with_capacity(segment.len() + 32);
             continuation.push_str("  ");
             continuation.push_str(&render_styled("│", palette.muted, Some("dim".to_string())));
             continuation.push(' ');
             continuation.push_str(&render_command_segment(segment, main_color, palette.muted, false));
+            // All wrapped lines except the final one end with an explicit
+            // shell continuation so the multi-line header reads as one command.
+            let is_last = idx + 1 >= total - 1;
+            if !is_last {
+                continuation.push_str(&render_styled(" \\", palette.muted, Some("dim".to_string())));
+            }
             renderer.line(MessageStyle::Info, &continuation)?;
         }
     }

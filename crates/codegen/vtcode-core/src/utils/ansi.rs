@@ -24,6 +24,7 @@ use unicode_width::UnicodeWidthStr;
 use url::Url;
 use vtcode_commons::color_policy::{self, ColorOutputPolicySource};
 use vtcode_commons::diff_paths::looks_like_diff_content;
+use vtcode_commons::formatting::{RAN_COMMAND_CONTINUATION_WIDTH, RAN_COMMAND_FIRST_WIDTH};
 use vtcode_commons::tool_types::CompactStr;
 use vtcode_commons::ui_protocol::{CompactActivityMetadata, ToolOutputId};
 use vtcode_commons::{parse_editor_target, resolve_editor_path};
@@ -369,7 +370,23 @@ impl AnsiRenderer {
     ) -> Result<()> {
         let command = command.into();
         if !self.supports_inline_ui() {
-            return self.line(MessageStyle::Info, &format!("• Ran {command}"));
+            // Plain-text fallback (no inline UI): wrap long commands with
+            // explicit `\` continuations and `│` gutters so a chained
+            // `git add … && git commit …` stays readable instead of terminal
+            // word-wrap without a continuation marker.
+            let wrapped = vtcode_commons::formatting::wrap_shell_command_with_continuations(
+                &command,
+                RAN_COMMAND_FIRST_WIDTH,
+                RAN_COMMAND_CONTINUATION_WIDTH,
+            );
+            if wrapped.is_empty() {
+                return self.line(MessageStyle::Info, "• Ran command");
+            }
+            self.line(MessageStyle::Info, &format!("• Ran {}", wrapped[0]))?;
+            for segment in wrapped.iter().skip(1) {
+                self.line(MessageStyle::Info, &format!("  │ {segment}"))?;
+            }
+            return Ok(());
         }
 
         let (activity, replaces_previous) =

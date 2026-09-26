@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use anstyle::{AnsiColor, Color as AnsiColorEnum, Effects, Style as AnsiStyle};
+use vtcode_commons::formatting::{RAN_COMMAND_CONTINUATION_WIDTH, RAN_COMMAND_FIRST_WIDTH};
 use vtcode_commons::ui_protocol::{InlineSegment, InlineTextStyle, convert_style};
 
 use crate::tui::ui::syntax_highlight;
@@ -346,7 +347,46 @@ pub fn line_to_compact_segments(
             style: Arc::clone(&styles.count),
         });
     } else if let Some(cmd) = metadata.command.as_deref() {
-        segments.extend(shell_syntax_segments(cmd, styles, true));
+        // Long single-command rows wrap with explicit `\` continuations so a
+        // chained `git add … && git commit … && git log …` reads as one shell
+        // command instead of terminal-reflow word wrap. Short rows stay
+        // single-line; `\n` splits are honored by transcript reflow.
+        const COMPACT_CONT_INDENT: &str = "\n      ";
+        let needs_wrap = cmd.chars().count() > RAN_COMMAND_FIRST_WIDTH;
+        if needs_wrap {
+            // Operator-aware (same `&&`/`||`/`|` chunking as the expanded
+            // `• Ran` headers): each chain/pipe stage starts on a fresh row.
+            // The wrapper already appends ` \\` to non-final rows; strip it
+            // here so the marker is emitted once with separator styling.
+            let wrapped = vtcode_commons::formatting::wrap_shell_command_with_continuations(
+                cmd,
+                RAN_COMMAND_FIRST_WIDTH,
+                RAN_COMMAND_CONTINUATION_WIDTH,
+            );
+            if wrapped.len() > 1 {
+                for (idx, line) in wrapped.iter().enumerate() {
+                    // First wrapped line uses command-position highlighting;
+                    // continuations highlight as args (no leading command word).
+                    let expect_command = idx == 0;
+                    let body = line.strip_suffix(" \\").unwrap_or(line);
+                    segments.extend(shell_syntax_segments(body, styles, expect_command));
+                    if idx + 1 < wrapped.len() {
+                        segments.push(InlineSegment {
+                            text: " \\".to_string(),
+                            style: Arc::clone(&styles.separator),
+                        });
+                        segments.push(InlineSegment {
+                            text: COMPACT_CONT_INDENT.to_string(),
+                            style: Arc::clone(&styles.output),
+                        });
+                    }
+                }
+            } else {
+                segments.extend(shell_syntax_segments(cmd, styles, true));
+            }
+        } else {
+            segments.extend(shell_syntax_segments(cmd, styles, true));
+        }
         if metadata.hidden_line_count > 0 {
             segments.push(InlineSegment {
                 text: format!(" · … +{} lines", metadata.hidden_line_count),

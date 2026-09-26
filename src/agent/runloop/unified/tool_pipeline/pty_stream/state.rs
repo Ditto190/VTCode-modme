@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use vtcode_commons::formatting::wrap_shell_command;
+use vtcode_commons::formatting::wrap_shell_command_with_continuations;
 use vtcode_commons::preview::{
     format_hidden_lines_summary as shared_hidden_lines_summary, split_head_tail_preview_with_limit,
     summary_window as shared_summary_window,
@@ -321,11 +321,14 @@ fn format_command_header_lines(command: &str, workspace_root: Option<&Path>) -> 
     // content first (same pipeline as `• Ran` summaries) so live PTY headers
     // do not echo a dangling prefix. The transcript must show the command in
     // full: unlike compact previews, live headers never head-truncate with
-    // `…` — TUI reflow owns viewport-aware wrapping, so every pipe segment
-    // (e.g. screenshot 2026-09-24 `| grep -v ".backup"`) survives.
+    // `…` — explicit `\` continuations own the wrapping (same operator-aware
+    // breaks as the summaries), so every pipe segment (e.g. screenshot
+    // 2026-09-24 `| grep -v ".backup"`) survives; TUI reflow owns only
+    // residual viewport overflow.
     let relative = relativize_command_paths(command, workspace_root);
     let preview = preview_full_command(&relative);
-    let wrapped = wrap_shell_command(&preview, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
+    let wrapped =
+        wrap_shell_command_with_continuations(&preview, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
     if wrapped.is_empty() {
         return vec!["• Ran command".to_string()];
     }
