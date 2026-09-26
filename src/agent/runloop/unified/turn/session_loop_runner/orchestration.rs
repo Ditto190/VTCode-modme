@@ -687,10 +687,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             .await;
             apply_startup_plan_agent_selection(&mut active_primary_agent, &tool_registry, &config, &handle).await;
             harness_try!(render_planning_workflow_next_step_hint(&mut renderer));
-            harness_try!(crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
-                &mut renderer,
-                crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
-            ));
+            // No researching indicator here: startup entry has no request yet.
         } else if planning_entry_source.requires_startup_prompt() && resume_ref.is_none() {
             let should_enter = harness_try!(
                 prompt_startup_planning_workflow(&handle, &mut session, &ctrl_c_state, &ctrl_c_notify).await
@@ -710,10 +707,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 .await;
                 apply_startup_plan_agent_selection(&mut active_primary_agent, &tool_registry, &config, &handle).await;
                 harness_try!(render_planning_workflow_next_step_hint(&mut renderer));
-                harness_try!(crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
-                    &mut renderer,
-                    crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
-                ));
+                // No researching indicator here: no request exists yet.
             }
         }
         let mut linked_directories: Vec<LinkedDirectory> = Vec::with_capacity(4);
@@ -2062,13 +2056,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     session_stats.record_plan_continuation_turn_with_limit(max_turns);
                                     std::sync::Arc::make_mut(&mut runtime.state.messages)
                                         .push(vtcode_core::llm::provider::Message::system(directive));
-                                    let _ = renderer.line(
-                                        MessageStyle::Info,
-                                        &format!(
-                                            "[i] Plan-mode auto-continue turn {}/{}: planning still active.",
-                                            session_stats.plan_continuation_turns(),
-                                            max_turns
-                                        ),
+                                    // Queued auto-continue stays quiet: the next turn starts
+                                    // immediately, so a TUI info line is noise. Exhausted /
+                                    // queue-full paths below still inform the user.
+                                    tracing::debug!(
+                                        plan_turn = session_stats.plan_continuation_turns(),
+                                        max_turns,
+                                        "Queued plan-mode auto-continue without TUI echo"
                                     );
                                     true
                                 }
@@ -2116,14 +2110,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     session_stats.record_tracker_continuation_turn_with_limit(max_turns);
                                     std::sync::Arc::make_mut(&mut runtime.state.messages)
                                         .push(vtcode_core::llm::provider::Message::system(directive));
-                                    let _ = renderer.line(
-                                        MessageStyle::Info,
-                                        &format!(
-                                            "[i] Tracker auto-continue turn {}/{}: {} incomplete step(s) remain.",
-                                            session_stats.tracker_continuation_turns(),
-                                            max_turns,
-                                            incomplete.len()
-                                        ),
+                                    // Queued auto-continue stays quiet: the next turn starts
+                                    // immediately, so a TUI info line is noise (notably the
+                                    // plan-accept → build handoff with pending tracker
+                                    // steps). Exhausted / queue-full paths below still
+                                    // inform the user.
+                                    tracing::debug!(
+                                        tracker_turn = session_stats.tracker_continuation_turns(),
+                                        max_turns,
+                                        incomplete = incomplete.len(),
+                                        "Queued tracker auto-continue without TUI echo"
                                     );
                                     true
                                 }

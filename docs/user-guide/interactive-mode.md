@@ -219,7 +219,7 @@ When a task is already running, VT Code keeps the active turn alive and lets you
 - The agent emits planning output in `<proposed_plan>...</proposed_plan>` blocks.
 - `task_tracker` mirrors checklist state with plan sidecars where planning artefacts are enabled.
 - When you are ready to implement, switch to a build-oriented primary agent such as `build` or `auto`.
-- During the planning workflow the footer shows a `Planning...` stage status, and while an approved plan executes it shows `Building...`. These stage states keep the composer usable so you can queue or steer input between turns; the animated spinner continues while tools execute underneath.
+- During the planning workflow the footer shows a `Planning...` stage status once the first planning turn starts (entering Plan mode alone stays idle until you send a request), and while an approved plan executes it shows `Building...`. These stage states keep the composer usable so you can queue or steer input between turns; the animated spinner continues while tools execute underneath.
 - Plan approval offers three choices: implement in the current context, clear transient context
   and implement with a fresh thread, or stay in Plan mode. Both implementation choices preserve
   the session's existing confirmation policy. The fresh path preserves the plan and task tracker

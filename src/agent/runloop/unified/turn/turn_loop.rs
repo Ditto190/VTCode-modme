@@ -843,6 +843,11 @@ pub(crate) async fn run_turn_loop(
     );
     if ctx.is_planning_active() {
         ctx.plan_session.start_turn();
+        // Planning work starts now: the user request exists, so promote to
+        // the Planning stage and show the researching indicator once per
+        // turn. Mode entry alone stays Idle to avoid a premature "Planning..."
+        // footer before any request.
+        crate::agent::runloop::unified::planning_workflow_state::mark_planning_turn_started(ctx.renderer, ctx.handle);
     }
     // After a permanent `request_user_input` denial, suppress the tool for the
     // rest of the session so the model stops retrying it across turns.
@@ -931,6 +936,12 @@ pub(crate) async fn run_turn_loop(
         if !planning_limits_applied && ctx.is_planning_active() {
             planning_limits_applied = true;
             ctx.plan_session.start_turn();
+            // Planning just became active inside a running turn: promote to
+            // the stage and show the researching row once, since work is live.
+            crate::agent::runloop::unified::planning_workflow_state::mark_planning_turn_started(
+                ctx.renderer,
+                ctx.handle,
+            );
             turn_config = extract_turn_config(
                 effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
                 true,

@@ -454,6 +454,11 @@ fn queue_follow_up_input(
 /// the in-flight queue and stays in the pending snapshot until the post-turn
 /// history checkpoint acknowledges it, preserving the crash-recovery
 /// contract.
+///
+/// Harness-generated continuations (tracker/plan auto-continue, background
+/// completion, verification recovery) stay quiet: the full internal prompt is
+/// model-facing, so echoing it to the transcript is TUI noise. Only genuine
+/// user steering gets a `Steered into active turn` status line.
 fn apply_pending_follow_ups_mid_turn(
     renderer: &mut vtcode_core::utils::ansi::AnsiRenderer,
     runtime_steering: &mut vtcode_core::core::agent::runtime::RuntimeSteering,
@@ -462,9 +467,23 @@ fn apply_pending_follow_ups_mid_turn(
     for intent in runtime_steering.drain_follow_up_intents_to_in_flight() {
         let (intent_id, input) = intent.into_parts();
         push_steered_user_message(working_history, &intent_id, &input);
+        if is_internal_harness_follow_up(&input) {
+            tracing::debug!("Applied internal harness follow-up mid-turn without TUI echo");
+            continue;
+        }
         display_status(renderer, &format!("Steered into active turn: {input}"))?;
     }
     Ok(())
+}
+
+/// True for machine-generated continuation prompts that must not echo to the
+/// TUI. Matches the stable openings of every harness-queued follow-up so a
+/// reworded tail cannot reintroduce transcript noise.
+fn is_internal_harness_follow_up(input: &str) -> bool {
+    input.starts_with("The task tracker still has incomplete steps:")
+        || input.starts_with("Plan-mode auto-continue:")
+        || input.starts_with("Review the authoritative background subprocess completion notice")
+        || input.starts_with("Continue autonomously from the last stalled turn.")
 }
 
 /// Append a steered user message tagged with its intent id so restart
@@ -740,8 +759,9 @@ mod tests {
         TOOL_LOOP_LIMIT_RECOVERY_REASON, UNLIMITED_TOOL_LOOPS, arm_tool_loop_synthesis_recovery,
         auto_tool_loop_grant_increment, clamp_tool_loop_increment,
         effective_max_tool_calls_for_approved_plan_execution, effective_max_tool_calls_for_turn, extract_turn_config,
-        handle_steering_messages, initial_tool_loop_limit, is_stale_approved_plan_pause_response,
-        resolve_safety_tool_call_limits, resolve_tool_loop_limit, tool_loop_hard_cap,
+        handle_steering_messages, initial_tool_loop_limit, is_internal_harness_follow_up,
+        is_stale_approved_plan_pause_response, resolve_safety_tool_call_limits, resolve_tool_loop_limit,
+        tool_loop_hard_cap,
     };
     use crate::agent::runloop::unified::planning_workflow::{
         PlanningIntent, detect_enter_planning_intent, detect_planning_intent,
@@ -1007,6 +1027,24 @@ mod tests {
         assert!(!is_stale_approved_plan_pause_response(
             "Implementation is paused while I wait for the user to clarify the API contract."
         ));
+    }
+
+    #[test]
+    fn internal_harness_follow_ups_stay_quiet_while_user_steering_echoes() {
+        assert!(is_internal_harness_follow_up(
+            "The task tracker still has incomplete steps: #1 do X. This follow-up is the harness resuming the work."
+        ));
+        assert!(is_internal_harness_follow_up(
+            "Plan-mode auto-continue: no validated persisted plan is ready for approval yet."
+        ));
+        assert!(is_internal_harness_follow_up(
+            "Review the authoritative background subprocess completion notice and continue."
+        ));
+        assert!(is_internal_harness_follow_up(
+            "Continue autonomously from the last stalled turn. Verification is still pending."
+        ));
+        assert!(!is_internal_harness_follow_up("leftover"));
+        assert!(!is_internal_harness_follow_up("please keep going with the build"));
     }
 
     #[test]

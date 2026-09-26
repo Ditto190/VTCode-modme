@@ -321,6 +321,22 @@ pub(crate) fn render_planning_workflow_next_step_hint(renderer: &mut AnsiRendere
     Ok(())
 }
 
+/// Promote to the Planning stage and render the researching transcript row.
+///
+/// Called once per planning turn when work is live (turn start, mid-turn
+/// planning entry). Mode entry alone stays `Idle` so the footer never shows
+/// `Planning...` before the user has typed a request.
+pub(crate) fn mark_planning_turn_started(renderer: &mut AnsiRenderer, handle: &InlineHandle) {
+    handle.set_activity_state(ActivityState::Planning);
+    handle.force_redraw();
+    if let Err(err) = crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
+        renderer,
+        crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
+    ) {
+        tracing::warn!("failed to render planning progress indicator: {}", err);
+    }
+}
+
 /// Canonical plan-agent display identity used when planning entry cannot
 /// mutate `ActivePrimaryAgentState` yet (mid-turn `start_planning`). Matches
 /// the built-in plan primary agent name and color so the header badge agrees
@@ -383,7 +399,14 @@ pub(crate) async fn transition_to_planning_workflow(
     plan_session.enter(entry_source);
     plan_session.set_previous_primary_agent(previous_primary_agent);
     plan_session.set_fallback_primary_agent(fallback_primary_agent);
-    handle.set_activity_state(ActivityState::Planning);
+    // Stay Idle until the first planning turn actually starts. Setting
+    // Planning here would show "Planning..." in the footer before the user
+    // has typed anything, and the researching transcript row below would
+    // claim research started with no request. `run_turn_loop` promotes to
+    // the Planning stage and renders the researching indicator once per
+    // planning turn; mid-turn entry (`start_planning`) promotes explicitly
+    // because its turn is already running.
+    handle.set_activity_state(ActivityState::Idle);
     handle.force_redraw();
 }
 

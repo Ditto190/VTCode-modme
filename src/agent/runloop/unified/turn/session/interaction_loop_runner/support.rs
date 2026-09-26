@@ -1001,7 +1001,8 @@ pub(crate) async fn handle_select_primary_agent(
             sync_primary_agent_runtime(ctx, state).await?;
             set_primary_agent_display(ctx, display_name);
             // Activating the plan agent also enters the planning workflow so
-            // both "plan" concepts stay unified.
+            // both "plan" concepts stay unified. No researching indicator
+            // here: no request exists yet; the turn start renders it.
             if is_plan_agent && !ctx.tool_registry.is_planning_active() {
                 transition_to_planning_workflow(
                     ctx.tool_registry,
@@ -1015,12 +1016,6 @@ pub(crate) async fn handle_select_primary_agent(
                     true,
                 )
                 .await;
-                if let Err(err) = crate::agent::runloop::unified::tool_summary::render_planning_progress_indicator(
-                    ctx.renderer,
-                    crate::agent::runloop::unified::tool_summary::PLANNING_RESEARCHING_INDICATOR,
-                ) {
-                    tracing::warn!("failed to render planning progress indicator: {}", err);
-                }
             }
         }
         Err(vtcode_core::primary_agent::PrimaryAgentResolutionError::UnknownAgent { requested }) => {
