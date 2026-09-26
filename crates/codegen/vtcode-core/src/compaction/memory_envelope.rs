@@ -278,21 +278,28 @@ pub fn build_session_memory_envelope(
     // A present-but-stale artifact must not fall back to a prior envelope's
     // copy (that re-adopts the same leftover). Only inherit prior when the
     // file is absent.
-    let spec_summary = if current_spec_path(workspace_root).exists() {
+    let spec_present = current_spec_path(workspace_root).exists();
+    let evaluation_present = current_evaluation_path(workspace_root).exists();
+    let spec_summary = if spec_present {
         read_spec_summary_fresh(workspace_root, artifact_cutoff)
     } else {
         pe.and_then(|e| e.spec_summary.clone())
     };
-    let evaluation_summary = if current_evaluation_path(workspace_root).exists() {
+    let evaluation_summary = if evaluation_present {
         read_evaluation_summary_fresh(workspace_root, artifact_cutoff)
     } else {
         pe.and_then(|e| e.evaluation_summary.clone())
     };
     let merge = |prior: &[String], updates: &[String]| merge_recent_strings(prior, updates, MEMORY_LIST_LIMIT);
-    let constraints = merge(
-        pe.map(|e| e.constraints.as_slice()).unwrap_or(&[]),
-        &extract_constraints_from_summary(spec_summary.as_deref()),
-    );
+    // Constraints extracted from a dropped stale artifact must not re-enter via
+    // the prior envelope. When a live artifact file exists that channel is
+    // authoritative (fresh content or explicitly dropped).
+    let prior_constraints: &[String] = if spec_present || evaluation_present {
+        &[]
+    } else {
+        pe.map(|e| e.constraints.as_slice()).unwrap_or(&[])
+    };
+    let constraints = merge(prior_constraints, &extract_constraints_from_summary(spec_summary.as_deref()));
     let constraints = merge(&constraints, &extract_constraints_from_summary(evaluation_summary.as_deref()));
     let update = envelope_update.cloned().unwrap_or_default();
     let pending_intents = update
@@ -716,7 +723,12 @@ pub fn sanitize_session_id(session_id: &str) -> String {
         .collect()
 }
 
-fn memory_envelope_file_matches_session(name: &str, session_id: &str) -> bool {
+/// Whether a history envelope filename belongs to `session_id`.
+///
+/// Envelope names use the 32-char sanitized id, with optional `_<n>`
+/// suffixes. Matching must use this exact rule — a loose `starts_with` on
+/// the raw id over-preserves unrelated sessions.
+pub fn memory_envelope_file_matches_session(name: &str, session_id: &str) -> bool {
     let session_prefix = sanitize_session_id(session_id);
     name == format!("{session_prefix}{MEMORY_ENVELOPE_SUFFIX}")
         || (name.starts_with(&format!("{session_prefix}_")) && name.ends_with(MEMORY_ENVELOPE_SUFFIX))
@@ -790,16 +802,28 @@ fn extract_verification_summary(content: &str, checklist: &[String]) -> Option<S
 /// Split the tail of a `verify:` line into clean commands.
 ///
 /// Plan writers sometimes emit `verify: [a] and verify: [b]` on one line.
-/// Bracket-strip each piece and drop empties so a spliced marker can never
-/// leak into `verification_summary`.
+/// Strip at most one matching outer `[`…`]` pair per piece and drop empties so
+/// a spliced marker can never leak into `verification_summary`.
 fn split_verify_command_tail(rest: &str) -> Vec<String> {
     rest.split(" and verify:")
         .map(str::trim)
-        .map(|piece| piece.trim().trim_start_matches('[').trim_end_matches(']').trim())
+        .map(strip_one_outer_bracket_pair)
         .filter(|piece| !piece.is_empty())
         .map(normalize_whitespace)
         .filter(|piece| !piece.is_empty())
         .collect()
+}
+
+fn strip_one_outer_bracket_pair(piece: &str) -> &str {
+    let trimmed = piece.trim();
+    // Plan splices can leave the closing bracket off (`verify: [cmd`).
+    let Some(inner) = trimmed.strip_prefix('[').map(str::trim_start) else {
+        return trimmed;
+    };
+    match inner.strip_suffix(']') {
+        Some(stripped) => stripped.trim_end(),
+        None => inner,
+    }
 }
 
 fn collect_structured_verify_commands(content: &str) -> Vec<String> {
@@ -1591,6 +1615,14 @@ mod tests {
                 "cargo check --locked".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn split_verify_command_tail_keeps_legitimate_inner_brackets() {
+        // Only one outer pair is stripped; array/subscript syntax inside the
+        // command must survive.
+        let commands = super::split_verify_command_tail(" cargo test --features 'a[b]' ");
+        assert_eq!(commands, vec!["cargo test --features 'a[b]'".to_string()]);
     }
 
     #[test]

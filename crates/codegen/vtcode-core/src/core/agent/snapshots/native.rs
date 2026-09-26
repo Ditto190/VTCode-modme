@@ -397,7 +397,9 @@ impl SnapshotManager {
         if !self.enabled {
             return Ok(());
         }
+        let nav_path = self.navigation_path(session)?;
         let mut state = self.navigation(session)?;
+        let had_record = nav_path.exists();
         if state.active.len() > REWIND_ACTIVE_KEEP {
             let drop_count = state.active.len() - REWIND_ACTIVE_KEEP;
             state.active.drain(..drop_count);
@@ -405,14 +407,33 @@ impl SnapshotManager {
         for entry in std::mem::take(&mut state.redo) {
             self.retire_recovery_record(&entry.snapshot).await;
         }
-        atomic_json(&self.navigation_path(session)?, &state)?;
+        // Avoid inventing an empty branch file for checkpoint-less sessions.
+        if had_record || !state.active.is_empty() || state.pending.is_some() {
+            atomic_json(&nav_path, &state)?;
+        }
         let lock_path = self.storage_dir.join("rewind.lock");
-        match fs::remove_file(&lock_path) {
-            Ok(()) => {}
+        // Only remove the lock while we hold it. Deleting an flocked file that
+        // another process holds would let later `try_lock` calls create a fresh
+        // inode and break mutual exclusion.
+        match fs::OpenOptions::new().read(true).write(true).open(&lock_path) {
+            Ok(file) => {
+                if file.try_lock().is_ok() {
+                    if let Err(error) = fs::remove_file(&lock_path)
+                        && error.kind() != std::io::ErrorKind::NotFound
+                    {
+                        tracing::debug!(%error, "failed to remove rewind.lock after session completion");
+                    }
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
-                tracing::debug!(%error, "failed to remove rewind.lock after session completion");
+                tracing::debug!(%error, "failed to open rewind.lock after session completion");
             }
+        }
+        // Newly unpinned turns can be reclaimed now rather than waiting for the
+        // next prompt's budget prune.
+        if let Err(error) = self.prune_snapshot_budget().await {
+            tracing::debug!(%error, "checkpoint budget prune failed after session completion");
         }
         Ok(())
     }

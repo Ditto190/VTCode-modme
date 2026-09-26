@@ -46,10 +46,10 @@ age-based prune.
 **Verification** —
 - `cargo fmt --all -- --check` PASS
 - `cargo clippy --locked -p vtcode -p vtcode-core -p vtcode-memory --tests -- -D warnings` PASS
-- `cargo nextest run --locked -p vtcode-memory -E 'test(retention) or test(abandoned) or test(mark_abandoned)'` 11/11 PASS
-- `cargo nextest run --locked -p vtcode-core -E 'test(complete_session_navigation) or test(split_verify) or test(structured_verify) or test(stale_spec) or test(archive_completed) or test(envelope) or test(orient)'` 22/22 PASS
+- `cargo nextest run --locked -p vtcode-memory -E 'test(retention) or test(abandoned) or test(mark_abandoned) or test(symlink)'` 12/12 PASS
+- `cargo nextest run --locked -p vtcode-core -E 'test(complete_session_navigation) or test(split_verify) or test(structured_verify) or test(stale_spec) or test(handoff_artifact) or test(archive_completed) or test(envelope) or test(orient)'` 22/22 PASS
 - `cargo nextest run --locked -p vtcode -E 'test(prune_history) or test(harness) or test(retention)'` 82/82 PASS
-- `cargo nextest run --locked -p vtcode-memory -p vtcode-core --no-fail-fast` 4054/4055 PASS; 1 FAIL `harness_terminal_runs_retain_completed_sessions_until_close` — **PRE-EXISTING** (reproduces with changes stashed)
+- `cargo nextest run --locked -p vtcode-memory -p vtcode-core --no-fail-fast` 4058/4059 PASS; 1 FAIL `harness_terminal_runs_retain_completed_sessions_until_close` — **PRE-EXISTING** (reproduces with changes stashed)
 - `cargo nextest run --locked -p vtcode --no-fail-fast -E 'not binary(/cli_harness_failures/)'` 3368/3369 PASS; 1 FAIL `registry_exhaustion_latches_runloop_and_blocks_the_next_inspection` — **PRE-EXISTING**
 
 **Journey log** —
@@ -66,10 +66,15 @@ age-based prune.
   eviction candidates.
 - `session_artifact_cutoff` is intentionally fail-open on `created()` only.
   Falling back to `modified()` made the cutoff "now" and over-filtered
-  artifacts written at session start.
+  artifacts written at session start. A 24h grace keeps handoff artifacts
+  written before `vtcode` launches while still dropping week-old fixtures.
 - filesnap blob GC only runs through `retire_snapshot`/`cleanup_retired_snapshots`.
   Force-deleting turn JSON orphans the blobs; do not hand-delete snapshots if
   you want the content store reclaimed.
+- Deep review of the first implementation pass found nine issues (handoff
+  cutoff regression, loose envelope matching, fixed temp name, symlink
+  follow in `mark_abandoned`, constraint re-adoption, unconditional
+  `rewind.lock` delete). All nine were fixed and re-reviewed clean.
 
 ## [S1] Problem
 

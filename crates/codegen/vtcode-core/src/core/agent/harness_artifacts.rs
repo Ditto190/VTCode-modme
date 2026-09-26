@@ -127,10 +127,11 @@ pub fn read_outcome_verification_summary_fresh(
 /// task artifacts that predate the session. Returns `None` when the session
 /// directory is missing so callers can fall back to unfiltered reads.
 pub fn session_artifact_cutoff(workspace_root: &Path, session_id: &str) -> Option<SystemTime> {
-    let sessions_root = workspace_root.join(".vtcode").join("sessions");
+    // Canonical store path (full-length sanitize_id), plus the raw id as a
+    // fallback for callers that never opened the store.
     let candidates = [
-        sessions_root.join(session_id),
-        sessions_root.join(crate::compaction::memory_envelope::sanitize_session_id(session_id)),
+        vtcode_memory::session_directory(workspace_root, session_id),
+        workspace_root.join(".vtcode").join("sessions").join(session_id),
     ];
     for dir in candidates {
         let Ok(metadata) = fs::metadata(&dir) else {
@@ -166,8 +167,16 @@ pub fn archive_completed_current_task(workspace_root: &Path, session_id: &str) -
     }
     let archive_dir = workspace_root.join(TASKS_DIR).join("archive");
     fs::create_dir_all(&archive_dir).with_context(|| format!("create task archive dir {}", archive_dir.display()))?;
-    let safe_session: String = session_id
-        .chars()
+    let archive_path = archive_dir.join(format!("current_task-{}.md", filename_safe_id(session_id, 64)));
+    fs::rename(&task_path, &archive_path)
+        .with_context(|| format!("archive completed task tracker to {}", archive_path.display()))?;
+    Ok(Some(archive_path))
+}
+
+/// Filename-safe session id prefix for archive side-cars (not envelope names —
+/// those use `sanitize_session_id`'s fixed 32-char contract).
+fn filename_safe_id(id: &str, max_chars: usize) -> String {
+    id.chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '_' || c == '-' {
                 c
@@ -175,12 +184,8 @@ pub fn archive_completed_current_task(workspace_root: &Path, session_id: &str) -
                 '_'
             }
         })
-        .take(64)
-        .collect();
-    let archive_path = archive_dir.join(format!("current_task-{safe_session}.md"));
-    fs::rename(&task_path, &archive_path)
-        .with_context(|| format!("archive completed task tracker to {}", archive_path.display()))?;
-    Ok(Some(archive_path))
+        .take(max_chars)
+        .collect()
 }
 
 /// Write the spec artifact content to disk and return the path.
@@ -288,14 +293,27 @@ fn read_markdown_summary(path: &Path, label: &str) -> Option<String> {
     Some(format!("{label}: {}", truncate_summary(&joined)))
 }
 
+/// Grace applied when comparing artifact mtime to session start.
+///
+/// A spec written as a handoff before `vtcode` starts is still live for this
+/// session; only leftovers from *earlier* sessions (days/weeks old) must be
+/// dropped. 24h covers normal handoff workflows; the Jul-24 fixture class is
+/// far outside it.
+const ARTIFACT_FRESHNESS_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 /// Read a markdown summary only when the file is at least as new as `not_before`.
 ///
 /// Workspace-global task artifacts outlive their session. A leftover fixture
 /// must not describe a later session's memory envelope or orient snapshot.
+/// Files within [`ARTIFACT_FRESHNESS_GRACE`] of `not_before` still count as
+/// live so a just-written handoff artifact is kept.
 fn read_markdown_summary_fresh(path: &Path, label: &str, not_before: Option<SystemTime>) -> Option<String> {
     if let Some(not_before) = not_before {
         let modified = fs::metadata(path).ok()?.modified().ok()?;
-        if modified < not_before {
+        let stale_before = not_before
+            .checked_sub(ARTIFACT_FRESHNESS_GRACE)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        if modified < stale_before {
             return None;
         }
     }
@@ -422,8 +440,8 @@ mod tests {
         let spec_path = current_spec_path(temp.path());
         fs::create_dir_all(spec_path.parent().expect("parent")).expect("tasks dir");
         fs::write(&spec_path, "# Execution Spec\nExplore the codebase and summarize.\n").expect("write spec");
-        // Make the fixture look old (pre-session).
-        let old = SystemTime::now() - std::time::Duration::from_secs(3600);
+        // Make the fixture look like a leftover from a prior session (days old).
+        let old = SystemTime::now() - std::time::Duration::from_secs(48 * 60 * 60);
         let file = fs::File::options().write(true).open(&spec_path).expect("open");
         file.set_modified(old).expect("set mtime");
 
@@ -433,8 +451,23 @@ mod tests {
             "a leftover fixture must not describe a later session"
         );
         assert!(
-            read_spec_summary_fresh(temp.path(), Some(old - std::time::Duration::from_secs(10))).is_some(),
+            read_spec_summary_fresh(temp.path(), Some(old + std::time::Duration::from_secs(10))).is_some(),
             "fresh reads still accept artifacts written during the session"
+        );
+    }
+
+    #[test]
+    fn handoff_artifact_written_just_before_session_start_stays_live() {
+        let temp = tempdir().expect("tempdir");
+        let spec_path = current_spec_path(temp.path());
+        fs::create_dir_all(spec_path.parent().expect("parent")).expect("tasks dir");
+        fs::write(&spec_path, "# Spec\n\nShip the residual hygiene fix.\n").expect("write spec");
+
+        // Session directory is created *after* the handoff spec is written.
+        let session_start = SystemTime::now();
+        assert!(
+            read_spec_summary_fresh(temp.path(), Some(session_start)).is_some(),
+            "a just-written handoff artifact must survive the freshness cutoff"
         );
     }
 

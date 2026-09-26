@@ -184,7 +184,13 @@ pub fn mark_abandoned_active_sessions(
     let mut marked = 0usize;
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        // Same symlink-safe enumeration as `retention_candidates`: never
+        // rewrite a manifest through a planted symlink.
+        if !file_type.is_dir() || file_type.is_symlink() {
             continue;
         }
         if preserve_path.as_deref() == Some(path.as_path()) {
@@ -218,10 +224,14 @@ pub fn mark_abandoned_active_sessions(
         }
         let body = serde_json::to_vec_pretty(&summary)
             .map_err(|error| SessionStoreError::io(manifest_path.clone(), std::io::Error::other(error)))?;
-        // Atomic replace so a crash cannot leave a truncated manifest.
-        let temp = manifest_path.with_extension("json.tmp");
+        // Unique temp + rename so a crash cannot leave a truncated manifest and
+        // concurrent writers cannot collide (same pattern as checkpoint atomic_json).
+        let temp = manifest_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
         std::fs::write(&temp, &body).map_err(|e| SessionStoreError::io(temp.clone(), e))?;
-        std::fs::rename(&temp, &manifest_path).map_err(|e| SessionStoreError::io(manifest_path.clone(), e))?;
+        if let Err(error) = std::fs::rename(&temp, &manifest_path) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(SessionStoreError::io(manifest_path.clone(), error));
+        }
         marked += 1;
     }
     Ok(marked)

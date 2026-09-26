@@ -148,9 +148,6 @@ pub(super) async fn run_harness_retention(workspace: &Path, vt_cfg: Option<&VTCo
 fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_days: u64) -> Result<usize> {
     const HISTORY_ENVELOPE_KEEP: usize = 50;
 
-    // Envelope filenames are produced by the 32-char sanitized session id, not
-    // the raw id. Match on that prefix or the preserve branch is dead.
-    let preserve_prefix = vtcode_core::compaction::memory_envelope::sanitize_session_id(preserve_session_id);
     let history_dir = workspace.join(".vtcode").join("history");
     let Ok(entries) = std::fs::read_dir(&history_dir) else {
         return Ok(0);
@@ -164,8 +161,9 @@ fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_
         if !name.ends_with(".memory.json") || !path.is_file() {
             continue;
         }
-        let stem = name.trim_end_matches(".memory.json");
-        if stem.starts_with(&preserve_prefix) || name.starts_with(preserve_session_id) {
+        // Exact sanitized-id match (same rule as envelope writers). Loose
+        // prefix matching would preserve unrelated sessions.
+        if vtcode_core::compaction::memory_envelope::memory_envelope_file_matches_session(name, preserve_session_id) {
             continue;
         }
         let modified = entry
@@ -260,6 +258,28 @@ mod tests {
         assert!(
             history.join(envelope_name).exists(),
             "finalizing session envelope must match on the 32-char sanitized prefix"
+        );
+    }
+
+    #[test]
+    fn prune_history_envelopes_does_not_over_preserve_shared_prefixes() {
+        let temp = TempDir::new().expect("temp dir");
+        let history = temp.path().join(".vtcode").join("history");
+        std::fs::create_dir_all(&history).expect("history dir");
+        // Near-miss name that loose `starts_with("session-keep")` would wrongly preserve.
+        std::fs::write(history.join("session-keep.memory.json"), b"{}").expect("write preserved");
+        std::fs::write(history.join("session-keeper.memory.json"), b"{}").expect("write near-miss");
+        for i in 0..60 {
+            std::fs::write(history.join(format!("other-{i:03}.memory.json")), b"{}").expect("write other");
+        }
+
+        // max_age_days = 0 ages out every non-preserved envelope so the
+        // assertion is about matching, not the count cap.
+        prune_history_envelopes(temp.path(), "session-keep", 0).expect("prune");
+        assert!(history.join("session-keep.memory.json").exists(), "exact session stays");
+        assert!(
+            !history.join("session-keeper.memory.json").exists(),
+            "near-miss name must not be preserved by loose prefix matching"
         );
     }
 }

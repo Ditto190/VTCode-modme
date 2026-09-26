@@ -352,6 +352,34 @@ fn mark_abandoned_skips_preserved_session() {
     assert_eq!(other.status, "completed");
 }
 
+#[cfg(unix)]
+#[test]
+fn mark_abandoned_skips_symlink_session_entries() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new().expect("tempdir");
+    let outside = TempDir::new().expect("outside");
+    let outside_manifest = outside.path().join("manifest.json");
+    fs::write(
+        &outside_manifest,
+        r#"{"session_id":"evil","status":"active","updated_at":"2020-01-01T00:00:00Z","created_at":"2020-01-01T00:00:00Z","turn_count":1,"event_count":1}"#,
+    )
+    .expect("write outside manifest");
+    let sessions = sessions_root(dir.path());
+    fs::create_dir_all(&sessions).expect("sessions root");
+    symlink(outside.path(), sessions.join("evil-session")).expect("symlink");
+
+    let marked = crate::retention::mark_abandoned_active_sessions(dir.path(), 30, None).expect("mark abandoned");
+
+    assert_eq!(marked, 0, "symlinked session entries must be skipped");
+    assert!(
+        fs::read_to_string(&outside_manifest)
+            .expect("outside manifest")
+            .contains("\"active\""),
+        "must not rewrite a manifest through a planted symlink"
+    );
+}
+
 #[test]
 fn retention_evicts_abandoned_active_sessions_past_age_window() {
     let dir = TempDir::new().expect("tempdir");
