@@ -185,9 +185,6 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     }: PostToolLlmRecoveryInputs<'_>,
 ) -> Result<PostToolFailureRecovery> {
     let config_guidance = misconfiguration_guidance(err);
-    if let Some(guidance) = config_guidance.as_ref() {
-        renderer.line(MessageStyle::Warning, &guidance.user_message())?;
-    }
 
     if is_unmatched_tool_result_error(&err.to_string()) {
         // A repaired retry has already been attempted, or the request was
@@ -195,6 +192,9 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         // schedule another provider or tool-free retry with the same wire
         // shape.
         ensure_post_tool_resume_directive(working_history);
+        if let Some(guidance) = config_guidance.as_ref() {
+            renderer.line(MessageStyle::Warning, &guidance.user_message())?;
+        }
         renderer.line(
             MessageStyle::Info,
             "The provider rejected an unmatched tool result after one bounded history repair; the turn is paused for resume.",
@@ -235,7 +235,10 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     } else {
         ""
     };
-    let summary = follow_up_failure_status_line(transient_hint);
+    let summary = match config_guidance.as_ref() {
+        Some(guidance) => format!("{} {}", follow_up_failure_status_line(transient_hint), guidance.user_message()),
+        None => follow_up_failure_status_line(transient_hint),
+    };
     let should_retry_tool_enabled =
         !misconfiguration && allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
     let should_retry_tool_free = !misconfiguration
@@ -264,15 +267,6 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         // reuse this turn's tool outputs instead of re-running exploration.
         ensure_post_tool_resume_directive(working_history);
     }
-    let action_text = follow_up_failure_action_line(
-        should_retry_tool_enabled,
-        context_capacity_failure,
-        should_retry_tool_free,
-        planning_active,
-        err_cat.is_retryable(),
-        misconfiguration,
-    );
-    renderer.line(MessageStyle::Info, &format!("  • {action_text}"))?;
     let action = if should_retry_tool_enabled {
         PostToolFailureRecovery::RetryToolEnabled
     } else if should_retry_tool_free {
@@ -280,6 +274,13 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     } else {
         PostToolFailureRecovery::StopAfterDirective
     };
+    let action_text = follow_up_failure_action_line(
+        action,
+        context_capacity_failure,
+        planning_active,
+        !misconfiguration && !err_cat.is_retryable(),
+    );
+    renderer.line(MessageStyle::Info, &format!("  • {action_text}"))?;
 
     tracing::warn!(
         error = %err,
@@ -301,30 +302,32 @@ fn follow_up_failure_status_line(transient_hint: &str) -> String {
 
 /// Action line body (no bullet prefix) for a post-tool follow-up failure.
 /// Pure so the 2-line TUI contract is unit-testable without a renderer.
+/// `tip_eligible` is `!misconfiguration && !err_retryable` at the call site.
 fn follow_up_failure_action_line(
-    should_retry_tool_enabled: bool,
+    recovery: PostToolFailureRecovery,
     context_capacity_failure: bool,
-    should_retry_tool_free: bool,
     planning_active: bool,
-    err_retryable: bool,
-    misconfiguration: bool,
+    tip_eligible: bool,
 ) -> &'static str {
-    if should_retry_tool_enabled {
-        if context_capacity_failure {
-            "Context capacity exceeded; compacting and scheduling one tool-enabled recovery pass."
-        } else {
-            "Scheduling one tool-enabled recovery pass."
+    match recovery {
+        PostToolFailureRecovery::RetryToolEnabled => {
+            if context_capacity_failure {
+                "Context capacity exceeded; compacting and scheduling one tool-enabled recovery pass."
+            } else {
+                "Scheduling one tool-enabled recovery pass."
+            }
         }
-    } else if should_retry_tool_free {
-        "Scheduling a final tool-free recovery pass."
-    } else if !misconfiguration && !err_retryable {
-        if planning_active {
-            "Planning evidence is preserved; type `keep planning` to continue, or switch provider/model if this repeats."
-        } else {
-            "Retry with a narrower prompt or switch provider/model."
+        PostToolFailureRecovery::RetryToolFree => "Scheduling a final tool-free recovery pass.",
+        PostToolFailureRecovery::StopAfterDirective if tip_eligible => {
+            if planning_active {
+                "Planning evidence is preserved; type `keep planning` to continue, or switch provider/model if this repeats."
+            } else {
+                "Retry with a narrower prompt or switch provider/model."
+            }
         }
-    } else {
-        "Type 'continue' to resume with retained tool outputs."
+        PostToolFailureRecovery::StopAfterDirective | PostToolFailureRecovery::NotApplicable => {
+            "Type 'continue' to resume with retained tool outputs."
+        }
     }
 }
 
@@ -1076,11 +1079,11 @@ mod tests {
         assert!(status.contains("model follow-up failed"));
 
         for action in [
-            follow_up_failure_action_line(true, false, false, false, true, false),
-            follow_up_failure_action_line(true, true, false, false, true, false),
-            follow_up_failure_action_line(false, false, true, false, true, false),
-            follow_up_failure_action_line(false, false, false, true, false, false),
-            follow_up_failure_action_line(false, false, false, false, false, false),
+            follow_up_failure_action_line(PostToolFailureRecovery::RetryToolEnabled, false, false, false),
+            follow_up_failure_action_line(PostToolFailureRecovery::RetryToolEnabled, true, false, false),
+            follow_up_failure_action_line(PostToolFailureRecovery::RetryToolFree, false, false, false),
+            follow_up_failure_action_line(PostToolFailureRecovery::StopAfterDirective, false, true, true),
+            follow_up_failure_action_line(PostToolFailureRecovery::StopAfterDirective, false, false, false),
         ] {
             assert!(!action.contains('\n'), "action stays one line: {action}");
             assert!(!action.contains("Follow-up error category"), "no category leak: {action}");
@@ -1090,21 +1093,31 @@ mod tests {
 
     #[test]
     fn follow_up_failure_action_line_matches_outcome() {
-        assert!(follow_up_failure_action_line(true, true, false, false, true, false).contains("Context capacity"));
         assert!(
-            follow_up_failure_action_line(true, false, false, false, true, false).contains("tool-enabled recovery")
+            follow_up_failure_action_line(PostToolFailureRecovery::RetryToolEnabled, true, false, false)
+                .contains("Context capacity")
         );
-        assert!(follow_up_failure_action_line(false, false, true, false, true, false).contains("tool-free recovery"));
         assert!(
-            follow_up_failure_action_line(false, false, false, true, false, false).contains("keep planning"),
+            follow_up_failure_action_line(PostToolFailureRecovery::RetryToolEnabled, false, false, false)
+                .contains("tool-enabled recovery")
+        );
+        assert!(
+            follow_up_failure_action_line(PostToolFailureRecovery::RetryToolFree, false, false, false)
+                .contains("tool-free recovery")
+        );
+        assert!(
+            follow_up_failure_action_line(PostToolFailureRecovery::StopAfterDirective, false, true, true)
+                .contains("keep planning"),
             "planning stop names the next verb"
         );
         assert!(
-            follow_up_failure_action_line(false, false, false, false, false, false).contains("narrower prompt"),
+            follow_up_failure_action_line(PostToolFailureRecovery::StopAfterDirective, false, false, true)
+                .contains("narrower prompt"),
             "non-retryable stop names the retry tip"
         );
         assert!(
-            follow_up_failure_action_line(false, false, false, false, true, true).contains("continue"),
+            follow_up_failure_action_line(PostToolFailureRecovery::StopAfterDirective, false, false, false)
+                .contains("continue"),
             "misconfiguration stop offers continue"
         );
     }

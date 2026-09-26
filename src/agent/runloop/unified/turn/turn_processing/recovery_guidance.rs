@@ -88,7 +88,8 @@ fn recovery_empty_response_fallback_guidance(mode: RecoveryMode) -> &'static str
 
 /// User-facing empty-response fallback answer. Stays concise (spec
 /// tui-diagnostics-cleanup S2D): no embedded multi-line evidence dumps.
-/// Bounded previews belong in the synthesis directive, not the assistant text.
+/// Tool outputs already live in conversation history; planning synthesis
+/// directives carry bounded previews separately when needed.
 pub(super) fn recovery_empty_response_fallback_message(mode: RecoveryMode) -> String {
     let intro = recovery_empty_response_fallback_intro(mode);
     let guidance = recovery_empty_response_fallback_guidance(mode);

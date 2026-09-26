@@ -210,12 +210,21 @@ pub(super) fn blocker_summary_with_diagnostics(
     summary
 }
 
+/// True when the blocker summary is the anti-blind verification gate.
+/// Shared by the status label and the action-line verb so the literal stays
+/// in one place.
+pub(super) fn is_verification_pending_block(blocker_summary: &str) -> bool {
+    blocker_summary.to_ascii_lowercase().contains("verification is still pending")
+}
+
+const BLOCKED_STATUS_HEADLINE_LIMIT: usize = 80;
+
 /// Short TUI stop marker for a blocked turn. Long recovery-fallback and
 /// planning reasons are already published as assistant text in the same turn
 /// (R4: do not repeat); the full reason stays in the handoff markdown.
 pub(super) fn blocked_status_label(blocker_summary: &str) -> String {
     let lowered = blocker_summary.to_ascii_lowercase();
-    if lowered.contains("verification is still pending") {
+    if is_verification_pending_block(blocker_summary) {
         return "Turn blocked: verification pending".to_string();
     }
     if lowered.contains("planning turn ended via recovery fallback") {
@@ -225,31 +234,45 @@ pub(super) fn blocked_status_label(blocker_summary: &str) -> String {
         return "Turn blocked: recovery fallback".to_string();
     }
     let headline = truncated_block_reason(blocker_summary, "");
-    let headline = headline.strip_suffix("… — full reason: ").unwrap_or(&headline);
+    let headline = headline.strip_suffix("… — full reason: ").unwrap_or(headline.as_str());
     if headline.is_empty() {
         return "Turn blocked".to_string();
     }
-    if headline.chars().count() <= 80 {
+    if headline.chars().count() <= BLOCKED_STATUS_HEADLINE_LIMIT {
         return format!("Turn blocked: {headline}");
     }
-    "Turn blocked".to_string()
+    let mut short: String = headline.chars().take(BLOCKED_STATUS_HEADLINE_LIMIT.saturating_sub(1)).collect();
+    short.push('…');
+    format!("Turn blocked: {short}")
 }
 
 /// Build the single TUI action line (2-line diagnostic contract). Combines the
-/// verb phrase, optional resume id, and a workspace-relative handoff pointer.
+/// verb phrase, optional resume id, and durable handoff pointers.
+///
+/// Both the live pointer and the timestamped archive are named: the live
+/// `current_blocked.md` is deleted on recovery, so a transcript that only
+/// names it becomes an orphan. The archive is the durable copy.
 pub(super) fn blocked_action_line(
     workspace: &Path,
     handoff_path: &Path,
+    archive_path: &Path,
     resume: Option<&str>,
     planning_active: bool,
     is_mutation_block: bool,
     is_verification_block: bool,
 ) -> String {
-    let mut parts: Vec<String> = Vec::with_capacity(3);
+    let mut parts: Vec<String> = Vec::with_capacity(4);
     if is_verification_block {
         parts.push(
             "Run the verifier standalone or as a pure `&&` chain, let it exit 0, then type 'continue'".to_string(),
         );
+        if planning_active {
+            parts.push(
+                plan_mode_switch_guidance_line(is_mutation_block)
+                    .trim_end_matches('.')
+                    .to_string(),
+            );
+        }
     } else if planning_active {
         parts.push(
             plan_mode_switch_guidance_line(is_mutation_block)
@@ -263,7 +286,9 @@ pub(super) fn blocked_action_line(
         parts.push(format!("`vtcode --resume {id}`"));
     }
     let relative = workspace_relative_display(workspace, handoff_path);
+    let archive = workspace_relative_display(workspace, archive_path);
     parts.push(format!("details: {relative}"));
+    parts.push(format!("archive: {archive}"));
     format!("  • {}", parts.join(" · "))
 }
 
@@ -440,11 +465,11 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
         Ok(artifacts) => {
             // Strict 2-line TUI diagnostic contract (spec tui-diagnostics-cleanup):
             // line 1 = short stop marker (no repeat of an assistant-published
-            // reason), line 2 = one combined action. Full reason, archive path,
-            // and forensics stay in the handoff markdown + `events.jsonl`.
+            // reason), line 2 = one combined action including durable archive
+            // pointer (live current_blocked.md is cleared on recovery).
             let status = blocked_status_label(blocker_summary);
             let _ = renderer.line(MessageStyle::Warning, &status);
-            let is_verification_block = blocker_summary.to_ascii_lowercase().contains("verification is still pending");
+            let is_verification_block = is_verification_pending_block(blocker_summary);
             let resume_id = match resume {
                 BlockedHandoffResume::Available(id) => Some(id.as_str()),
                 BlockedHandoffResume::Unavailable(_) => None,
@@ -452,6 +477,7 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
             let action = blocked_action_line(
                 workspace,
                 &artifacts.current_path,
+                &artifacts.archive_path,
                 resume_id,
                 planning_active,
                 is_plan_mode_mutation_block(blocker_summary),
@@ -516,9 +542,9 @@ pub(super) fn persist_blocked_handoff_quiet(
 mod tests {
     use super::{
         NO_ARCHIVE_RESUME_EXPLANATION, TRANSCRIPT_BLOCK_REASON_LIMIT, blocked_action_line, blocked_status_label,
-        blocker_summary_with_diagnostics, is_plan_mode_mutation_block, plan_mode_switch_guidance_line,
-        truncated_block_reason, verification_auto_recovery_follow_up, verification_auto_recovery_status_line,
-        verification_exhausted_handoff_reason,
+        blocker_summary_with_diagnostics, is_plan_mode_mutation_block, is_verification_pending_block,
+        plan_mode_switch_guidance_line, truncated_block_reason, verification_auto_recovery_follow_up,
+        verification_auto_recovery_status_line, verification_exhausted_handoff_reason,
     };
     use crate::agent::runloop::unified::state::{VerificationFailureSummary, is_follow_up_prompt_like};
     use std::path::Path;
@@ -736,12 +762,23 @@ mod tests {
     }
 
     #[test]
-    fn blocked_action_line_is_one_line_with_relative_details_and_resume() {
+    fn blocked_status_label_truncates_long_headlines_instead_of_dropping() {
+        let long = format!("provider rejected the request: {}", "x".repeat(200));
+        let label = blocked_status_label(&long);
+        assert!(label.starts_with("Turn blocked: provider rejected"));
+        assert!(label.ends_with('…'), "long reasons keep a truncated signal: {label}");
+        assert!(label.chars().count() <= "Turn blocked: ".len() + 80);
+    }
+
+    #[test]
+    fn blocked_action_line_is_one_line_with_relative_details_resume_and_archive() {
         let workspace = Path::new("/work/proj");
         let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
+        let archive = Path::new("/work/proj/.vtcode/tasks/blockers/session-vtcode-20260924t041604z-deadbeef.md");
         let action = blocked_action_line(
             workspace,
             handoff,
+            archive,
             Some("session-vtcode-20260924T040254Z_398045-69092"),
             false,
             false,
@@ -752,6 +789,10 @@ mod tests {
         assert!(!action.contains('\n'), "2-line contract: action stays single-line: {action}");
         assert!(action.contains("`vtcode --resume session-vtcode-20260924T040254Z_398045-69092`"));
         assert!(action.contains("details: .vtcode/tasks/current_blocked.md"));
+        assert!(
+            action.contains("archive: .vtcode/tasks/blockers/session-vtcode-20260924t041604z-deadbeef.md"),
+            "durable archive pointer must survive live-pointer clear: {action}"
+        );
         assert!(!action.contains("/work/proj/.vtcode"), "no absolute workspace path: {action}");
     }
 
@@ -759,9 +800,11 @@ mod tests {
     fn blocked_action_line_verification_leads_with_verifier_step() {
         let workspace = Path::new("/work/proj");
         let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
-        let action = blocked_action_line(workspace, handoff, None, false, false, true);
+        let archive = Path::new("/work/proj/.vtcode/tasks/blockers/a.md");
+        let action = blocked_action_line(workspace, handoff, archive, None, false, false, true);
         assert!(action.contains("Run the verifier standalone"));
         assert!(action.contains("details: .vtcode/tasks/current_blocked.md"));
+        assert!(action.contains("archive: .vtcode/tasks/blockers/a.md"));
         assert!(!action.contains('\n'));
     }
 
@@ -769,9 +812,28 @@ mod tests {
     fn blocked_action_line_plan_mode_folds_switch_guidance() {
         let workspace = Path::new("/work/proj");
         let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
-        let action = blocked_action_line(workspace, handoff, None, true, true, false);
+        let archive = Path::new("/work/proj/.vtcode/tasks/blockers/a.md");
+        let action = blocked_action_line(workspace, handoff, archive, None, true, true, false);
         assert!(action.contains("/mode build"));
         assert!(action.contains("read-only"));
         assert!(!action.contains('\n'), "R7: plan-mode guidance folds into the one action line");
+    }
+
+    #[test]
+    fn blocked_action_line_keeps_plan_verb_when_verification_also_pending() {
+        let workspace = Path::new("/work/proj");
+        let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
+        let archive = Path::new("/work/proj/.vtcode/tasks/blockers/a.md");
+        let action = blocked_action_line(workspace, handoff, archive, None, true, true, true);
+        assert!(action.contains("Run the verifier standalone"));
+        assert!(action.contains("/mode build"), "plan guidance must not be dropped: {action}");
+        assert!(!action.contains('\n'));
+    }
+
+    #[test]
+    fn verification_matcher_is_shared() {
+        assert!(is_verification_pending_block(BASE));
+        assert!(is_verification_pending_block("Turn blocked: verification is still pending."));
+        assert!(!is_verification_pending_block("provider 429 rate limited"));
     }
 }
