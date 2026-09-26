@@ -2,6 +2,85 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.169.4 - 2026-09-26
+
+### Highlights
+#### Bug Fixes
+
+- Replace yanked chacha20 0.10.1 with 0.10.2 (72b5c7c5) (@vinhnx)
+- Silence macOS __eh_frame compact-unwind warning (295bd1a9) (@vinhnx)
+- Support argument-hint and silent allowed-tools list normalization (a60f8c69) 
+- Tighten background window review findings (b8c10b5e) 
+- Execute textual tool-call markup in skill sub-LLM fallback (9c9f9490) 
+- Surface validator feedback in terminal plan rejection history (a045db8f) 
+- Bound session close so stop/close cannot freeze the runloop (cfa8434f) 
+- Bound output-read lock acquire and widen close timeout (ff5ecda7) 
+- Escalate child reap and cover out-of-scope textual tool markup (f4de874e) 
+- Render blockquotes as italic without leading bar (ee8271ce) 
+- Restore macOS panic unwinding and re-tune preview-budget test sizes (7d3856e4) 
+- Sync header and full plan-agent switch on planning entry (57d6435d) 
+- Keep plan-entry handoffs out of Blocked and never restore plan (9c85c67c) 
+- Gate textual tool-calls on fences and clean names (60959f8e) 
+- Fail-open unclosed fence tail in textual tool-call gating (27792c10) 
+- Defer planning indicator until first planning turn (179afc0d) 
+- Shell-aware Ran header wrapping with shared widths (7393eb63) 
+- Format tool-call commands with explicit shell continuations (52ab4302) 
+- Stop name mistakes from tripping preflight circuit (c98bbf59) 
+- Prune turn checkpoints and skip quoted heredoc bodies (93b31290) 
+- Ignore stale session navigations when protecting turns (d3690926) 
+- Keep checkpoint prune off the hot path (84223819) 
+- Keep durable archive pointer and bound blocked status (69c96715) 
+- Stop residual session state from leaking across sessions (b730ed9d) 
+- Close review gaps in residual session hygiene (88e7e660) 
+- Harden residual hygiene against review findings (f1aac4d8) 
+#### Documentation
+
+- Refine structure and collapse promotional blocks (ba10f8a1) (@vinhnx)
+- Reorganize section structure without content changes (8f11eb58) 
+- Finalize background-agents-window feature doc (a16c8780) 
+- Spotlight Memcode cross-thread memory writeup (a651d88a) 
+- Record session-stdio-dimmer commit range (221f00f1) 
+- Move Spotlight to top and add Memcode pull quote (8101b4e5) 
+- Record plan-rejection-model-feedback delivery (29e3da63) 
+- Record session-close-harden delivery (ce55774e) 
+- Record session-close-and-skill-markup-harden delivery (dee20d19) 
+- Record plan-mode-header-handoff delivery range (f88757d7) 
+- Update plan-mode-header-handoff delivery range (3b6bfaa0) 
+- Record harness-textual-tool-call-harden delivery (655852ca) 
+- Record tool-loop-session-auto-grant delivery (e676bcf5) 
+- Update tool-loop-session-auto-grant after review fixes (141fe082) 
+- Deliver session-audit-harness-fixes after review (d4b05b95) 
+- Deliver tui-diagnostics-cleanup after review (c9f31c29) 
+- Deliver session-residual-hygiene after review (55d36ee2) 
+- Record final session-residual-hygiene commit range (136d05b2) 
+#### Features
+
+- Align discovery and loading with Agent Skills spec client guide (bc203212) 
+- Expand Local Agents into floating background window (e988dd53) 
+- Dim session stdio bodies and add expand notice (15474018) 
+- Live transcript progress rows with whole-line shimmer (29599e42) 
+- Auto-grant tool loops after first session grant (f9ccb493) 
+### Other Changes
+#### Other
+
+- Update TODO (21c2ab54) 
+- Update TODO (e2215fe1) 
+- Update TODO (f79ec288) 
+- Update TODO (4c42868c) 
+- Update TODO (78eabb32) 
+- Revert "Merge branch 'fix/plan-mode-header-handoff'" (a4bea5a2) 
+- Update TODO (a997cb99) 
+#### Refactors
+
+- Remove unused RL optimization loop module (2fb819df) 
+- Derive harness follow-up quiet path from producer constants (9a1ab4a0) 
+- Latch tool-loop grants inside apply path (d2c0c747) 
+- Enforce 2-line diagnostic contract across runloop (7d67cb21) 
+#### Tests
+
+- Cover full-command header wrapping end to end (7d41a8ff) 
+- Harden tool-call tag tests and document quiet follow-up UX (c9635e4d) 
+- Lock post-tool 2-line contract and fix stale hint helper (d29320c5) 
 ## 0.169.3 - 2026-09-25
 
 ### Highlights
