@@ -3,7 +3,7 @@ feature: tool-loop-session-auto-grant
 status: delivered
 updated: 2026-09-26
 branch: feat/tool-loop-session-auto-grant
-commits: c9635e4d0..f9ccb493f
+commits: c9635e4d0..d2c0c747c
 ---
 
 # Tool Loop Session Auto-Grant
@@ -23,8 +23,8 @@ earlier grant this session preauthorized further increases") and keep the existi
 
 **Verification** — `./scripts/check-dev.sh` PASS (fmt, clippy, cargo check).
 Focused nextest: tool-loop / latch / grant-source / limit-prompts suites 19–24/19–24
-PASS across runs. Reviewer (independent subagent) confirmed all 8 acceptance criteria
-with no critical findings.
+PASS across runs. Two independent reviews: all 8 acceptance criteria met, no critical
+findings; post-fix re-review CLEAN.
 
 **Journey log** —
 - Full-auto already had auto-grant (`full_auto_loop_grants_enabled` +
@@ -41,6 +41,9 @@ with no critical findings.
   `tool_loop_grant_preauthorized_survives_fresh_execution_in_session`).
 - fmt-only import reorders in `session_loop.rs` / `session_loop_impl.rs` rode along
   from `cargo fmt --all` required by the gate.
+- Post-delivery review-fix loop: moved the latch into `apply_tool_loop_grant`
+  (Manual only), replaced `!= Manual` with an explicit `is_automatic()` allowlist,
+  and collapsed three overlapping grant-source tests into one decision matrix.
 
 ## [S1] Problem
 
