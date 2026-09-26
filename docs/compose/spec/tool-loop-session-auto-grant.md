@@ -1,14 +1,46 @@
 ---
 feature: tool-loop-session-auto-grant
-status: in-progress
+status: delivered
 updated: 2026-09-26
 branch: feat/tool-loop-session-auto-grant
-commits: 
+commits: c9635e4d0..f9ccb493f
 ---
 
 # Tool Loop Session Auto-Grant
 
 ## Report
+
+**What was built** — Interactive tool-loop limit hits no longer re-prompt after the
+user grants one increase. The first successful `prompt_tool_loop_limit_increase`
+approval latches `SessionStats::tool_loop_grant_preauthorized` for the process
+session. Later limit hits take the auto-grant path with the same max `+N` arithmetic
+as full-auto (`auto_tool_loop_grant_increment`), continue the turn, and never open
+the modal. Denial/Esc/Stop leaves the latch clear so the next hit prompts again.
+Full-auto auto-grant, the absolute hard cap, and the planning research synthesis path
+are unchanged. Session-preauthorized grants use distinct wording ("Auto-granted …
+earlier grant this session preauthorized further increases") and keep the existing
+`ToolLoopLimitIncreased` event kind.
+
+**Verification** — `./scripts/check-dev.sh` PASS (fmt, clippy, cargo check).
+Focused nextest: tool-loop / latch / grant-source / limit-prompts suites 19–24/19–24
+PASS across runs. Reviewer (independent subagent) confirmed all 8 acceptance criteria
+with no critical findings.
+
+**Journey log** —
+- Full-auto already had auto-grant (`full_auto_loop_grants_enabled` +
+  `auto_tool_loop_grant_increment`); the interactive gap was a missing session latch,
+  not missing increment math.
+- `CrossTurnTracker` is session-scoped but lives in the outer orchestration loop, not
+  `TurnLoopContext`. `SessionStats` is already `&mut` in the turn context and holds
+  other session flags, so the latch belongs there.
+- Reviewer noted the original `session_preauthorized_auto_grant_matches_full_auto_increment`
+  test was tautological; replaced with an assertion that the latched source is never
+  `Manual` plus explicit max-increment cases.
+- `reset_for_fresh_execution` deliberately keeps the latch: the one-time HITL
+  preference is process-session scoped, not conversation-context scoped (covered by
+  `tool_loop_grant_preauthorized_survives_fresh_execution_in_session`).
+- fmt-only import reorders in `session_loop.rs` / `session_loop_impl.rs` rode along
+  from `cargo fmt --all` required by the gate.
 
 ## [S1] Problem
 
@@ -99,9 +131,9 @@ clamped. The same arithmetic as full-auto, so one unit-tested pure function cove
 
 ## Tasks
 
-- [ ] T1: Add `tool_loop_grant_preauthorized` to `SessionStats` with accessors — acceptance: field defaults false; `mark_tool_loop_grant_preauthorized` / `tool_loop_grant_preauthorized` compile and unit-test. (covers: S2)
-- [ ] T2: Extract pure grant-policy helper and wire auto-grant when latched — acceptance: at limit with `preauthorized=true` and not full-auto, `maybe_handle_tool_loop_limit` uses `auto_tool_loop_grant_increment` and never calls `prompt_tool_loop_limit_increase`. (covers: S2; depends: T1)
-- [ ] T3: Set the latch only on successful interactive grant; leave denial unlatched — acceptance: successful grant path sets the flag; denial/synthesis recovery leaves it false. (covers: S2; depends: T1)
-- [ ] T4: Distinct session-preauthorized wording in status + harness event — acceptance: auto-grant after latch does not use the "Full-auto" string; manual wording unchanged. (covers: S2; depends: T2)
-- [ ] T5: Regression tests for scenarios (first prompt, post-grant auto, denial keeps prompt, hard cap terminal, full-auto precedence) — acceptance: `cargo nextest run` covers the decision matrix and latch transitions. (covers: S2; depends: T2, T3, T4)
-- [ ] T6: Update tool-loop user docs (`docs/config/TOOLS_CONFIG.md` and related grant docs) — acceptance: docs describe one-time HITL then session auto-grant of max +N. (covers: S2)
+- [x] T1: Add `tool_loop_grant_preauthorized` to `SessionStats` with accessors — acceptance: field defaults false; `mark_tool_loop_grant_preauthorized` / `tool_loop_grant_preauthorized` compile and unit-test. (covers: S2)
+- [x] T2: Extract pure grant-policy helper and wire auto-grant when latched — acceptance: at limit with `preauthorized=true` and not full-auto, `maybe_handle_tool_loop_limit` uses `auto_tool_loop_grant_increment` and never calls `prompt_tool_loop_limit_increase`. (covers: S2; depends: T1)
+- [x] T3: Set the latch only on successful interactive grant; leave denial unlatched — acceptance: successful grant path sets the flag; denial/synthesis recovery leaves it false. (covers: S2; depends: T1)
+- [x] T4: Distinct session-preauthorized wording in status + harness event — acceptance: auto-grant after latch does not use the "Full-auto" string; manual wording unchanged. (covers: S2; depends: T2)
+- [x] T5: Regression tests for scenarios (first prompt, post-grant auto, denial keeps prompt, hard cap terminal, full-auto precedence) — acceptance: `cargo nextest run` covers the decision matrix and latch transitions. (covers: S2; depends: T2, T3, T4)
+- [x] T6: Update tool-loop user docs (`docs/config/TOOLS_CONFIG.md` and related grant docs) — acceptance: docs describe one-time HITL then session auto-grant of max +N. (covers: S2)
