@@ -88,6 +88,11 @@ pub(crate) struct SessionStats {
     /// This survives a blocked turn so a later `continue` cannot claim
     /// completion from inspection-only work.
     verification_pending: bool,
+    /// Whether the user granted a tool-loop increase at least once this
+    /// session. After that first successful grant, later tool-loop limit hits
+    /// auto-grant the maximum increment without another HITL prompt. Denials
+    /// leave this false so the prompt remains available.
+    tool_loop_grant_preauthorized: bool,
     /// Bounded fix-up edits remaining while `verification_pending` is true.
     /// Granted by a failed verifier so a broken build can be repaired across
     /// `continue` turns; consumed by successful fix-up mutations.
@@ -956,6 +961,19 @@ impl SessionStats {
         self.recent_touched_files.iter().cloned().collect()
     }
 
+    /// Whether later tool-loop limit hits may skip the HITL prompt and
+    /// auto-grant the maximum increment. Set only after the first successful
+    /// interactive grant in this process session.
+    pub(crate) fn tool_loop_grant_preauthorized(&self) -> bool {
+        self.tool_loop_grant_preauthorized
+    }
+
+    /// Latch session-preauthorized tool-loop auto-grants after a successful
+    /// interactive grant. Idempotent; denials never call this.
+    pub(crate) fn mark_tool_loop_grant_preauthorized(&mut self) {
+        self.tool_loop_grant_preauthorized = true;
+    }
+
     pub(crate) fn auto_permission_prompt_fallback_active(&self) -> bool {
         self.auto_permission_prompt_fallback
     }
@@ -1539,6 +1557,30 @@ mod tests {
         assert!(stats.verification_snapshot().0);
         stats.set_verification_snapshot((false, 0));
         assert!(!stats.verification_snapshot().0);
+    }
+
+    #[test]
+    fn tool_loop_grant_preauthorized_latches_only_after_explicit_grant() {
+        let mut stats = SessionStats::default();
+        assert!(!stats.tool_loop_grant_preauthorized(), "session starts unlatched");
+
+        stats.mark_tool_loop_grant_preauthorized();
+        assert!(stats.tool_loop_grant_preauthorized());
+
+        // Idempotent: later grants do not flip it back.
+        stats.mark_tool_loop_grant_preauthorized();
+        assert!(stats.tool_loop_grant_preauthorized());
+    }
+
+    #[test]
+    fn tool_loop_grant_preauthorized_survives_fresh_execution_in_session() {
+        let mut stats = SessionStats::default();
+        stats.mark_tool_loop_grant_preauthorized();
+        stats.reset_for_fresh_execution();
+        assert!(
+            stats.tool_loop_grant_preauthorized(),
+            "the one-time HITL latch is process-session scoped, not conversation-context scoped"
+        );
     }
 
     #[test]

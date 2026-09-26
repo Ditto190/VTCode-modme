@@ -195,7 +195,8 @@ fn clamp_tool_loop_increment(
     requested_increment.min(per_prompt_limit).min(remaining)
 }
 
-/// Increment a full-auto run grants itself when it hits the tool-loop limit:
+/// Increment a full-auto run (or a session-preauthorized interactive run)
+/// grants itself when it hits the tool-loop limit:
 /// the same maximum one manual approval may add, clamped to the remaining
 /// headroom below the hard cap. Pure so the grant arithmetic stays unit
 /// tested without standing up an interactive session.
@@ -213,31 +214,80 @@ fn auto_tool_loop_grant_increment(current_limit: usize, hard_cap: usize, plannin
     clamp_tool_loop_increment(per_prompt_limit, current_limit, hard_cap, planning_active)
 }
 
-/// Apply one tool-loop limit increase shared by the full-auto grant path and
-/// the manual prompt path. Only the user-facing wording records whether a
-/// human approved the increase; the event kind and continuation semantics
-/// are identical.
+/// How a tool-loop increase is authorized at a limit hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolLoopGrantSource {
+    /// Full-auto policy with `auto_grant_tool_limits` on.
+    FullAuto,
+    /// Interactive session where the user already granted once.
+    SessionPreauthorized,
+    /// Manual HITL approval (or denial handled by the caller).
+    Manual,
+}
+
+impl ToolLoopGrantSource {
+    /// Whether this source skips the HITL modal and grants the max increment.
+    fn is_automatic(self) -> bool {
+        matches!(self, Self::FullAuto | Self::SessionPreauthorized)
+    }
+}
+
+/// Pure grant-policy decision at a tool-loop limit hit.
+///
+/// Full-auto always auto-grants. Otherwise the first interactive hit prompts;
+/// once the session latch is set by a successful grant, later hits auto-grant
+/// the maximum increment without a modal.
+fn tool_loop_grant_source(full_auto_grants_enabled: bool, session_preauthorized: bool) -> ToolLoopGrantSource {
+    if full_auto_grants_enabled {
+        ToolLoopGrantSource::FullAuto
+    } else if session_preauthorized {
+        ToolLoopGrantSource::SessionPreauthorized
+    } else {
+        ToolLoopGrantSource::Manual
+    }
+}
+
+/// Apply one tool-loop limit increase shared by the full-auto grant path,
+/// the session-preauthorized path, and the manual prompt path. Only the
+/// user-facing wording records who authorized the increase; the event kind
+/// and continuation semantics are identical.
+///
+/// A successful manual grant latches session-preauthorized auto-grants for
+/// later limit hits in this process session. Denial never reaches this
+/// function, so it cannot latch.
 fn apply_tool_loop_grant(
     ctx: &mut TurnLoopContext<'_>,
     current_max_tool_loops: &mut usize,
     increment: usize,
     requested_increment: usize,
     hard_cap: usize,
-    auto_granted: bool,
+    grant_source: ToolLoopGrantSource,
 ) -> Result<ToolLoopLimitAction> {
+    if grant_source == ToolLoopGrantSource::Manual {
+        ctx.session_stats.mark_tool_loop_grant_preauthorized();
+    }
     let previous_max_tool_loops = *current_max_tool_loops;
     *current_max_tool_loops = (*current_max_tool_loops).saturating_add(increment);
     let agent_name = ctx.active_primary_agent.active().name();
-    let event_message = if auto_granted {
-        format!(
-            "Full-auto auto-granted +{} tool loops to current agent {} (limit {}); continuing this turn and reusing existing tool outputs.",
-            increment, agent_name, *current_max_tool_loops,
-        )
-    } else {
-        format!(
-            "Current agent {} granted +{} tool loops (limit {}); continuing this turn and reusing existing tool outputs.",
-            agent_name, increment, *current_max_tool_loops,
-        )
+    let event_message = match grant_source {
+        ToolLoopGrantSource::FullAuto => {
+            format!(
+                "Full-auto auto-granted +{} tool loops to current agent {} (limit {}); continuing this turn and reusing existing tool outputs.",
+                increment, agent_name, *current_max_tool_loops,
+            )
+        }
+        ToolLoopGrantSource::SessionPreauthorized => {
+            format!(
+                "Auto-granted +{} tool loops to current agent {} (limit {}); earlier grant this session preauthorized further increases. Continuing this turn and reusing existing tool outputs.",
+                increment, agent_name, *current_max_tool_loops,
+            )
+        }
+        ToolLoopGrantSource::Manual => {
+            format!(
+                "Current agent {} granted +{} tool loops (limit {}); continuing this turn and reusing existing tool outputs.",
+                agent_name, increment, *current_max_tool_loops,
+            )
+        }
     };
     if let Some(emitter) = ctx.harness_emitter
         && let Err(error) = emitter.emit(harness_event(
@@ -251,23 +301,33 @@ fn apply_tool_loop_grant(
         tracing::debug!(error = %error, "Failed to emit tool-loop grant event");
     }
     tracing::info!(
-        auto_granted,
+        grant_source = ?grant_source,
         "Updated tool loop limit: turn={} (was {}), session tool-call limit remains unchanged",
         *current_max_tool_loops,
         previous_max_tool_loops,
     );
-    let status_message = if auto_granted {
-        format!(
-            "Full-auto auto-granted +{} tool loops (limit {}, cap {})",
-            increment, *current_max_tool_loops, hard_cap,
-        )
-    } else if requested_increment != increment {
-        format!(
-            "Tool loop limit increased to {} (+{}, requested +{}, cap {})",
-            *current_max_tool_loops, increment, requested_increment, hard_cap,
-        )
-    } else {
-        format!("Tool loop limit increased to {} (+{}, cap {})", *current_max_tool_loops, increment, hard_cap,)
+    let status_message = match grant_source {
+        ToolLoopGrantSource::FullAuto => {
+            format!(
+                "Full-auto auto-granted +{} tool loops (limit {}, cap {})",
+                increment, *current_max_tool_loops, hard_cap,
+            )
+        }
+        ToolLoopGrantSource::SessionPreauthorized => {
+            format!(
+                "Auto-granted +{} tool loops (limit {}, cap {}); earlier grant this session preauthorized further increases",
+                increment, *current_max_tool_loops, hard_cap,
+            )
+        }
+        ToolLoopGrantSource::Manual if requested_increment != increment => {
+            format!(
+                "Tool loop limit increased to {} (+{}, requested +{}, cap {})",
+                *current_max_tool_loops, increment, requested_increment, hard_cap,
+            )
+        }
+        ToolLoopGrantSource::Manual => {
+            format!("Tool loop limit increased to {} (+{}, cap {})", *current_max_tool_loops, increment, hard_cap,)
+        }
     };
     display_status(ctx.renderer, &status_message)?;
     Ok(ToolLoopLimitAction::ContinueLoop)
@@ -692,10 +752,11 @@ pub(super) async fn maybe_handle_tool_loop_limit(
         return Ok(ToolLoopLimitAction::BreakLoop);
     }
 
-    let prompt_result = if full_auto_loop_grants_enabled(
-        ctx.full_auto,
-        super::turn_loop::effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
-    ) {
+    let grant_source = tool_loop_grant_source(
+        full_auto_loop_grants_enabled(ctx.full_auto, super::turn_loop::effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg)),
+        ctx.session_stats.tool_loop_grant_preauthorized(),
+    );
+    let prompt_result = if grant_source.is_automatic() {
         let increment = auto_tool_loop_grant_increment(*current_max_tool_loops, hard_cap, planning_active);
         if increment == 0 {
             emit_loop_hard_cap_break_metric(
@@ -712,7 +773,7 @@ pub(super) async fn maybe_handle_tool_loop_limit(
             )?;
             return Ok(ToolLoopLimitAction::BreakLoop);
         }
-        return apply_tool_loop_grant(ctx, current_max_tool_loops, increment, increment, hard_cap, true);
+        return apply_tool_loop_grant(ctx, current_max_tool_loops, increment, increment, hard_cap, grant_source);
     } else {
         crate::agent::runloop::unified::tool_routing::prompt_tool_loop_limit_increase(
             ctx.handle,
@@ -744,7 +805,14 @@ pub(super) async fn maybe_handle_tool_loop_limit(
                 )?;
                 return Ok(ToolLoopLimitAction::BreakLoop);
             }
-            apply_tool_loop_grant(ctx, current_max_tool_loops, increment, requested_increment, hard_cap, false)
+            apply_tool_loop_grant(
+                ctx,
+                current_max_tool_loops,
+                increment,
+                requested_increment,
+                hard_cap,
+                ToolLoopGrantSource::Manual,
+            )
         }
         _ => {
             display_status(
@@ -763,12 +831,12 @@ pub(super) async fn maybe_handle_tool_loop_limit(
 #[cfg(test)]
 mod tests {
     use super::{
-        TOOL_LOOP_LIMIT_RECOVERY_REASON, UNLIMITED_TOOL_LOOPS, arm_tool_loop_synthesis_recovery,
+        TOOL_LOOP_LIMIT_RECOVERY_REASON, ToolLoopGrantSource, UNLIMITED_TOOL_LOOPS, arm_tool_loop_synthesis_recovery,
         auto_tool_loop_grant_increment, clamp_tool_loop_increment,
         effective_max_tool_calls_for_approved_plan_execution, effective_max_tool_calls_for_turn, extract_turn_config,
         handle_steering_messages, initial_tool_loop_limit, is_internal_harness_follow_up,
         is_stale_approved_plan_pause_response, resolve_safety_tool_call_limits, resolve_tool_loop_limit,
-        tool_loop_hard_cap,
+        tool_loop_grant_source, tool_loop_hard_cap,
     };
     use crate::agent::runloop::unified::planning_workflow::{
         PlanningIntent, detect_enter_planning_intent, detect_planning_intent,
@@ -925,6 +993,37 @@ mod tests {
         assert_eq!(auto_tool_loop_grant_increment(60, 60, false), 0);
         assert_eq!(auto_tool_loop_grant_increment(120, 120, false), 0);
         assert_eq!(auto_tool_loop_grant_increment(240, 240, true), 0);
+    }
+
+    #[test]
+    fn tool_loop_grant_source_prefers_full_auto_then_session_latch() {
+        assert_eq!(
+            tool_loop_grant_source(true, false),
+            ToolLoopGrantSource::FullAuto,
+            "full-auto wins even before any interactive grant"
+        );
+        assert_eq!(
+            tool_loop_grant_source(true, true),
+            ToolLoopGrantSource::FullAuto,
+            "full-auto wording stays full-auto after an interactive grant"
+        );
+        assert_eq!(
+            tool_loop_grant_source(false, true),
+            ToolLoopGrantSource::SessionPreauthorized,
+            "after the first successful grant later hits auto-grant without a prompt"
+        );
+        assert_eq!(
+            tool_loop_grant_source(false, false),
+            ToolLoopGrantSource::Manual,
+            "first interactive hit (and any denial retry) still prompts"
+        );
+
+        // Only Manual opens the HITL modal; the other two auto-grant max +N
+        // via `auto_tool_loop_grant_increment` (already covered above).
+        assert!(!tool_loop_grant_source(false, false).is_automatic());
+        assert!(tool_loop_grant_source(false, true).is_automatic());
+        assert!(tool_loop_grant_source(true, false).is_automatic());
+        assert!(tool_loop_grant_source(true, true).is_automatic());
     }
 
     #[test]
