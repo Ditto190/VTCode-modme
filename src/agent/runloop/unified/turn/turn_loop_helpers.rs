@@ -225,6 +225,13 @@ enum ToolLoopGrantSource {
     Manual,
 }
 
+impl ToolLoopGrantSource {
+    /// Whether this source skips the HITL modal and grants the max increment.
+    fn is_automatic(self) -> bool {
+        matches!(self, Self::FullAuto | Self::SessionPreauthorized)
+    }
+}
+
 /// Pure grant-policy decision at a tool-loop limit hit.
 ///
 /// Full-auto always auto-grants. Otherwise the first interactive hit prompts;
@@ -244,6 +251,10 @@ fn tool_loop_grant_source(full_auto_grants_enabled: bool, session_preauthorized:
 /// the session-preauthorized path, and the manual prompt path. Only the
 /// user-facing wording records who authorized the increase; the event kind
 /// and continuation semantics are identical.
+///
+/// A successful manual grant latches session-preauthorized auto-grants for
+/// later limit hits in this process session. Denial never reaches this
+/// function, so it cannot latch.
 fn apply_tool_loop_grant(
     ctx: &mut TurnLoopContext<'_>,
     current_max_tool_loops: &mut usize,
@@ -252,6 +263,9 @@ fn apply_tool_loop_grant(
     hard_cap: usize,
     grant_source: ToolLoopGrantSource,
 ) -> Result<ToolLoopLimitAction> {
+    if grant_source == ToolLoopGrantSource::Manual {
+        ctx.session_stats.mark_tool_loop_grant_preauthorized();
+    }
     let previous_max_tool_loops = *current_max_tool_loops;
     *current_max_tool_loops = (*current_max_tool_loops).saturating_add(increment);
     let agent_name = ctx.active_primary_agent.active().name();
@@ -742,7 +756,7 @@ pub(super) async fn maybe_handle_tool_loop_limit(
         full_auto_loop_grants_enabled(ctx.full_auto, super::turn_loop::effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg)),
         ctx.session_stats.tool_loop_grant_preauthorized(),
     );
-    let prompt_result = if grant_source != ToolLoopGrantSource::Manual {
+    let prompt_result = if grant_source.is_automatic() {
         let increment = auto_tool_loop_grant_increment(*current_max_tool_loops, hard_cap, planning_active);
         if increment == 0 {
             emit_loop_hard_cap_break_metric(
@@ -791,9 +805,6 @@ pub(super) async fn maybe_handle_tool_loop_limit(
                 )?;
                 return Ok(ToolLoopLimitAction::BreakLoop);
             }
-            // A successful interactive grant latches session-preauthorized
-            // auto-grants for later limit hits in this process session.
-            ctx.session_stats.mark_tool_loop_grant_preauthorized();
             apply_tool_loop_grant(
                 ctx,
                 current_max_tool_loops,
@@ -1006,43 +1017,13 @@ mod tests {
             ToolLoopGrantSource::Manual,
             "first interactive hit (and any denial retry) still prompts"
         );
-    }
 
-    #[test]
-    fn session_preauthorized_uses_max_increment_and_skips_manual_prompt() {
-        // Latched sessions must not take the Manual (prompt) branch, and the
-        // auto path must request the same max +N as full-auto.
-        assert_ne!(
-            tool_loop_grant_source(false, true),
-            ToolLoopGrantSource::Manual,
-            "latched sessions never open the HITL modal"
-        );
-        // Ordinary remaining headroom 40 from a 20/60 budget: max grant is +40.
-        assert_eq!(auto_tool_loop_grant_increment(20, 60, false), 40);
-        // Ordinary remaining headroom 80 from a 40/120 budget: max grant is +50
-        // (MAX_TOOL_LOOP_INCREMENT_PER_PROMPT), matching the full-auto path.
-        assert_eq!(auto_tool_loop_grant_increment(40, 120, false), 50);
-    }
-
-    #[test]
-    fn tool_loop_session_auto_grant_scenarios() {
-        // Scenario 1: first limit hit in a fresh session prompts.
-        assert_eq!(tool_loop_grant_source(false, false), ToolLoopGrantSource::Manual);
-
-        // Scenario 2: after a successful grant, the next hit auto-grants max +N
-        // (same increment helper as full-auto) without a modal.
-        assert_eq!(tool_loop_grant_source(false, true), ToolLoopGrantSource::SessionPreauthorized);
-        assert_eq!(auto_tool_loop_grant_increment(20, 60, false), 40);
-
-        // Scenario 3: denial never latches, so the next hit still prompts
-        // (covered by source=false remaining Manual).
-
-        // Scenario 4: hard cap remains terminal for the latched path — zero
-        // headroom yields no grant and the caller breaks the loop.
-        assert_eq!(auto_tool_loop_grant_increment(60, 60, false), 0);
-
-        // Scenario 5: full-auto takes precedence over the session latch.
-        assert_eq!(tool_loop_grant_source(true, true), ToolLoopGrantSource::FullAuto);
+        // Only Manual opens the HITL modal; the other two auto-grant max +N
+        // via `auto_tool_loop_grant_increment` (already covered above).
+        assert!(!tool_loop_grant_source(false, false).is_automatic());
+        assert!(tool_loop_grant_source(false, true).is_automatic());
+        assert!(tool_loop_grant_source(true, false).is_automatic());
+        assert!(tool_loop_grant_source(true, true).is_automatic());
     }
 
     #[test]

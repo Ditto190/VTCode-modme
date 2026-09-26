@@ -1562,11 +1562,7 @@ mod tests {
     #[test]
     fn tool_loop_grant_preauthorized_latches_only_after_explicit_grant() {
         let mut stats = SessionStats::default();
-        assert!(!stats.tool_loop_grant_preauthorized(), "session starts unprompted-locked");
-
-        // Denial paths never call the marker, so the flag stays false and the
-        // next limit hit prompts again.
-        assert!(!stats.tool_loop_grant_preauthorized());
+        assert!(!stats.tool_loop_grant_preauthorized(), "session starts unlatched");
 
         stats.mark_tool_loop_grant_preauthorized();
         assert!(stats.tool_loop_grant_preauthorized());
