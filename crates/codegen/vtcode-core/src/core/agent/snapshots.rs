@@ -758,9 +758,16 @@ impl SnapshotManager {
         Ok(CheckpointRestore { metadata: stored.metadata, conversation })
     }
 
-    /// Turn numbers still referenced by any session navigation (active branch,
-    /// redo stack, or pending recovery). Rewind/redo must never lose these.
+    /// Turn numbers still referenced by any *recent* session navigation
+    /// (active branch, redo stack, or pending recovery). Rewind/redo must
+    /// never lose these. Branch files older than the retention window are
+    /// ignored so a completed session cannot pin its turns forever.
     fn protected_turns(&self) -> BTreeSet<usize> {
+        let cutoff = self.retention_cutoff_secs().ok().flatten();
+        self.protected_turns_with_cutoff(cutoff)
+    }
+
+    fn protected_turns_with_cutoff(&self, cutoff: Option<u64>) -> BTreeSet<usize> {
         let mut protected = BTreeSet::new();
         let Ok(entries) = fs::read_dir(&self.storage_dir) else {
             return protected;
@@ -773,11 +780,23 @@ impl SnapshotManager {
             if !stem.starts_with("branch_") || path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
+            if let Some(cutoff) = cutoff {
+                // Stale navigation (completed/abandoned session past retention)
+                // must not keep its turn files alive. `cutoff` is a UNIX
+                // timestamp: branch files last modified before it are stale.
+                let modified_secs = path
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                    .map(|since| since.as_secs());
+                if !modified_secs.is_some_and(|secs| secs > cutoff) {
+                    continue;
+                }
+            }
             let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
-            // Navigation schema lives in `native`; decode the three turn lists
-            // through serde_json so this helper stays independent of that module.
             let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                 continue;
             };
