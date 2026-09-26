@@ -25,7 +25,6 @@ unnecessary complexity. Reuse existing patterns where possible. Rank confirmed i
 positives, apply justified DRY/KISS refactors, fix, test, and re-review until clean. After you review done: don't
 stop, start implement fixes for each one "
 
-
 response: "
 Running /review...
 I can’t access the repository or run tests in this session, so I can’t review or
@@ -74,3 +73,35 @@ reference:
 audit and make sure command are displayed correctly in full in the TUI with proper line wrapping and no truncation.
 
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.37.35.png'
+
+===
+
+check session. review the log, error, warnings and infos that prevented vtcode harness from functioning correctly. ensure context is properly maintained and any issues are addressed. and check for wasted resources or unnecessary operations. and wasted tool calls are minimized. also verify that all session-related data is correctly cleaned up and no residual state affects subsequent sessions.
+
+===
+
+auto grant tool loop limit ensure that the system automatically grants the tool loop limit without requiring manual intervention, and verify that it works correctly under different scenarios. context: when the tool loop limit is reached. the system should auto grant the max +N tool limit and continue operation seamlessly, without any disruption to ongoing processes.
+
+"Tool Loop Limit Reached
+──────────────────────────────────────────────────────────────────────────────────────
+Maximum tool loops reached: 20 (cap 60, 40 remaining)
+• Current agent: build
+• Grant more loops to continue this turn with the current agent.
+• Stop synthesizes from the outputs already gathered.
+──────────────────────────────────────────────────────────────────────────────────────
+Use ↑↓ or Tab to navigate • Enter to select • Esc to stop
+│ +40 tool loops
+Continue with 40 more tool loops (reaches cap)
++20 tool loops
+Continue with 20 more tool loops
++10 tool loops
+Continue with 10 more tool loops
+────────────────────────────────────────────────────────────────────────────────────
+Stop
+Stop the current turn and wait for input"
+
+=> this human in the loop should show only 1 time in the session, after user has granted additional tool loops once. the next subsequence run that hits the tool loop limit should automatically grant the additional loops without prompting the user again.
+
+===
+
+fix /review command doesn't work properly, check openai/codex deepwiki implementation for guidance and fix the command.
