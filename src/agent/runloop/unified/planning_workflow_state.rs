@@ -282,21 +282,19 @@ impl PlanningWorkflowSessionState {
 
 pub(crate) const PLANNING_WORKFLOW_REVIEW_AND_EXECUTE_HINT: &str = "Planning workflow is active. Continue refining the plan; approval controls appear only after a validated draft is persisted.";
 pub(crate) const PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT: &str = "Planning workflow: type `implement` (or `yes`/`continue`/`go`/`start`) to execute, or say `keep planning` to revise.";
-pub(crate) const PLANNING_WORKFLOW_KEEP_PLANNING_HINT: &str =
-    "To keep planning, say `keep planning` and describe what to revise.";
-pub(crate) const PLANNING_WORKFLOW_MANUAL_SWITCH_FALLBACK_HINT: &str =
-    "If the persisted plan is not shown automatically, type `implement` to present it for approval.";
 pub(crate) const PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT: &str =
     "Planning workflow remains active: no approval-ready plan was produced. Keep planning and describe what to revise.";
 
 pub(crate) fn short_confirmation_hint_with_fallback() -> String {
-    format!("{PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT} {PLANNING_WORKFLOW_MANUAL_SWITCH_FALLBACK_HINT}")
+    // One line under the 2-line diagnostic contract; the fallback verb is
+    // already covered by `implement` in the primary hint.
+    PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT.to_string()
 }
 
 pub(crate) fn render_planning_workflow_next_step_hint(renderer: &mut AnsiRenderer) -> Result<()> {
+    // Strict 2-line cap: status + one action (R1).
     renderer.line(MessageStyle::Info, PLANNING_WORKFLOW_REVIEW_AND_EXECUTE_HINT)?;
-    renderer.line(MessageStyle::Info, PLANNING_WORKFLOW_KEEP_PLANNING_HINT)?;
-    renderer.line(MessageStyle::Info, PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT)?;
+    renderer.line(MessageStyle::Info, PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT)?;
     Ok(())
 }
 

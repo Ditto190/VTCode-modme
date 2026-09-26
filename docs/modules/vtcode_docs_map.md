@@ -1093,6 +1093,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about TODO Continuation Hardening (Residual)?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/tui-diagnostics-cleanup.md`
+  - **Content**: TUI Diagnostics Cleanup
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about TUI Diagnostics Cleanup?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/tui-diff-auto-expand.md`
   - **Content**: TUI Diff Auto-Resize and Expand
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks

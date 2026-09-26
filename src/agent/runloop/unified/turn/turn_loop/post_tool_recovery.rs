@@ -237,43 +237,22 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     };
     let summary =
         format!("Tool execution completed, but the model follow-up failed{transient_hint}. Output above is valid.",);
-    renderer.line(MessageStyle::Info, &summary)?;
-    renderer.line(MessageStyle::Info, &format!("Follow-up error category: {}", err_cat.user_label()))?;
     let should_retry_tool_enabled =
         !misconfiguration && allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
     let should_retry_tool_free = !misconfiguration
         && allow_tool_free_retry
         && (err_cat.is_retryable() || matches!(err_cat, ErrorCategory::ExecutionError));
-    // The "next turn reuses evidence" tip only applies when the turn actually
-    // ends here (StopAfterDirective). When a bounded retry is scheduled below,
-    // the same-turn retry reuses the evidence immediately, so emitting the
-    // next-turn tip alongside the retry notice contradicts the recovery flow
-    // (observed: ExecutionError in plan mode showed both the tip and
-    // "scheduling a final tool-free recovery pass").
-    if !misconfiguration && !err_cat.is_retryable() && !should_retry_tool_enabled && !should_retry_tool_free {
-        if planning_active {
-            renderer.line(
-                MessageStyle::Info,
-                "Tip: planning evidence is preserved; the harness synthesizes the plan from collected tool outputs, and the next `keep planning` turn reuses that evidence without re-reading. If the failure repeats, switch provider/model for the follow-up.",
-            )?;
-        } else {
-            renderer.line(
-                MessageStyle::Info,
-                "Tip: rerun with a narrower prompt or switch provider/model for the follow-up.",
-            )?;
-        }
-    }
-    let action = if should_retry_tool_enabled {
+    // Strict 2-line TUI diagnostic contract: status + one action. Category and
+    // tip text fold into the action or drop; forensics stay out of the
+    // transcript.
+    renderer.line(MessageStyle::Info, &summary)?;
+    let action_text = if should_retry_tool_enabled {
         ensure_recent_system_message(working_history, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE);
-        renderer.line(
-            MessageStyle::Info,
-            if context_capacity_failure {
-                "[!] Follow-up exceeded the provider context capacity; compacting context and scheduling one tool-enabled recovery pass."
-            } else {
-                "[!] Follow-up failed transiently after tool execution; compacting context and scheduling one tool-enabled recovery pass."
-            },
-        )?;
-        PostToolFailureRecovery::RetryToolEnabled
+        if context_capacity_failure {
+            "Context capacity exceeded; compacting and scheduling one tool-enabled recovery pass."
+        } else {
+            "Scheduling one tool-enabled recovery pass."
+        }
     } else if should_retry_tool_free {
         // Tool-free recovery: inject only the tools-disabled recovery reason.
         // The resume directive would contradict it (see
@@ -286,15 +265,26 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
             POST_TOOL_RECOVERY_REASON
         };
         prepare_post_tool_tool_free_recovery(working_history, reason);
-        renderer.line(
-            MessageStyle::Info,
-            "[!] Follow-up failed after tool execution; scheduling a final tool-free recovery pass.",
-        )?;
-        PostToolFailureRecovery::RetryToolFree
-    } else {
+        "Scheduling a final tool-free recovery pass."
+    } else if !misconfiguration && !err_cat.is_retryable() {
         // Turn ends here; the resume directive guides the *next* turn to
         // reuse this turn's tool outputs instead of re-running exploration.
         ensure_post_tool_resume_directive(working_history);
+        if planning_active {
+            "Planning evidence is preserved; type `keep planning` to continue, or switch provider/model if this repeats."
+        } else {
+            "Retry with a narrower prompt or switch provider/model."
+        }
+    } else {
+        ensure_post_tool_resume_directive(working_history);
+        "Type 'continue' to resume with retained tool outputs."
+    };
+    renderer.line(MessageStyle::Info, &format!("  • {action_text}"))?;
+    let action = if should_retry_tool_enabled {
+        PostToolFailureRecovery::RetryToolEnabled
+    } else if should_retry_tool_free {
+        PostToolFailureRecovery::RetryToolFree
+    } else {
         PostToolFailureRecovery::StopAfterDirective
     };
 

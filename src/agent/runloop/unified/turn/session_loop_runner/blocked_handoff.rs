@@ -11,6 +11,7 @@ use vtcode_core::utils::session_archive::{
 
 use vtcode_core::tools::tool_intent::{VERIFIER_SHELL_FORM_NOTE, verifier_reference};
 
+use crate::agent::runloop::git::workspace_relative_display;
 use crate::agent::runloop::unified::inline_events::harness::{HarnessEventEmitter, harness_event};
 use crate::agent::runloop::unified::state::VerificationFailureSummary;
 
@@ -32,8 +33,10 @@ const BLOCKED_DIAGNOSTICS_FOOTER_LIMIT: usize = 1200;
 /// Plan-mode blocked-turn header: plan mode is read-only by design, so a
 /// `Turn blocked` / `Mutation blocked` there is a policy stop, not a
 /// transient failure. Retrying the same mutating tools re-blocks.
-const PLAN_MODE_MUTATION_BLOCK_HEADER: &str = "Plan mode is read-only — edits block by design (not a failing check):";
-const PLAN_MODE_TURN_BLOCKED_HEADER: &str = "You're in plan mode (read-only) — retrying the same tools will re-block:";
+/// Folded into the single TUI action line (2-line diagnostic contract).
+const PLAN_MODE_MUTATION_BLOCK_ACTION: &str =
+    "Plan mode is read-only; `/mode build` to implement, or type 'continue' to keep planning.";
+const PLAN_MODE_TURN_BLOCKED_ACTION: &str = "Type 'continue' to keep planning, or `/mode build` to implement.";
 
 /// Returns true when a blocker summary describes a mutation/policy stop
 /// rather than a generic turn-loop stop. Used to pick plan-mode copy:
@@ -49,24 +52,15 @@ pub(super) fn is_plan_mode_mutation_block(blocker_summary: &str) -> bool {
     lowered.contains("mutation blocked") || lowered.contains("tool denied by planning workflow")
 }
 
-/// Transcript guidance lines for a blocked turn while planning is active.
-/// Index 0 is the header, 1 stays planning, 2 implements. Kept as static
-/// strings so transcript rendering stays bounded and unit-testable.
-/// Build is the default destination (confirmation-aware); Auto only changes
-/// confirmation policy, not authority or safety gates.
-pub(super) fn plan_mode_switch_guidance_lines(is_mutation_block: bool) -> [&'static str; 3] {
+/// Single plan-mode action line for a blocked turn while planning is active.
+/// Kept as a static string so transcript rendering stays bounded and
+/// unit-testable. Build is the default destination (confirmation-aware);
+/// Auto only changes confirmation policy, not authority or safety gates.
+pub(super) fn plan_mode_switch_guidance_line(is_mutation_block: bool) -> &'static str {
     if is_mutation_block {
-        [
-            PLAN_MODE_MUTATION_BLOCK_HEADER,
-            "  • Stay planning: type `continue` to keep researching toward `<proposed_plan>`",
-            "  • Implement now: approve the plan or run `/mode build` (`/mode auto` for unattended; Build stays confirmation-aware)",
-        ]
+        PLAN_MODE_MUTATION_BLOCK_ACTION
     } else {
-        [
-            PLAN_MODE_TURN_BLOCKED_HEADER,
-            "  • Stay planning: type `continue` to resume research",
-            "  • Implement now: approve the plan or run `/mode build` (`/mode auto` for unattended)",
-        ]
+        PLAN_MODE_TURN_BLOCKED_ACTION
     }
 }
 
@@ -214,6 +208,63 @@ pub(super) fn blocker_summary_with_diagnostics(
     summary.push_str(reason);
     summary.push_str(&footer);
     summary
+}
+
+/// Short TUI stop marker for a blocked turn. Long recovery-fallback and
+/// planning reasons are already published as assistant text in the same turn
+/// (R4: do not repeat); the full reason stays in the handoff markdown.
+pub(super) fn blocked_status_label(blocker_summary: &str) -> String {
+    let lowered = blocker_summary.to_ascii_lowercase();
+    if lowered.contains("verification is still pending") {
+        return "Turn blocked: verification pending".to_string();
+    }
+    if lowered.contains("planning turn ended via recovery fallback") {
+        return "Turn blocked: planning recovery fallback".to_string();
+    }
+    if lowered.contains("recovery fallback") {
+        return "Turn blocked: recovery fallback".to_string();
+    }
+    let headline = truncated_block_reason(blocker_summary, "");
+    let headline = headline.strip_suffix("… — full reason: ").unwrap_or(&headline);
+    if headline.is_empty() {
+        return "Turn blocked".to_string();
+    }
+    if headline.chars().count() <= 80 {
+        return format!("Turn blocked: {headline}");
+    }
+    "Turn blocked".to_string()
+}
+
+/// Build the single TUI action line (2-line diagnostic contract). Combines the
+/// verb phrase, optional resume id, and a workspace-relative handoff pointer.
+pub(super) fn blocked_action_line(
+    workspace: &Path,
+    handoff_path: &Path,
+    resume: Option<&str>,
+    planning_active: bool,
+    is_mutation_block: bool,
+    is_verification_block: bool,
+) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(3);
+    if is_verification_block {
+        parts.push(
+            "Run the verifier standalone or as a pure `&&` chain, let it exit 0, then type 'continue'".to_string(),
+        );
+    } else if planning_active {
+        parts.push(
+            plan_mode_switch_guidance_line(is_mutation_block)
+                .trim_end_matches('.')
+                .to_string(),
+        );
+    } else {
+        parts.push("Type 'continue' to resume, or describe alternative instructions".to_string());
+    }
+    if let Some(id) = resume.map(str::trim).filter(|id| !id.is_empty()) {
+        parts.push(format!("`vtcode --resume {id}`"));
+    }
+    let relative = workspace_relative_display(workspace, handoff_path);
+    parts.push(format!("details: {relative}"));
+    format!("  • {}", parts.join(" · "))
 }
 
 /// Bound the block reason for transcript rendering. When the summary exceeds
@@ -387,52 +438,26 @@ pub(super) fn write_blocked_handoff_after_checkpoint(
         planning_active,
     ) {
         Ok(artifacts) => {
-            let full_reason_path = artifacts.current_path.display().to_string();
-            let transcript_reason = truncated_block_reason(blocker_summary, &full_reason_path);
-            let _ = renderer.line(MessageStyle::Warning, &format!("Turn blocked: {transcript_reason}"));
-            // Verification blocks name the verifier (or the generic description
-            // when none was detected) in the summary: lead with the actionable
-            // verifier-first step instead of the generic `continue` nudge so
-            // long-running work can resume without re-reading handoff files.
-            // Lowercase match follows the helper convention for compound reasons.
-            // TUI stays to one actionable line; full diagnostics live in the
-            // handoff file + `events.jsonl` for agent consumption.
+            // Strict 2-line TUI diagnostic contract (spec tui-diagnostics-cleanup):
+            // line 1 = short stop marker (no repeat of an assistant-published
+            // reason), line 2 = one combined action. Full reason, archive path,
+            // and forensics stay in the handoff markdown + `events.jsonl`.
+            let status = blocked_status_label(blocker_summary);
+            let _ = renderer.line(MessageStyle::Warning, &status);
             let is_verification_block = blocker_summary.to_ascii_lowercase().contains("verification is still pending");
-            if is_verification_block {
-                let _ = renderer.line(
-                    MessageStyle::Info,
-                    "  • Run the verifier standalone or as a pure `&&` chain, let it exit 0, then type 'continue'.",
-                );
-            } else {
-                let _ = renderer
-                    .line(MessageStyle::Info, "  • Type 'continue' to resume, or describe alternative instructions");
-            }
-            // Plan-mode QoL: a blocked turn while planning is active is a
-            // read-only policy stop. `continue` keeps planning, but the user
-            // may prefer to implement. Never auto-switch modes here — mode
-            // switches are locked during a turn and require explicit user
-            // choice on the next turn — so this is transcript guidance plus
-            // a plan-aware input placeholder set by the caller, the
-            // non-blocking equivalent of a HITL mode-switch popup.
-            if planning_active {
-                for line in plan_mode_switch_guidance_lines(is_plan_mode_mutation_block(blocker_summary)) {
-                    let _ = renderer.line(MessageStyle::Info, line);
-                }
-            }
-            match resume {
-                BlockedHandoffResume::Available(id) => {
-                    let _ = renderer
-                        .line(MessageStyle::Info, &format!("  • From terminal: Run `vtcode --resume {}`", id.as_str()));
-                }
-                BlockedHandoffResume::Unavailable(_) => {}
-            }
-            let _ = renderer
-                .line(MessageStyle::Info, &format!("  • Blocker details: {}", artifacts.current_path.display()));
-            // The live pointer is cleared once the session recovers, which
-            // orphans transcripts that only name it. The timestamped archive
-            // survives clearing, so always print it alongside.
-            let _ = renderer
-                .line(MessageStyle::Info, &format!("  • Archived details: {}", artifacts.archive_path.display()));
+            let resume_id = match resume {
+                BlockedHandoffResume::Available(id) => Some(id.as_str()),
+                BlockedHandoffResume::Unavailable(_) => None,
+            };
+            let action = blocked_action_line(
+                workspace,
+                &artifacts.current_path,
+                resume_id,
+                planning_active,
+                is_plan_mode_mutation_block(blocker_summary),
+                is_verification_block,
+            );
+            let _ = renderer.line(MessageStyle::Info, &action);
 
             if let Some(handle) = handle {
                 handle.set_activity_state(vtcode_commons::ui_protocol::ActivityState::Blocked);
@@ -490,12 +515,13 @@ pub(super) fn persist_blocked_handoff_quiet(
 #[cfg(test)]
 mod tests {
     use super::{
-        NO_ARCHIVE_RESUME_EXPLANATION, TRANSCRIPT_BLOCK_REASON_LIMIT, blocker_summary_with_diagnostics,
-        is_plan_mode_mutation_block, plan_mode_switch_guidance_lines, truncated_block_reason,
-        verification_auto_recovery_follow_up, verification_auto_recovery_status_line,
+        NO_ARCHIVE_RESUME_EXPLANATION, TRANSCRIPT_BLOCK_REASON_LIMIT, blocked_action_line, blocked_status_label,
+        blocker_summary_with_diagnostics, is_plan_mode_mutation_block, plan_mode_switch_guidance_line,
+        truncated_block_reason, verification_auto_recovery_follow_up, verification_auto_recovery_status_line,
         verification_exhausted_handoff_reason,
     };
     use crate::agent::runloop::unified::state::{VerificationFailureSummary, is_follow_up_prompt_like};
+    use std::path::Path;
     use vtcode_core::core::agent::snapshots::SnapshotTurnDiagnostics;
     use vtcode_core::tools::tool_intent::{GENERIC_VERIFIER_DESCRIPTION, VERIFIER_SHELL_FORM_NOTE};
 
@@ -681,24 +707,71 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_guidance_splits_mutation_from_generic_turn_block() {
-        let mutation = plan_mode_switch_guidance_lines(true);
-        let generic = plan_mode_switch_guidance_lines(false);
-        assert!(mutation[0].contains("read-only"));
-        assert!(mutation[1].contains("continue"));
-        assert!(mutation[2].contains("/mode build"));
-        assert!(mutation[2].contains("/mode auto"));
-        assert!(generic[0].contains("read-only"));
-        assert!(generic[2].contains("/mode build"));
-        assert_ne!(mutation[0], generic[0], "mutation vs generic headers must differ");
+    fn plan_mode_guidance_is_one_action_line_splitting_mutation_from_generic() {
+        let mutation = plan_mode_switch_guidance_line(true);
+        let generic = plan_mode_switch_guidance_line(false);
+        assert!(mutation.contains("read-only"));
+        assert!(mutation.contains("/mode build"));
+        assert!(generic.contains("continue"));
+        assert!(generic.contains("/mode build"));
+        assert_ne!(mutation, generic, "mutation vs generic actions must differ");
+        assert!(!mutation.contains('\n'), "stays one line: {mutation}");
+        assert!(!generic.contains('\n'), "stays one line: {generic}");
     }
 
     #[test]
-    fn plan_mode_guidance_names_build_as_default_with_auto_as_unattended() {
-        let mutation = plan_mode_switch_guidance_lines(true);
+    fn blocked_status_label_shortens_recovery_fallback_reasons() {
+        let fallback = "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained.";
+        assert_eq!(blocked_status_label(fallback), "Turn blocked: recovery fallback");
         assert!(
-            mutation[2].contains("Build stays confirmation-aware"),
-            "must explain build vs auto policy difference"
+            !blocked_status_label(fallback).contains("was not confirmed"),
+            "R4: do not repeat the assistant-published reason"
         );
+
+        let planning = "Planning turn ended via recovery fallback without confirming an approval-ready plan; planning remains active.";
+        assert_eq!(blocked_status_label(planning), "Turn blocked: planning recovery fallback");
+
+        assert_eq!(blocked_status_label(BASE), "Turn blocked: verification pending");
+        assert_eq!(blocked_status_label("provider 429 rate limited"), "Turn blocked: provider 429 rate limited");
+    }
+
+    #[test]
+    fn blocked_action_line_is_one_line_with_relative_details_and_resume() {
+        let workspace = Path::new("/work/proj");
+        let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
+        let action = blocked_action_line(
+            workspace,
+            handoff,
+            Some("session-vtcode-20260924T040254Z_398045-69092"),
+            false,
+            false,
+            false,
+        );
+
+        assert!(action.starts_with("  • "));
+        assert!(!action.contains('\n'), "2-line contract: action stays single-line: {action}");
+        assert!(action.contains("`vtcode --resume session-vtcode-20260924T040254Z_398045-69092`"));
+        assert!(action.contains("details: .vtcode/tasks/current_blocked.md"));
+        assert!(!action.contains("/work/proj/.vtcode"), "no absolute workspace path: {action}");
+    }
+
+    #[test]
+    fn blocked_action_line_verification_leads_with_verifier_step() {
+        let workspace = Path::new("/work/proj");
+        let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
+        let action = blocked_action_line(workspace, handoff, None, false, false, true);
+        assert!(action.contains("Run the verifier standalone"));
+        assert!(action.contains("details: .vtcode/tasks/current_blocked.md"));
+        assert!(!action.contains('\n'));
+    }
+
+    #[test]
+    fn blocked_action_line_plan_mode_folds_switch_guidance() {
+        let workspace = Path::new("/work/proj");
+        let handoff = Path::new("/work/proj/.vtcode/tasks/current_blocked.md");
+        let action = blocked_action_line(workspace, handoff, None, true, true, false);
+        assert!(action.contains("/mode build"));
+        assert!(action.contains("read-only"));
+        assert!(!action.contains('\n'), "R7: plan-mode guidance folds into the one action line");
     }
 }
