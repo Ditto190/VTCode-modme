@@ -246,22 +246,8 @@ fn approved_plan_handoff_bypasses_final_response_guard() {
     let approved_handoff = TurnLoopResult::Completed { plan_approved_execution_pending: true };
     let ordinary_completion = TurnLoopResult::Completed { plan_approved_execution_pending: false };
 
-    assert!(!completed_turn_requires_final_response(&approved_handoff, true));
-    assert!(!completed_turn_requires_final_response(&approved_handoff, false));
-    assert!(completed_turn_requires_final_response(&ordinary_completion, false));
-    // Plan-entry handoff completes with `plan_approved_execution_pending: false`
-    // but is still a control-flow turn: the tool result is its terminal output.
-    assert!(!completed_turn_requires_final_response(&ordinary_completion, true));
-}
-
-#[test]
-fn plan_entry_handoff_is_not_approved_plan_execution() {
-    use super::is_plan_entry_handoff;
-
-    assert!(is_plan_entry_handoff("plan"));
-    assert!(is_plan_entry_handoff("Plan"));
-    assert!(!is_plan_entry_handoff("build"));
-    assert!(!is_plan_entry_handoff("auto"));
+    assert!(!completed_turn_requires_final_response(&approved_handoff));
+    assert!(completed_turn_requires_final_response(&ordinary_completion));
 }
 
 #[test]

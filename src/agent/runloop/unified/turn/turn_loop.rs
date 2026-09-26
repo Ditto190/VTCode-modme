@@ -491,22 +491,8 @@ fn ensure_completed_turn_response(
     Ok(response_was_fallback)
 }
 
-/// True when a `Completed` turn must publish a final assistant response.
-///
-/// Primary-agent handoffs (plan entry via `SwitchPrimaryAgent`, approved-plan
-/// execution via the policy target) are control-flow turns: the session loop
-/// constructs the follow-up request, and the handoff turn legitimately ends on
-/// a tool result with no assistant final. Requiring one would append a
-/// misleading recovery fallback and convert the handoff into `Blocked`.
-fn completed_turn_requires_final_response(result: &TurnLoopResult, primary_agent_handoff: bool) -> bool {
-    !primary_agent_handoff && matches!(result, TurnLoopResult::Completed { plan_approved_execution_pending: false })
-}
-
-/// True when a `SwitchPrimaryAgent` handoff is *entering* plan mode rather than
-/// leaving it for an approved-plan execution agent. Plan entry must not claim
-/// `plan_approved_execution_pending` (that flag starts implementation).
-pub(crate) fn is_plan_entry_handoff(agent: &str) -> bool {
-    agent.eq_ignore_ascii_case("plan")
+fn completed_turn_requires_final_response(result: &TurnLoopResult) -> bool {
+    matches!(result, TurnLoopResult::Completed { plan_approved_execution_pending: false })
 }
 
 pub(crate) struct TurnLoopOutcome {
@@ -1829,12 +1815,10 @@ pub(crate) async fn run_turn_loop(
         match turn_outcome {
             TurnHandlerOutcome::Continue => continue,
             TurnHandlerOutcome::SwitchPrimaryAgent(agent) => {
-                // Primary-agent handoff after the turn. Plan *entry* selects the
-                // plan agent without claiming an approved-plan execution turn;
-                // plan→build/auto still uses the approved-plan path below.
-                let plan_entry = is_plan_entry_handoff(&agent);
+                // Plan-mode "switch to build/auto agent" decision: end the turn
+                // normally and let the interaction loop perform the handoff.
                 pending_primary_agent = Some(agent);
-                result = TurnLoopResult::Completed { plan_approved_execution_pending: !plan_entry };
+                result = TurnLoopResult::Completed { plan_approved_execution_pending: true };
                 break;
             }
             TurnHandlerOutcome::SwitchPrimaryAgentWithPolicy { target } => {
@@ -1929,18 +1913,16 @@ pub(crate) async fn run_turn_loop(
         )?;
     }
 
-    // An approved-plan handoff or plan-entry handoff is a completed control-
-    // flow turn, not a user-visible assistant turn. Its follow-up request is
-    // constructed by the outer session loop, so requiring a final assistant
-    // response here would convert the handoff into `Blocked` before the
-    // implementation/planning turn can start.
-    let primary_agent_handoff = pending_primary_agent.is_some() || pending_plan_execution_target.is_some();
-    let final_response_was_fallback = if completed_turn_requires_final_response(&result, primary_agent_handoff) {
+    // An approved-plan handoff is a completed control-flow turn, not a user-
+    // visible assistant turn. Its implementation request is constructed by
+    // the outer session loop, so requiring a final assistant response here
+    // would convert the handoff into `Blocked` before execution can start.
+    let final_response_was_fallback = if completed_turn_requires_final_response(&result) {
         ensure_completed_turn_response(&mut ctx, working_history, turn_history_start_len)?
     } else {
         ctx.harness_state.final_response_was_fallback()
     };
-    if completed_turn_requires_final_response(&result, primary_agent_handoff) {
+    if completed_turn_requires_final_response(&result) {
         if final_response_was_fallback {
             let reason = completed_fallback_reason(ctx.is_planning_active());
             // Diagnostic for false-Blocked reports (e.g. simple requests ending
