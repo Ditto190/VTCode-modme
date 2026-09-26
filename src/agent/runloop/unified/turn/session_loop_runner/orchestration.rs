@@ -2371,6 +2371,24 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 return Err(error);
             }
         }
+        // Bound the finished session's rewind pins so completed threads cannot
+        // keep their full turn history protected for the snapshot age window.
+        // A fully-checked task tracker is archived so it cannot leak into the
+        // next session's memory envelope.
+        {
+            let session_id = tool_registry.harness_context_snapshot().session_id;
+            if let Some(manager) = checkpoint_manager.as_ref()
+                && let Err(error) = manager.complete_session_navigation(&session_id).await
+            {
+                tracing::debug!(%error, "checkpoint navigation trim failed after thread completion");
+            }
+            if let Err(error) = vtcode_core::core::agent::harness_artifacts::archive_completed_current_task(
+                &config.workspace,
+                &session_id,
+            ) {
+                tracing::debug!(%error, "completed task tracker archive failed after thread completion");
+            }
+        }
         agent_touched_paths.extend(context_manager.tracked_instruction_activity_paths());
         // Skip persistent memory on interrupt-exits (it makes LLM API calls which
         // delay shutdown significantly). For normal exits, wait up to 5 s for

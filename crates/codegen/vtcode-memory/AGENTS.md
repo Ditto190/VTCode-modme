@@ -11,7 +11,7 @@
 - Public API uses `anyhow::Result<T>` + `.context()`; no `unwrap`/`expect` in non-test code.
 - Keep ordinary appends buffered; flush at turn boundaries, reads, cap rewrites, and close.
 - Return persistence errors to callers; do not silently discard cap-enforcement failures.
-- Retention may remove only validated direct child session directories; preserve active manifests and reject manifest-controlled paths or symlink entries.
+- Retention may remove only validated direct child session directories; preserve live active manifests and reject manifest-controlled paths or symlink entries. `mark_abandoned_active_sessions` flips idle `active` manifests past `max_age_days` to `completed` so crashed threads can be reclaimed (`max_age_days == 0` disables the sweep).
 - `event_log.rs`: turn-lifecycle state machine is `LogState::apply_lifecycle_event` (single impl shared by `append` and `scan` via `LifecycleKind`). Serialization+rollback is `LogState::serialize_event`. Cap eviction planning is `LogState::plan_cap_eviction` (I/O stays in `enforce_event_cap`). Do not duplicate these state transitions inline.
 - Session event bytes are synced before derived metadata; publish the turn index before the manifest, leave the pending cap-rewrite marker until both are durable, and rescan when metadata is malformed, inconsistent, or offsets exceed the canonical log.
 - Session directories are `0700` and session files are `0600`; preserve the symlink-safe `vtcode-commons` filesystem primitives.

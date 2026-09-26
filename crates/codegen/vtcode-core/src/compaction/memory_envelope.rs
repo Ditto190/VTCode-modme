@@ -21,7 +21,10 @@ use vtcode_config::loader::VTCodeConfig;
 use crate::compaction::CompactionConfig;
 use crate::config::constants::tools as tool_names;
 use crate::context::history_files::{HistoryFileManager, messages_to_history_messages};
-use crate::core::agent::harness_artifacts::{current_task_path, read_evaluation_summary, read_spec_summary};
+use crate::core::agent::harness_artifacts::{
+    current_evaluation_path, current_spec_path, current_task_path, read_evaluation_summary_fresh,
+    read_spec_summary_fresh, session_artifact_cutoff,
+};
 use crate::core::agent::steering::{
     MAX_APPLIED_FOLLOW_UP_INTENT_IDS, MAX_QUEUED_FOLLOW_UP_INTENTS, QueuedFollowUpIntent,
 };
@@ -271,14 +274,32 @@ pub fn build_session_memory_envelope(
     envelope_update: Option<&SessionMemoryEnvelopeUpdate>,
 ) -> SessionMemoryEnvelope {
     let pe = prior_envelope;
-    let spec_summary = read_spec_summary(workspace_root).or_else(|| pe.and_then(|e| e.spec_summary.clone()));
-    let evaluation_summary =
-        read_evaluation_summary(workspace_root).or_else(|| pe.and_then(|e| e.evaluation_summary.clone()));
+    let artifact_cutoff = session_artifact_cutoff(workspace_root, session_id);
+    // A present-but-stale artifact must not fall back to a prior envelope's
+    // copy (that re-adopts the same leftover). Only inherit prior when the
+    // file is absent.
+    let spec_present = current_spec_path(workspace_root).exists();
+    let evaluation_present = current_evaluation_path(workspace_root).exists();
+    let spec_summary = if spec_present {
+        read_spec_summary_fresh(workspace_root, artifact_cutoff)
+    } else {
+        pe.and_then(|e| e.spec_summary.clone())
+    };
+    let evaluation_summary = if evaluation_present {
+        read_evaluation_summary_fresh(workspace_root, artifact_cutoff)
+    } else {
+        pe.and_then(|e| e.evaluation_summary.clone())
+    };
     let merge = |prior: &[String], updates: &[String]| merge_recent_strings(prior, updates, MEMORY_LIST_LIMIT);
-    let constraints = merge(
-        pe.map(|e| e.constraints.as_slice()).unwrap_or(&[]),
-        &extract_constraints_from_summary(spec_summary.as_deref()),
-    );
+    // Constraints extracted from a dropped stale artifact must not re-enter via
+    // the prior envelope. When a live artifact file exists that channel is
+    // authoritative (fresh content or explicitly dropped).
+    let prior_constraints: &[String] = if spec_present || evaluation_present {
+        &[]
+    } else {
+        pe.map(|e| e.constraints.as_slice()).unwrap_or(&[])
+    };
+    let constraints = merge(prior_constraints, &extract_constraints_from_summary(spec_summary.as_deref()));
     let constraints = merge(&constraints, &extract_constraints_from_summary(evaluation_summary.as_deref()));
     let update = envelope_update.cloned().unwrap_or_default();
     let pending_intents = update
@@ -685,7 +706,10 @@ fn extract_compaction_summary(compacted: &[Message], original_history: &[Message
     }
 }
 
-fn sanitize_session_id(session_id: &str) -> String {
+/// Sanitize a session id the same way history envelope filenames do
+/// (32-char ASCII-safe prefix). Callers that match envelope names must use
+/// this, not the raw session id.
+pub fn sanitize_session_id(session_id: &str) -> String {
     session_id
         .chars()
         .map(|c| {
@@ -699,7 +723,12 @@ fn sanitize_session_id(session_id: &str) -> String {
         .collect()
 }
 
-fn memory_envelope_file_matches_session(name: &str, session_id: &str) -> bool {
+/// Whether a history envelope filename belongs to `session_id`.
+///
+/// Envelope names use the 32-char sanitized id, with optional `_<n>`
+/// suffixes. Matching must use this exact rule — a loose `starts_with` on
+/// the raw id over-preserves unrelated sessions.
+pub fn memory_envelope_file_matches_session(name: &str, session_id: &str) -> bool {
     let session_prefix = sanitize_session_id(session_id);
     name == format!("{session_prefix}{MEMORY_ENVELOPE_SUFFIX}")
         || (name.starts_with(&format!("{session_prefix}_")) && name.ends_with(MEMORY_ENVELOPE_SUFFIX))
@@ -770,6 +799,33 @@ fn extract_verification_summary(content: &str, checklist: &[String]) -> Option<S
     (!fallback_lines.is_empty()).then(|| fallback_lines.join("\n"))
 }
 
+/// Split the tail of a `verify:` line into clean commands.
+///
+/// Plan writers sometimes emit `verify: [a] and verify: [b]` on one line.
+/// Strip at most one matching outer `[`…`]` pair per piece and drop empties so
+/// a spliced marker can never leak into `verification_summary`.
+fn split_verify_command_tail(rest: &str) -> Vec<String> {
+    rest.split(" and verify:")
+        .map(str::trim)
+        .map(strip_one_outer_bracket_pair)
+        .filter(|piece| !piece.is_empty())
+        .map(normalize_whitespace)
+        .filter(|piece| !piece.is_empty())
+        .collect()
+}
+
+fn strip_one_outer_bracket_pair(piece: &str) -> &str {
+    let trimmed = piece.trim();
+    // Plan splices can leave the closing bracket off (`verify: [cmd`).
+    let Some(inner) = trimmed.strip_prefix('[').map(str::trim_start) else {
+        return trimmed;
+    };
+    match inner.strip_suffix(']') {
+        Some(stripped) => stripped.trim_end(),
+        None => inner,
+    }
+}
+
 fn collect_structured_verify_commands(content: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut in_verify_block = false;
@@ -777,13 +833,10 @@ fn collect_structured_verify_commands(content: &str) -> Vec<String> {
     for line in content.lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix("verify:") {
-            let command = normalize_whitespace(rest);
-            if command.is_empty() {
-                in_verify_block = true;
-            } else {
+            for command in split_verify_command_tail(rest) {
                 commands.push(command);
-                in_verify_block = false;
             }
+            in_verify_block = rest.trim().is_empty();
             continue;
         }
 
@@ -1548,5 +1601,37 @@ mod tests {
         ];
 
         assert_eq!(extract_compaction_summary(&compacted, &[]), "new local summary");
+    }
+
+    #[test]
+    fn split_verify_command_tail_splits_and_strips_brackets() {
+        let tail = " [cargo nextest run -E 'test(turn_loop_helpers) or test(tool_outcomes) or test(blocked_handoff)'] and verify: [cargo check --locked";
+        let commands = super::split_verify_command_tail(tail);
+        assert_eq!(
+            commands,
+            vec![
+                "cargo nextest run -E 'test(turn_loop_helpers) or test(tool_outcomes) or test(blocked_handoff)'"
+                    .to_string(),
+                "cargo check --locked".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn split_verify_command_tail_keeps_legitimate_inner_brackets() {
+        // Only one outer pair is stripped; array/subscript syntax inside the
+        // command must survive.
+        let commands = super::split_verify_command_tail(" cargo test --features 'a[b]' ");
+        assert_eq!(commands, vec!["cargo test --features 'a[b]'".to_string()]);
+    }
+
+    #[test]
+    fn structured_verify_commands_do_not_splice_bracketed_pairs() {
+        let content =
+            "# Fix\n\n- [x] step\n  files: src/x.rs\n  verify: [cargo check --locked] and verify: [cargo fmt --check\n";
+        let commands = super::collect_structured_verify_commands(content);
+        assert_eq!(commands, vec!["cargo check --locked".to_string(), "cargo fmt --check".to_string()]);
+        let summary = super::extract_verification_summary(content, &[]).expect("summary");
+        assert!(!summary.contains("] and verify:"), "splice marker must not leak: {summary}");
     }
 }

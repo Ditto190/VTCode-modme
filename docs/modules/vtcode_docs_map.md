@@ -1043,6 +1043,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: 2026-09-19 | Post-merge review: inspection verify allowlist tightening, 2026-09-19 | Planning recovery rejects inspection-command verifies, 2026-09-14 | Session session-vtcode-20260914T031505Z_075199-09813 planning validation audit, 2026-08-16 | Checkpoints 912–917 diagnostics audit, 2026-08-12 | Planning wire-catalog collapse (turns 912–913)
   - **User Questions**: "What can you tell me about Session Log Review?", "How does 2026-09-19 | Post-merge review: inspection verify allowlist tightening work?", "How does 2026-09-19 | Planning recovery rejects inspection-command verifies work?"
 
+- **File**: `docs/compose/spec/session-residual-hygiene.md`
+  - **Content**: Session Residual Hygiene
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Session Residual Hygiene?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/session-stdio-dimmer.md`
   - **Content**: Session Stdin/Stdout Dimmer and Expand
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks

@@ -27,6 +27,10 @@ use crate::core::SECONDS_PER_DAY;
 pub const DEFAULT_CHECKPOINTS_ENABLED: bool = true;
 pub const DEFAULT_MAX_SNAPSHOTS: usize = 50;
 pub const DEFAULT_MAX_AGE_DAYS: u64 = 30;
+/// How many newest active turns a finished session keeps pinned for rewind.
+/// Older entries are dropped on thread completion so their snapshots become
+/// prune-eligible instead of sitting protected for the full age window.
+pub const REWIND_ACTIVE_KEEP: usize = 5;
 const SNAPSHOT_SCHEMA_VERSION: SchemaVersion = SchemaVersion(3);
 
 /// Collect turn numbers from a navigation value: either a bare array of turns
