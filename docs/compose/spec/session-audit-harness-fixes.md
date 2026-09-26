@@ -1,9 +1,9 @@
 ---
 feature: session-audit-harness-fixes
-status: in-progress
+status: delivered
 updated: 2026-09-26
 branch: fix/session-audit-harness-fixes
-commits: # leave empty while in progress; fill at delivery
+commits: 606f360ba..c98bbf59a
 ---
 
 # Session Audit Harness Fixes
@@ -57,6 +57,9 @@ completed session's branch checkpoint, orphaned `turn_recovery_*` snapshot remov
   sessions never reached the threshold and leftovers piled up across runs.
 - `tool-policy.json` `approval_cache` is an `IndexSet` (insertion-ordered), so
   trimming from the front drops the oldest keys and keeps recent approvals.
+- Review pass found one classifier-precision edge: a bare `"sandbox"` substring
+  would misclassify `Unknown tool: sandbox_helper` as policy. Tightened the
+  phrases to `sandbox denied` / `sandbox policy` and covered both sides in tests.
 
 ## [S1] Problem
 
@@ -157,7 +160,7 @@ defaults, MCP circuit breaker (`McpCircuitBreaker`), and planning-mode recovery
 directives.
 
 ## Tasks
-- [ ] T1: Classify preflight rejects as LLM-mistake vs policy and stop tripping the circuit on mistakes — acceptance: a batch of 3 prose-blob names plus 1 valid `exec_command` executes the `exec_command`; unit tests cover mistake vs policy (covers: S2.A, S2.B)
-- [ ] T2: On thread completion clear redo stack and orphaned `turn_recovery_*` snapshots — acceptance: completed session's branch checkpoint has empty `redo` and no recovery snapshot outside `active` (covers: S2.C.1)
-- [ ] T3: Prune aged tool-output spools and cap `approval_cache` on policy write — acceptance: spools older than retention are gone after completion; policy file size bounded in a unit test (covers: S2.C.2, S2.C.3)
-- [ ] T4: Record residual-state findings and verification in this document's Report — acceptance: Report has What was built / Verification / Journey log (covers: S1)
+- [x] T1: Classify preflight rejects as LLM-mistake vs policy and stop tripping the circuit on mistakes — acceptance: a batch of 3 prose-blob names plus 1 valid `exec_command` executes the `exec_command`; unit tests cover mistake vs policy (covers: S2.A, S2.B)
+- [x] T2: On thread completion clear redo stack and orphaned `turn_recovery_*` snapshots — acceptance: completed session's branch checkpoint has empty `redo` and no recovery snapshot outside `active` (covers: S2.C.1)
+- [x] T3: Prune aged tool-output spools and cap `approval_cache` on policy write — acceptance: spools older than retention are gone after completion; policy file size bounded in a unit test (covers: S2.C.2, S2.C.3)
+- [x] T4: Record residual-state findings and verification in this document's Report — acceptance: Report has What was built / Verification / Journey log (covers: S1)

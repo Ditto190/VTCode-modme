@@ -74,10 +74,13 @@ pub(crate) use types::{PreparedToolCall, ToolOutcomeContext, ValidationResult};
 /// rejects always count.
 pub(crate) fn preflight_failure_is_llm_mistake(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    // Security / policy blocks must keep tripping the circuit.
+    // Security / policy blocks always trip, even when they mention a tool name.
+    // Keep these phrases tight: a bare "sandbox" substring would misclassify
+    // `Unknown tool: sandbox_helper` as a policy block.
     if lower.contains("command security check failed")
         || lower.contains("command injection")
-        || lower.contains("sandbox")
+        || lower.contains("sandbox denied")
+        || lower.contains("sandbox policy")
         || lower.contains("policy violation")
         || lower.contains("not allowed")
     {

@@ -243,6 +243,8 @@ fn preflight_name_mistakes_are_llm_mistakes_and_do_not_trip() {
     assert!(preflight_failure_is_llm_mistake("Unknown tool: exec_command\n: Tool error"));
     assert!(preflight_failure_is_llm_mistake("Tool call has an empty tool name. Provide a valid tool name."));
     assert!(preflight_failure_is_llm_mistake("Tool preflight validation failed: Unknown tool: ` — `"));
+    // A tool name that merely contains "sandbox" is still a name mistake.
+    assert!(preflight_failure_is_llm_mistake("Unknown tool: sandbox_helper"));
 }
 
 #[test]
@@ -258,4 +260,5 @@ fn preflight_policy_and_argument_failures_still_trip() {
     ));
     assert!(!preflight_failure_is_llm_mistake("Invalid arguments: expected value"));
     assert!(!preflight_failure_is_llm_mistake("Policy violation: sandbox denied"));
+    assert!(!preflight_failure_is_llm_mistake("Command security check failed: sandbox policy denied"));
 }
