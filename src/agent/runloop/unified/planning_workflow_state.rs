@@ -285,10 +285,9 @@ pub(crate) const PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT: &str = "Planning wor
 pub(crate) const PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT: &str =
     "Planning workflow remains active: no approval-ready plan was produced. Keep planning and describe what to revise.";
 
-pub(crate) fn short_confirmation_hint_with_fallback() -> String {
-    // One line under the 2-line diagnostic contract; the fallback verb is
-    // already covered by `implement` in the primary hint.
-    PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT.to_string()
+/// Confirmation verb line for planning stop paths (2-line diagnostic contract).
+pub(crate) fn short_confirmation_hint() -> &'static str {
+    PLANNING_WORKFLOW_SHORT_CONFIRMATION_HINT
 }
 
 pub(crate) fn render_planning_workflow_next_step_hint(renderer: &mut AnsiRenderer) -> Result<()> {

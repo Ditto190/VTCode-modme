@@ -18,7 +18,7 @@ use crate::agent::runloop::unified::planning_workflow::{
     PlanningWorkflowState, emit_plan_ready_events, persist_plan_draft, persisted_plan_is_ready, validate_plan_content,
 };
 use crate::agent::runloop::unified::planning_workflow_state::{
-    PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT, PlanningWorkflowSessionState, short_confirmation_hint_with_fallback,
+    PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT, PlanningWorkflowSessionState, short_confirmation_hint,
 };
 use crate::agent::runloop::unified::run_loop_context::HarnessTurnState;
 use crate::agent::runloop::unified::turn::context::TurnLoopResult;
@@ -235,8 +235,7 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     } else {
         ""
     };
-    let summary =
-        format!("Tool execution completed, but the model follow-up failed{transient_hint}. Output above is valid.",);
+    let summary = follow_up_failure_status_line(transient_hint);
     let should_retry_tool_enabled =
         !misconfiguration && allow_tool_enabled_retry && (err_cat.is_retryable() || context_capacity_failure);
     let should_retry_tool_free = !misconfiguration
@@ -246,13 +245,8 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
     // tip text fold into the action or drop; forensics stay out of the
     // transcript.
     renderer.line(MessageStyle::Info, &summary)?;
-    let action_text = if should_retry_tool_enabled {
+    if should_retry_tool_enabled {
         ensure_recent_system_message(working_history, POST_TOOL_TOOL_ENABLED_RETRY_DIRECTIVE);
-        if context_capacity_failure {
-            "Context capacity exceeded; compacting and scheduling one tool-enabled recovery pass."
-        } else {
-            "Scheduling one tool-enabled recovery pass."
-        }
     } else if should_retry_tool_free {
         // Tool-free recovery: inject only the tools-disabled recovery reason.
         // The resume directive would contradict it (see
@@ -265,20 +259,19 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
             POST_TOOL_RECOVERY_REASON
         };
         prepare_post_tool_tool_free_recovery(working_history, reason);
-        "Scheduling a final tool-free recovery pass."
-    } else if !misconfiguration && !err_cat.is_retryable() {
+    } else {
         // Turn ends here; the resume directive guides the *next* turn to
         // reuse this turn's tool outputs instead of re-running exploration.
         ensure_post_tool_resume_directive(working_history);
-        if planning_active {
-            "Planning evidence is preserved; type `keep planning` to continue, or switch provider/model if this repeats."
-        } else {
-            "Retry with a narrower prompt or switch provider/model."
-        }
-    } else {
-        ensure_post_tool_resume_directive(working_history);
-        "Type 'continue' to resume with retained tool outputs."
-    };
+    }
+    let action_text = follow_up_failure_action_line(
+        should_retry_tool_enabled,
+        context_capacity_failure,
+        should_retry_tool_free,
+        planning_active,
+        err_cat.is_retryable(),
+        misconfiguration,
+    );
     renderer.line(MessageStyle::Info, &format!("  • {action_text}"))?;
     let action = if should_retry_tool_enabled {
         PostToolFailureRecovery::RetryToolEnabled
@@ -299,6 +292,40 @@ fn maybe_recover_after_post_tool_llm_failure_with_progress(
         "Recovered turn after post-tool LLM phase failure"
     );
     Ok(action)
+}
+
+/// Status line for a post-tool model follow-up failure (2-line diagnostic contract).
+fn follow_up_failure_status_line(transient_hint: &str) -> String {
+    format!("Tool execution completed, but the model follow-up failed{transient_hint}. Output above is valid.")
+}
+
+/// Action line body (no bullet prefix) for a post-tool follow-up failure.
+/// Pure so the 2-line TUI contract is unit-testable without a renderer.
+fn follow_up_failure_action_line(
+    should_retry_tool_enabled: bool,
+    context_capacity_failure: bool,
+    should_retry_tool_free: bool,
+    planning_active: bool,
+    err_retryable: bool,
+    misconfiguration: bool,
+) -> &'static str {
+    if should_retry_tool_enabled {
+        if context_capacity_failure {
+            "Context capacity exceeded; compacting and scheduling one tool-enabled recovery pass."
+        } else {
+            "Scheduling one tool-enabled recovery pass."
+        }
+    } else if should_retry_tool_free {
+        "Scheduling a final tool-free recovery pass."
+    } else if !misconfiguration && !err_retryable {
+        if planning_active {
+            "Planning evidence is preserved; type `keep planning` to continue, or switch provider/model if this repeats."
+        } else {
+            "Retry with a narrower prompt or switch provider/model."
+        }
+    } else {
+        "Type 'continue' to resume with retained tool outputs."
+    }
 }
 
 /// Extract file paths from tool responses in the working history.
@@ -581,7 +608,7 @@ pub(super) async fn complete_turn_after_failed_tool_free_recovery_with_events(
                 plan_mode_recovery_fallback(persisted_salvage, finalize_message, working_history);
             planning_fallback.push_str("\n\n");
             if persisted_plan_ready {
-                planning_fallback.push_str(&short_confirmation_hint_with_fallback());
+                planning_fallback.push_str(short_confirmation_hint());
             } else {
                 planning_fallback.push_str(PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT);
             }
@@ -608,7 +635,7 @@ pub(super) async fn complete_turn_after_failed_tool_free_recovery_with_events(
         let mut planning_fallback = plan_mode_recovery_fallback(persisted_salvage, fallback_notice, working_history);
         planning_fallback.push_str("\n\n");
         if persisted_plan_ready {
-            planning_fallback.push_str(&short_confirmation_hint_with_fallback());
+            planning_fallback.push_str(short_confirmation_hint());
         } else {
             planning_fallback.push_str(PLANNING_WORKFLOW_NO_APPROVAL_READY_PLAN_HINT);
         }
@@ -1039,6 +1066,47 @@ mod tests {
             message: "maximum context length is 114688 tokens".to_string(),
             metadata: None,
         })
+    }
+
+    #[test]
+    fn follow_up_failure_tui_lines_obey_two_line_contract() {
+        let status = follow_up_failure_status_line(" (transient; bounded retry scheduled)");
+        assert!(!status.contains('\n'), "status stays one line: {status}");
+        assert!(!status.contains("Follow-up error category"), "no category line: {status}");
+        assert!(status.contains("model follow-up failed"));
+
+        for action in [
+            follow_up_failure_action_line(true, false, false, false, true, false),
+            follow_up_failure_action_line(true, true, false, false, true, false),
+            follow_up_failure_action_line(false, false, true, false, true, false),
+            follow_up_failure_action_line(false, false, false, true, false, false),
+            follow_up_failure_action_line(false, false, false, false, false, false),
+        ] {
+            assert!(!action.contains('\n'), "action stays one line: {action}");
+            assert!(!action.contains("Follow-up error category"), "no category leak: {action}");
+            assert!(!action.contains("Elapsed:"), "no forensics: {action}");
+        }
+    }
+
+    #[test]
+    fn follow_up_failure_action_line_matches_outcome() {
+        assert!(follow_up_failure_action_line(true, true, false, false, true, false).contains("Context capacity"));
+        assert!(
+            follow_up_failure_action_line(true, false, false, false, true, false).contains("tool-enabled recovery")
+        );
+        assert!(follow_up_failure_action_line(false, false, true, false, true, false).contains("tool-free recovery"));
+        assert!(
+            follow_up_failure_action_line(false, false, false, true, false, false).contains("keep planning"),
+            "planning stop names the next verb"
+        );
+        assert!(
+            follow_up_failure_action_line(false, false, false, false, false, false).contains("narrower prompt"),
+            "non-retryable stop names the retry tip"
+        );
+        assert!(
+            follow_up_failure_action_line(false, false, false, false, true, true).contains("continue"),
+            "misconfiguration stop offers continue"
+        );
     }
 
     #[test]
