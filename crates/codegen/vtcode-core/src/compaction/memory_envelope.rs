@@ -22,7 +22,8 @@ use crate::compaction::CompactionConfig;
 use crate::config::constants::tools as tool_names;
 use crate::context::history_files::{HistoryFileManager, messages_to_history_messages};
 use crate::core::agent::harness_artifacts::{
-    current_task_path, read_evaluation_summary_fresh, read_spec_summary_fresh,
+    current_evaluation_path, current_spec_path, current_task_path, read_evaluation_summary_fresh,
+    read_spec_summary_fresh, session_artifact_cutoff,
 };
 use crate::core::agent::steering::{
     MAX_APPLIED_FOLLOW_UP_INTENT_IDS, MAX_QUEUED_FOLLOW_UP_INTENTS, QueuedFollowUpIntent,
@@ -274,10 +275,19 @@ pub fn build_session_memory_envelope(
 ) -> SessionMemoryEnvelope {
     let pe = prior_envelope;
     let artifact_cutoff = session_artifact_cutoff(workspace_root, session_id);
-    let spec_summary =
-        read_spec_summary_fresh(workspace_root, artifact_cutoff).or_else(|| pe.and_then(|e| e.spec_summary.clone()));
-    let evaluation_summary = read_evaluation_summary_fresh(workspace_root, artifact_cutoff)
-        .or_else(|| pe.and_then(|e| e.evaluation_summary.clone()));
+    // A present-but-stale artifact must not fall back to a prior envelope's
+    // copy (that re-adopts the same leftover). Only inherit prior when the
+    // file is absent.
+    let spec_summary = if current_spec_path(workspace_root).exists() {
+        read_spec_summary_fresh(workspace_root, artifact_cutoff)
+    } else {
+        pe.and_then(|e| e.spec_summary.clone())
+    };
+    let evaluation_summary = if current_evaluation_path(workspace_root).exists() {
+        read_evaluation_summary_fresh(workspace_root, artifact_cutoff)
+    } else {
+        pe.and_then(|e| e.evaluation_summary.clone())
+    };
     let merge = |prior: &[String], updates: &[String]| merge_recent_strings(prior, updates, MEMORY_LIST_LIMIT);
     let constraints = merge(
         pe.map(|e| e.constraints.as_slice()).unwrap_or(&[]),
@@ -689,7 +699,10 @@ fn extract_compaction_summary(compacted: &[Message], original_history: &[Message
     }
 }
 
-fn sanitize_session_id(session_id: &str) -> String {
+/// Sanitize a session id the same way history envelope filenames do
+/// (32-char ASCII-safe prefix). Callers that match envelope names must use
+/// this, not the raw session id.
+pub fn sanitize_session_id(session_id: &str) -> String {
     session_id
         .chars()
         .map(|c| {
@@ -701,28 +714,6 @@ fn sanitize_session_id(session_id: &str) -> String {
         })
         .take(32)
         .collect()
-}
-
-/// Best-effort start time of `session_id`, used to reject leftover workspace
-/// task artifacts that predate the session.
-fn session_artifact_cutoff(workspace_root: &Path, session_id: &str) -> Option<std::time::SystemTime> {
-    let sessions_root = workspace_root.join(".vtcode").join("sessions");
-    let candidates = [
-        sessions_root.join(session_id),
-        sessions_root.join(sanitize_session_id(session_id)),
-    ];
-    for dir in candidates {
-        let Ok(metadata) = fs::metadata(&dir) else {
-            continue;
-        };
-        if let Ok(created) = metadata.created() {
-            return Some(created);
-        }
-        if let Ok(modified) = metadata.modified() {
-            return Some(modified);
-        }
-    }
-    None
 }
 
 fn memory_envelope_file_matches_session(name: &str, session_id: &str) -> bool {

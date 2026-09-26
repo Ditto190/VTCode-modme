@@ -123,7 +123,10 @@ pub(super) async fn run_harness_retention(workspace: &Path, vt_cfg: Option<&VTCo
 
     let history_workspace = workspace.to_path_buf();
     let history_preserve = turn_run_id.0.clone();
-    match spawn_blocking(move || prune_history_envelopes(&history_workspace, &history_preserve)).await {
+    let history_max_age_days = RetentionPolicy::default().max_age_days;
+    match spawn_blocking(move || prune_history_envelopes(&history_workspace, &history_preserve, history_max_age_days))
+        .await
+    {
         Ok(Ok(removed)) if removed > 0 => {
             tracing::debug!(target: "vtcode.harness", removed, "pruned legacy history memory envelopes");
         }
@@ -142,10 +145,12 @@ pub(super) async fn run_harness_retention(workspace: &Path, vt_cfg: Option<&VTCo
 ///
 /// Keeps the `HISTORY_ENVELOPE_KEEP` newest files and anything belonging to
 /// `preserve_session_id`; drops envelopes older than `max_age_days`.
-fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str) -> Result<usize> {
+fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_days: u64) -> Result<usize> {
     const HISTORY_ENVELOPE_KEEP: usize = 50;
-    const MAX_AGE_DAYS: u64 = 30;
 
+    // Envelope filenames are produced by the 32-char sanitized session id, not
+    // the raw id. Match on that prefix or the preserve branch is dead.
+    let preserve_prefix = vtcode_core::compaction::memory_envelope::sanitize_session_id(preserve_session_id);
     let history_dir = workspace.join(".vtcode").join("history");
     let Ok(entries) = std::fs::read_dir(&history_dir) else {
         return Ok(0);
@@ -159,7 +164,8 @@ fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str) -> Resul
         if !name.ends_with(".memory.json") || !path.is_file() {
             continue;
         }
-        if name.contains(preserve_session_id) {
+        let stem = name.trim_end_matches(".memory.json");
+        if stem.starts_with(&preserve_prefix) || name.starts_with(preserve_session_id) {
             continue;
         }
         let modified = entry
@@ -171,7 +177,7 @@ fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str) -> Resul
     }
     envelopes.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
 
-    let cutoff = SystemTime::now() - Duration::from_secs(MAX_AGE_DAYS * 24 * 3600);
+    let cutoff = SystemTime::now() - Duration::from_secs(max_age_days * 24 * 3600);
     let mut removed = 0usize;
     for (index, (path, modified)) in envelopes.iter().enumerate() {
         let over_count = index >= HISTORY_ENVELOPE_KEEP;
@@ -226,7 +232,7 @@ mod tests {
         }
         std::fs::write(history.join("session-keep.memory.json"), b"{}").expect("write preserved");
 
-        let removed = prune_history_envelopes(temp.path(), "session-keep").expect("prune");
+        let removed = prune_history_envelopes(temp.path(), "session-keep", 30).expect("prune");
         assert!(removed >= 10, "count cap should drop the oldest extras: {removed}");
         assert!(history.join("session-keep.memory.json").exists(), "preserved session stays");
         let remaining: Vec<_> = std::fs::read_dir(&history)
@@ -235,5 +241,25 @@ mod tests {
             .map(|e| e.file_name())
             .collect();
         assert!(remaining.len() <= 51, "bounded history envelopes: {}", remaining.len());
+    }
+
+    #[test]
+    fn prune_history_envelopes_preserves_real_session_id_prefix() {
+        let temp = TempDir::new().expect("temp dir");
+        let history = temp.path().join(".vtcode").join("history");
+        std::fs::create_dir_all(&history).expect("history dir");
+        // Real ids are sanitized to 32 chars for envelope filenames.
+        let session_id = "session-vtcode-20260925T234343Z_201620-81429";
+        let envelope_name = "session-vtcode-20260925T234343Z_.memory.json";
+        std::fs::write(history.join(envelope_name), b"{}").expect("write preserved");
+        for i in 0..60 {
+            std::fs::write(history.join(format!("other-{i:03}.memory.json")), b"{}").expect("write other");
+        }
+
+        prune_history_envelopes(temp.path(), session_id, 30).expect("prune");
+        assert!(
+            history.join(envelope_name).exists(),
+            "finalizing session envelope must match on the 32-char sanitized prefix"
+        );
     }
 }

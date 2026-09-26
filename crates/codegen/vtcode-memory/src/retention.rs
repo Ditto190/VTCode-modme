@@ -62,7 +62,7 @@ pub fn apply_retention_preserving(
     // Crashed/killed threads never emit thread.completed; surface those
     // abandoned `active` stores as completed so the eviction phases can
     // reclaim them. Live sessions stay `active` and remain unpinned.
-    mark_abandoned_active_sessions(workspace, policy.max_age_days)?;
+    mark_abandoned_active_sessions(workspace, policy.max_age_days, preserve_session_id)?;
     let preserve_path = preserve_session_id.map(|session_id| crate::session_dir(workspace, session_id));
     let mut sessions = retention_candidates(&root, preserve_path.as_deref())?;
     let mut removed = 0usize;
@@ -167,11 +167,16 @@ fn retention_candidates(
 /// younger than the cutoff and are left untouched. `max_age_days == 0` disables
 /// the sweep (the hard "never evict active" contract used by force-evict tests).
 /// Returns how many manifests were marked abandoned.
-pub fn mark_abandoned_active_sessions(workspace: &Path, max_age_days: u64) -> Result<usize, SessionStoreError> {
+pub fn mark_abandoned_active_sessions(
+    workspace: &Path,
+    max_age_days: u64,
+    preserve_session_id: Option<&str>,
+) -> Result<usize, SessionStoreError> {
     if max_age_days == 0 {
         return Ok(0);
     }
     let root = sessions_root(workspace);
+    let preserve_path = preserve_session_id.map(|session_id| crate::session_dir(workspace, session_id));
     let Ok(entries) = std::fs::read_dir(&root) else {
         return Ok(0);
     };
@@ -180,6 +185,9 @@ pub fn mark_abandoned_active_sessions(workspace: &Path, max_age_days: u64) -> Re
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_dir() {
+            continue;
+        }
+        if preserve_path.as_deref() == Some(path.as_path()) {
             continue;
         }
         if session_retention_pinned(&path) {
@@ -210,7 +218,10 @@ pub fn mark_abandoned_active_sessions(workspace: &Path, max_age_days: u64) -> Re
         }
         let body = serde_json::to_vec_pretty(&summary)
             .map_err(|error| SessionStoreError::io(manifest_path.clone(), std::io::Error::other(error)))?;
-        std::fs::write(&manifest_path, body).map_err(|e| SessionStoreError::io(manifest_path.clone(), e))?;
+        // Atomic replace so a crash cannot leave a truncated manifest.
+        let temp = manifest_path.with_extension("json.tmp");
+        std::fs::write(&temp, &body).map_err(|e| SessionStoreError::io(temp.clone(), e))?;
+        std::fs::rename(&temp, &manifest_path).map_err(|e| SessionStoreError::io(manifest_path.clone(), e))?;
         marked += 1;
     }
     Ok(marked)

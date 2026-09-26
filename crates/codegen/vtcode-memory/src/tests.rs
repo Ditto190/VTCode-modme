@@ -295,6 +295,64 @@ fn retention_preserves_active_sessions() {
 }
 
 #[test]
+fn retention_preserves_recent_active_sessions_under_age_window() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "live-session", DEFAULT_MAX_EVENTS).expect("open");
+    log.append(&ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "live".to_string() }))
+        .expect("append thread start");
+    log.flush().expect("flush live session");
+
+    let session_dir = sessions_root(dir.path()).join("live-session");
+    let manifest_path = session_dir.join("manifest.json");
+    let mut manifest: crate::SessionManifest =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse manifest");
+    // Just updated: still live under a 30-day window.
+    manifest.updated_at = chrono::Utc::now().to_rfc3339();
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).expect("serialize manifest"))
+        .expect("write manifest");
+
+    let removed = apply_retention(dir.path(), crate::retention::RetentionPolicy { max_sessions: 50, max_age_days: 30 })
+        .expect("retain");
+
+    assert_eq!(removed, 0);
+    assert!(session_dir.exists(), "recent active sessions must survive the age window");
+}
+
+#[test]
+fn mark_abandoned_skips_preserved_session() {
+    let dir = TempDir::new().expect("tempdir");
+    for session_id in ["preserved-session", "other-abandoned"] {
+        let log = open(dir.path(), session_id, DEFAULT_MAX_EVENTS).expect("open");
+        log.append(&ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: session_id.to_string() }))
+            .expect("append thread start");
+        log.flush().expect("flush");
+        let manifest_path = sessions_root(dir.path()).join(session_id).join("manifest.json");
+        let mut manifest: crate::SessionManifest =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse manifest");
+        manifest.updated_at = "2020-01-01T00:00:00Z".to_string();
+        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).expect("serialize manifest"))
+            .expect("write manifest");
+    }
+
+    let marked = crate::retention::mark_abandoned_active_sessions(dir.path(), 30, Some("preserved-session"))
+        .expect("mark abandoned");
+
+    assert_eq!(marked, 1, "only the unpreserved abandoned store is marked");
+    let preserved: crate::SessionManifest = serde_json::from_str(
+        &fs::read_to_string(sessions_root(dir.path()).join("preserved-session").join("manifest.json"))
+            .expect("read preserved"),
+    )
+    .expect("parse preserved");
+    assert_eq!(preserved.status, "active", "preserved session keeps active status");
+    let other: crate::SessionManifest = serde_json::from_str(
+        &fs::read_to_string(sessions_root(dir.path()).join("other-abandoned").join("manifest.json"))
+            .expect("read other"),
+    )
+    .expect("parse other");
+    assert_eq!(other.status, "completed");
+}
+
+#[test]
 fn retention_evicts_abandoned_active_sessions_past_age_window() {
     let dir = TempDir::new().expect("tempdir");
     let log = open(dir.path(), "abandoned-session", DEFAULT_MAX_EVENTS).expect("open");

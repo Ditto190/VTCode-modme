@@ -100,6 +100,52 @@ pub fn read_evaluation_summary_fresh(workspace_root: &Path, not_before: Option<S
     read_markdown_summary_fresh(&current_evaluation_path(workspace_root), "Evaluation", not_before)
 }
 
+/// Like [`read_contract_summary`], but drop the file when it predates `not_before`.
+pub fn read_contract_summary_fresh(workspace_root: &Path, not_before: Option<SystemTime>) -> Option<String> {
+    read_markdown_summary_fresh(&current_contract_path(workspace_root), "Contract", not_before)
+}
+
+/// Like [`read_feature_list_summary`], but drop the file when it predates `not_before`.
+pub fn read_feature_list_summary_fresh(workspace_root: &Path, not_before: Option<SystemTime>) -> Option<String> {
+    read_markdown_summary_fresh(&current_feature_list_path(workspace_root), "FeatureList", not_before)
+}
+
+/// Like [`read_sprint_contract_summary`], but drop the file when it predates `not_before`.
+pub fn read_sprint_contract_summary_fresh(workspace_root: &Path, not_before: Option<SystemTime>) -> Option<String> {
+    read_markdown_summary_fresh(&current_sprint_contract_path(workspace_root), "SprintContract", not_before)
+}
+
+/// Like [`read_outcome_verification_summary`], but drop the file when it predates `not_before`.
+pub fn read_outcome_verification_summary_fresh(
+    workspace_root: &Path,
+    not_before: Option<SystemTime>,
+) -> Option<String> {
+    read_markdown_summary_fresh(&current_outcome_verification_path(workspace_root), "OutcomeVerification", not_before)
+}
+
+/// Best-effort start time of `session_id`, used to reject leftover workspace
+/// task artifacts that predate the session. Returns `None` when the session
+/// directory is missing so callers can fall back to unfiltered reads.
+pub fn session_artifact_cutoff(workspace_root: &Path, session_id: &str) -> Option<SystemTime> {
+    let sessions_root = workspace_root.join(".vtcode").join("sessions");
+    let candidates = [
+        sessions_root.join(session_id),
+        sessions_root.join(crate::compaction::memory_envelope::sanitize_session_id(session_id)),
+    ];
+    for dir in candidates {
+        let Ok(metadata) = fs::metadata(&dir) else {
+            continue;
+        };
+        // Prefer true creation time. Falling back to `modified()` would make
+        // the cutoff "now" for a freshly touched dir and over-filter artifacts
+        // legitimately written at session start.
+        if let Ok(created) = metadata.created() {
+            return Some(created);
+        }
+    }
+    None
+}
+
 /// Archive a fully-checked `current_task.md` so a finished checklist cannot
 /// describe the next session. Incomplete checklists stay in place.
 ///
@@ -114,7 +160,8 @@ pub fn archive_completed_current_task(workspace_root: &Path, session_id: &str) -
         .map(str::trim_start)
         .filter(|line| line.starts_with("- ["))
         .collect();
-    if checklist.is_empty() || !checklist.iter().all(|line| line.starts_with("- [x]")) {
+    let is_checked = |line: &str| line.starts_with("- [x]") || line.starts_with("- [X]");
+    if checklist.is_empty() || !checklist.iter().all(|line| is_checked(line)) {
         return Ok(None);
     }
     let archive_dir = workspace_root.join(TASKS_DIR).join("archive");
