@@ -1,17 +1,3 @@
-check and cleanup TUI's user facing diagnostic messages and verbose error/info output. Keep it clean, short and concise. As most of the time users only need the essential information, avoid overwhelming them with too much detail. The information is targeted for the coding agent's consumption only.
-
-check current status for more context here: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.16.19.png' '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.03.48.png'
-
-===
-
-check when VT Code is in Build/Auto mode and when it needs to switch to plan mode for planning. the system already switch as per user confirmation, but the header still shows the previous mode. Check and update the header accordingly.
-
-===
-
-current seems vtcode still using all rust toolchain (2024 and old version), can we configure it to use only the latest version? Make sure to update the configuration and verify that only the latest version is being used. And make sure no breaking changes occur due to this update.
-
-===
-
 CRITICAL: it seems the background task can not be stopped or closed, and also the main runloop is stuck with loading state. Also, user can not send any new messages or commands. This needs immediate attention to prevent the application from becoming unresponsive.
 
 screenshot: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 11.25.18.png'
@@ -73,10 +59,6 @@ reference:
 audit and make sure command are displayed correctly in full in the TUI with proper line wrapping and no truncation.
 
 '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-24 at 16.37.35.png'
-
-===
-
-check session. review the log, error, warnings and infos that prevented vtcode harness from functioning correctly. ensure context is properly maintained and any issues are addressed. and check for wasted resources or unnecessary operations. and wasted tool calls are minimized. also verify that all session-related data is correctly cleaned up and no residual state affects subsequent sessions.
 
 ===
 
