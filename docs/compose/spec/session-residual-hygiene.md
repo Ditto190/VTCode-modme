@@ -1,14 +1,75 @@
 ---
 feature: session-residual-hygiene
-status: in-progress
+status: delivered
 updated: 2026-09-26
 branch: fix/session-residual-hygiene
-commits: # leave empty while in progress
+commits: 69c967153..88e7e660e
 ---
 
 # Session Residual Hygiene
 
 ## Report
+
+**What was built** — Re-audit of `session-vtcode-20260925T234343Z_201620-81429`
+after `session-audit-harness-fixes`. Four residual defects were closed in
+shipped surfaces:
+
+1. **Bounded rewind pins.** `SnapshotManager::complete_session_navigation`
+   runs on `thread.completed`, keeps only `REWIND_ACTIVE_KEEP` (5) newest
+   `active` turns, clears `redo` (retiring recovery records), and removes
+   `rewind.lock`. Dropped turn snapshots become prune-eligible immediately
+   instead of staying protected for the 30-day age window.
+2. **Session-scoped context artifacts.** Orient and memory-envelope readers
+   drop `current_spec`/`contract`/`evaluation`/`feature_list`/sprint/outcome
+   summaries whose file predates the session directory's `created()`. A
+   present-but-stale file no longer falls back to a prior envelope copy.
+   Fully-checked `current_task.md` is archived on terminal completion so the
+   live path is clear for the next plan.
+3. **`verify:` parse.** `split_verify_command_tail` splits
+   `verify: [a] and verify: [b]` and strips brackets, so `'] and verify: ['`
+   can no longer leak into `verification_summary`.
+4. **Retention.** `mark_abandoned_active_sessions` flips idle `active`
+   manifests past `max_age_days` to `completed` (skipping the preserved
+   session and pins) so crashed threads can be evicted; `apply_retention`
+   then reclaims them. `prune_history_envelopes` caps `.vtcode/history/*.memory.json`
+   at 50 newest / age cutoff, matching filenames on the 32-char sanitized
+   session id.
+
+Live workspace cleanup (operational, not in the diff): removed `rewind.lock`,
+Jul 24 fixture trio, and 941 aged history envelopes; archived the finished
+`current_task.md`; trimmed 5 branch files to a 5-turn rewind window; marked 8
+abandoned actives and removed 9 sessions past the count cap; pruned 80
+unprotected turn snapshots (31.7 MB). `filesnap/` content-addressed blobs
+(~124 MB) remain and are reclaimed through `retire_snapshot` GC on the next
+age-based prune.
+
+**Verification** —
+- `cargo fmt --all -- --check` PASS
+- `cargo clippy --locked -p vtcode -p vtcode-core -p vtcode-memory --tests -- -D warnings` PASS
+- `cargo nextest run --locked -p vtcode-memory -E 'test(retention) or test(abandoned) or test(mark_abandoned)'` 11/11 PASS
+- `cargo nextest run --locked -p vtcode-core -E 'test(complete_session_navigation) or test(split_verify) or test(structured_verify) or test(stale_spec) or test(archive_completed) or test(envelope) or test(orient)'` 22/22 PASS
+- `cargo nextest run --locked -p vtcode -E 'test(prune_history) or test(harness) or test(retention)'` 82/82 PASS
+- `cargo nextest run --locked -p vtcode-memory -p vtcode-core --no-fail-fast` 4054/4055 PASS; 1 FAIL `harness_terminal_runs_retain_completed_sessions_until_close` — **PRE-EXISTING** (reproduces with changes stashed)
+- `cargo nextest run --locked -p vtcode --no-fail-fast -E 'not binary(/cli_harness_failures/)'` 3368/3369 PASS; 1 FAIL `registry_exhaustion_latches_runloop_and_blocks_the_next_inspection` — **PRE-EXISTING**
+
+**Journey log** —
+- The prior audit's age-cutoff protection ("branch files older than 30 days
+  stop pinning turns") was correct but too slow: 16-turn `active` lists from
+  recent completed threads kept most of `checkpoints/` pinned. Bounding the
+  list at completion is the missing half.
+- History envelope filenames use `sanitize_session_id` (32-char truncate),
+  not the raw session id. Matching on `contains(raw_id)` is a dead preserve
+  branch — a reviewer caught this after a toy-id unit test passed by accident.
+- `retention_preserves_active_sessions` is a hard contract (never evict
+  `status=active`). Abandoned cleanup therefore has to flip stale actives to
+  `completed` first (`mark_abandoned_active_sessions`), not make them direct
+  eviction candidates.
+- `session_artifact_cutoff` is intentionally fail-open on `created()` only.
+  Falling back to `modified()` made the cutoff "now" and over-filtered
+  artifacts written at session start.
+- filesnap blob GC only runs through `retire_snapshot`/`cleanup_retired_snapshots`.
+  Force-deleting turn JSON orphans the blobs; do not hand-delete snapshots if
+  you want the content store reclaimed.
 
 ## [S1] Problem
 
