@@ -1,9 +1,9 @@
 ---
 feature: tui-diagnostics-cleanup
-status: in-progress
+status: delivered
 updated: 2026-09-26
 branch: fix/tui-diagnostics-cleanup
-commits:
+commits: 842238195..d29320c53
 ---
 
 # TUI Diagnostics Cleanup
@@ -11,6 +11,12 @@ commits:
 Broad audit of user-facing runloop diagnostic / error / info output. Screenshots from 2026-09-24 morning showed multi-line `Diagnosis:` blocks, `# Last-Turn Diagnostics` forensics dumps, and a long blocked-handoff bullet stack. Commit `cf4211c03` already collapsed diagnosis to one line and stripped the footer from the transcript. This pass finishes the contract across the remaining runloop surfaces.
 
 ## Report
+
+**What was built** — Runloop TUI diagnostics now obey a strict 2-line contract (status + one action). Blocked turns print a short stop marker (`Turn blocked: recovery fallback` / `verification pending`) instead of repeating the assistant-published reason, then a single action line that folds the verb, optional `vtcode --resume <id>`, and a workspace-relative handoff pointer. Post-tool follow-up failures collapse to summary + one action with no standalone category line; planning hint stacks emit at most two lines; empty-response fallback answers no longer embed multi-line evidence dumps. Full reason, archive path, `# Last-Turn Diagnostics`, and Observed/Likely-cause/Next-action triples stay in handoff markdown, `events.jsonl`, and tool payload `diagnosis` JSON for agent consumption. Prior `cf4211c03` one-line diagnosis and footer strip remain locked by tests.
+
+**Verification** — `./scripts/check-dev.sh` PASS; `cargo nextest run -p vtcode -E 'test(blocked) or test(diagnosis) or test(recovery) or test(fallback) or test(planning) or test(post_tool)'` 462/462 PASS (includes new `follow_up_failure_*`, `blocked_status_label_*`, `blocked_action_line_*` contract tests). Fresh review of `842238195..7d67cb21b` found T3 test-coverage gap + stale helper name; both fixed in `d29320c53` and re-review PASS.
+
+**Journey log** — Screenshots predated `cf4211c03`; first pass only closed diagnosis/footer, leaving duplicate fallback copy and bullet stacks. Broad-audit + strict 2-line cap chosen over a screenshot-only fix. Extracting pure `follow_up_failure_*` helpers was required to make the render contract testable without a stdout renderer.
 
 ## [S1] Problem
 
@@ -107,9 +113,9 @@ Add a tiny helper in the binary runloop (or reuse existing display module) for t
 
 ## Tasks
 
-- [ ] T1: Add/extend shared action-line helper (relative paths + optional resume id) with unit tests — acceptance: helper emits one line with workspace-relative path and no absolute workspace prefix (covers: S2, S2F)
-- [ ] T2: Blocked handoff 2-line contract — acceptance: blocked turn renders exactly one status + one action line; no archived-details bullet; R4 suppresses duplicate fallback reason; tests cover fallback-duplicate and verification-block cases (covers: S2A, S2; depends: T1)
-- [ ] T3: Post-tool recovery collapse — acceptance: follow-up failure renders ≤2 lines; no standalone `Follow-up error category:` line; tests updated (covers: S2C, S2)
-- [ ] T4: Planning hint + empty-response notice tidy — acceptance: planning hint stacks emit ≤2 lines; empty-response notices stay one-liners; no user-facing multi-line evidence dump in fallback answers (covers: S2D, S2E, S2)
-- [ ] T5: Diagnosis one-liner lock — acceptance: existing `concise_diagnosis_line` tests pass; no new TUI multi-line diagnosis path (covers: S2B, S2; depends: none)
-- [ ] T6: Docs — acceptance: `docs/user-guide/interactive-mode.md` blocked-turn wording matches 2-line contract; compose spec Report filled at delivery (covers: S2)
+- [x] T1: Add/extend shared action-line helper (relative paths + optional resume id) with unit tests — acceptance: helper emits one line with workspace-relative path and no absolute workspace prefix (covers: S2, S2F)
+- [x] T2: Blocked handoff 2-line contract — acceptance: blocked turn renders exactly one status + one action line; no archived-details bullet; R4 suppresses duplicate fallback reason; tests cover fallback-duplicate and verification-block cases (covers: S2A, S2; depends: T1)
+- [x] T3: Post-tool recovery collapse — acceptance: follow-up failure renders ≤2 lines; no standalone `Follow-up error category:` line; tests updated (covers: S2C, S2)
+- [x] T4: Planning hint + empty-response notice tidy — acceptance: planning hint stacks emit ≤2 lines; empty-response notices stay one-liners; no user-facing multi-line evidence dump in fallback answers (covers: S2D, S2E, S2)
+- [x] T5: Diagnosis one-liner lock — acceptance: existing `concise_diagnosis_line` tests pass; no new TUI multi-line diagnosis path (covers: S2B, S2; depends: none)
+- [x] T6: Docs — acceptance: `docs/user-guide/interactive-mode.md` blocked-turn wording matches 2-line contract; compose spec Report filled at delivery (covers: S2)
