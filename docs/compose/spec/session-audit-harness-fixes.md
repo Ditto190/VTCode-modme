@@ -164,3 +164,19 @@ directives.
 - [x] T2: On thread completion clear redo stack and orphaned `turn_recovery_*` snapshots — acceptance: completed session's branch checkpoint has empty `redo` and no recovery snapshot outside `active` (covers: S2.C.1)
 - [x] T3: Prune aged tool-output spools and cap `approval_cache` on policy write — acceptance: spools older than retention are gone after completion; policy file size bounded in a unit test (covers: S2.C.2, S2.C.3)
 - [x] T4: Record residual-state findings and verification in this document's Report — acceptance: Report has What was built / Verification / Journey log (covers: S1)
+
+
+## [S4] Follow-up improvements (same audit)
+
+Two residual findings from the re-scan, implemented on the same branch:
+
+1. **Checkpoint retention.** `native::begin_prompt` wrote `turn_*.json` but never
+   called `cleanup_old_snapshots`, so the workspace grew to 126 files / 185 MB.
+   Cleanup is now navigation-aware (`protected_turns` unions every `branch_*.json`
+   active/redo/pending list) and runs after each prompt checkpoint.
+2. **Quoted heredoc false positives.** `contains_command_substitution` and
+   `split_shell_segments` scanned heredoc bodies as live shell, so
+   `cat <<'EOF'` payloads with backticks were rejected as injection
+   (session-vtcode-20260925 L421). Quoted heredoc bodies are now skipped via
+   shared `quoted_heredoc_skip_len`; unquoted heredocs still scan for `$()`
+   and backticks.

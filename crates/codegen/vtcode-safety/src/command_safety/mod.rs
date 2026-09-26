@@ -195,6 +195,22 @@ fn contains_command_substitution(script: &str) -> bool {
             continue;
         }
         if !in_single_quote {
+            // Quoted heredoc bodies are literal data, not shell. Skipping them
+            // keeps `cat <<'EOF'` with backticks/`$()` in the payload from
+            // looking like command substitution (session-vtcode-20260925).
+            if character == '<' && characters.peek() == Some(&'<') {
+                let _ = characters.next(); // second '<'
+                let rest: String = characters.clone().collect();
+                if let Some(skip) = shell_parser::quoted_heredoc_skip_len(&rest) {
+                    let mut consumed = 0usize;
+                    while consumed < skip
+                        && let Some(ch) = characters.next()
+                    {
+                        consumed += ch.len_utf8();
+                    }
+                    continue;
+                }
+            }
             if character == '`' {
                 return true;
             }
@@ -247,6 +263,30 @@ mod tests {
     fn explicit_shell_script_allows_static_chaining_but_rejects_substitution() {
         assert!(validate_shell_script("printf first; printf second").is_ok());
         assert!(validate_shell_script("printf '%s' \"$(whoami)\"").is_err());
+    }
+
+    #[test]
+    fn quoted_heredoc_body_is_not_command_substitution() {
+        // Session-vtcode-20260925: a `cat <<'EOF'` payload containing Rust
+        // string literals with markdown fences (backticks) was rejected as
+        // injection. Quoted heredoc bodies are literal data.
+        let script = "cat > /tmp/probe.rs <<'EOF'\nfn main() {\n    let text = format!(\"```sh\");\n}\nEOF\n";
+        assert!(!contains_command_substitution(script), "quoted heredoc body must not count as substitution");
+        assert!(validate_shell_script(script).is_ok(), "quoted heredoc must pass shell validation: {script:?}");
+    }
+
+    #[test]
+    fn unquoted_heredoc_body_still_detects_substitution() {
+        let script = "cat > /tmp/x <<EOF\n$(whoami)\nEOF\n";
+        assert!(contains_command_substitution(script), "unquoted heredoc body can substitute");
+    }
+
+    #[test]
+    fn heredoc_skip_matches_delimiter_line() {
+        let after = "'EOF'\nline1\nEOF\ntrailer";
+        let skip = shell_parser::quoted_heredoc_skip_len(after).expect("skip length");
+        let skipped: String = after.chars().take(skip).collect();
+        assert_eq!(skipped, "'EOF'\nline1\nEOF\n");
     }
 
     #[test]

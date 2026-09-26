@@ -29,6 +29,26 @@ pub const DEFAULT_MAX_SNAPSHOTS: usize = 50;
 pub const DEFAULT_MAX_AGE_DAYS: u64 = 30;
 const SNAPSHOT_SCHEMA_VERSION: SchemaVersion = SchemaVersion(3);
 
+/// Collect turn numbers from a navigation value: either a bare array of turns
+/// (`active`) or a recovery object with an `active` array (`redo`/`pending`).
+fn collect_turn_numbers(value: &serde_json::Value, out: &mut BTreeSet<usize>) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                if let Some(turn) = item.as_u64() {
+                    out.insert(turn as usize);
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(active) = map.get("active") {
+                collect_turn_numbers(active, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn normalized_prompt_text(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     (!trimmed.is_empty()).then_some(trimmed)
@@ -738,12 +758,47 @@ impl SnapshotManager {
         Ok(CheckpointRestore { metadata: stored.metadata, conversation })
     }
 
+    /// Turn numbers still referenced by any session navigation (active branch,
+    /// redo stack, or pending recovery). Rewind/redo must never lose these.
+    fn protected_turns(&self) -> BTreeSet<usize> {
+        let mut protected = BTreeSet::new();
+        let Ok(entries) = fs::read_dir(&self.storage_dir) else {
+            return protected;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !stem.starts_with("branch_") || path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            // Navigation schema lives in `native`; decode the three turn lists
+            // through serde_json so this helper stays independent of that module.
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                continue;
+            };
+            for key in ["active", "redo", "pending"] {
+                collect_turn_numbers(&value[key], &mut protected);
+            }
+        }
+        protected
+    }
+
     pub async fn cleanup_old_snapshots(&self) -> Result<()> {
         if !self.enabled {
             return Ok(());
         }
 
-        let mut entries = self.read_snapshot_files()?;
+        let protected = self.protected_turns();
+        let mut entries: Vec<(usize, PathBuf)> = self
+            .read_snapshot_files()?
+            .into_iter()
+            .filter(|(turn, _)| !protected.contains(turn))
+            .collect();
 
         if let Some(cutoff) = self.retention_cutoff_secs()? {
             let stale_entries = entries.clone();
@@ -780,7 +835,11 @@ impl SnapshotManager {
                     );
                 }
             }
-            entries = self.read_snapshot_files()?;
+            entries = self
+                .read_snapshot_files()?
+                .into_iter()
+                .filter(|(turn, _)| !protected.contains(turn))
+                .collect();
         }
 
         if self.max_snapshots == 0 || entries.len() <= self.max_snapshots {
@@ -1104,6 +1163,43 @@ mod tests {
         assert_eq!(listed.len(), 3);
         assert_eq!(listed[0].turn_number, 5);
         assert_eq!(listed[2].turn_number, 3);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_preserves_navigation_referenced_turns() -> Result<()> {
+        let (_dir, manager) = setup_manager();
+        let conversation = vec![SessionMessage::new(crate::llm::provider::MessageRole::User, "nav")];
+        let files = BTreeSet::new();
+
+        for turn in 1..=5 {
+            manager
+                .create_snapshot(turn, "turn", &conversation, &files, None, None, None)
+                .await?
+                .expect("metadata");
+        }
+
+        // Simulate a live session navigation that still needs turns 1 and 2
+        // for rewind/redo. Unreferenced turns 3-5 are fair game.
+        let branch = serde_json::json!({
+            "active": [1, 2],
+            "redo": [{ "policy": "", "snapshot": "00000000-0000-0000-0000-000000000000", "active": [1] }],
+            "pending": null,
+        });
+        fs::write(manager.storage_dir.join("branch_74657374.json"), serde_json::to_vec(&branch)?)?;
+
+        let mut config = SnapshotConfig::new(manager.workspace.clone());
+        config.max_snapshots = 1;
+        let trimmed = SnapshotManager::new(config)?;
+        trimmed.cleanup_old_snapshots().await?;
+
+        assert!(trimmed.load_snapshot(1).await?.is_some(), "active turn must survive");
+        assert!(trimmed.load_snapshot(2).await?.is_some(), "active turn must survive");
+        // Unreferenced turns 3-5 compete for a single budget slot; the oldest
+        // two are retired and the newest (5) remains.
+        assert!(trimmed.load_snapshot(3).await?.is_none(), "unreferenced turn must be pruned");
+        assert!(trimmed.load_snapshot(4).await?.is_none(), "unreferenced turn must be pruned");
+        assert!(trimmed.load_snapshot(5).await?.is_some(), "newest unreferenced turn fits the budget");
         Ok(())
     }
 

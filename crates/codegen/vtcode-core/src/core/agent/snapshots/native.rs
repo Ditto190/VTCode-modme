@@ -470,6 +470,13 @@ impl SnapshotManager {
             self.retire_recovery_record(&entry.snapshot).await;
         }
         atomic_json(&self.navigation_path(session)?, &state)?;
+        // Prune unreferenced turn files so checkpoints stay inside the
+        // configured snapshot budget (native writes never hit the
+        // `save_snapshot` cleanup path). Navigation-referenced turns are
+        // protected inside `cleanup_old_snapshots`.
+        if let Err(error) = self.cleanup_old_snapshots().await {
+            tracing::debug!(%error, "checkpoint retention prune failed");
+        }
         active_map()
             .lock()
             .map_err(|error| anyhow::anyhow!("Checkpoint lock poisoned: {error}"))?

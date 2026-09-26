@@ -697,6 +697,80 @@ mod tests {
 
 use anyhow::bail;
 
+/// Byte length of a quoted heredoc body starting just after `<<` / `<<-`.
+///
+/// Returns `Some(n)` where `n` covers the delimiter token, the rest of the
+/// opener line, and every body line through the closing delimiter line. Bare
+/// (unquoted) delimiters return `None`: those bodies still allow substitution.
+pub(crate) fn quoted_heredoc_skip_len(rest: &str) -> Option<usize> {
+    let mut idx = 0usize;
+    let bytes = rest.as_bytes();
+    if bytes.first() == Some(&b'-') {
+        idx += 1;
+    }
+    while idx < bytes.len() && (bytes[idx] == b' ' || bytes[idx] == b'\t') {
+        idx += 1;
+    }
+    let quote = match bytes.get(idx) {
+        Some(b'\'') | Some(b'"') => bytes[idx],
+        _ => return None,
+    };
+    idx += 1;
+    let delim_start = idx;
+    while idx < bytes.len() && bytes[idx] != quote {
+        idx += 1;
+    }
+    if idx >= bytes.len() || idx == delim_start {
+        return None;
+    }
+    let delim = &rest[delim_start..idx];
+    idx += 1; // closing quote
+    // Rest of the opener line.
+    while idx < bytes.len() && rest.as_bytes()[idx] != b'\n' {
+        idx += 1;
+    }
+    if idx < bytes.len() {
+        idx += 1; // consume opener newline
+    }
+    // Body lines through the delimiter line (inclusive).
+    while idx <= bytes.len() {
+        let line_end = rest[idx..].find('\n').map(|offset| idx + offset).unwrap_or(bytes.len());
+        let line = rest[idx..line_end].trim_end_matches('\r');
+        let next = if line_end < bytes.len() {
+            line_end + 1
+        } else {
+            bytes.len()
+        };
+        if line == delim {
+            return Some(next);
+        }
+        if line_end >= bytes.len() {
+            return None;
+        }
+        idx = next;
+    }
+    None
+}
+
+/// Skip a quoted heredoc body in a `CharIndices` iterator that peeks at the
+/// second `<` of `<<` (the first was already consumed). Returns true when a
+/// body was skipped.
+pub(crate) fn skip_quoted_heredoc(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> bool {
+    // Consume the second `<`; `quoted_heredoc_skip_len` starts after `<<`.
+    let _ = chars.next();
+    let rest: String = chars.clone().map(|(_, c)| c).collect();
+    let Some(skip) = quoted_heredoc_skip_len(&rest) else {
+        return false;
+    };
+    let mut consumed = 0usize;
+    while consumed < skip
+        && let Some((_, ch)) = chars.next()
+    {
+        consumed += ch.len_utf8();
+    }
+    true
+}
+
 /// Quote state for shell segment splitting.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum QuoteState {
@@ -747,6 +821,10 @@ pub(crate) fn split_shell_segments(command: &str) -> Result<Vec<String>> {
                     '\\' => escaped = true,
                     '\'' => state = QuoteState::Single,
                     '"' => state = QuoteState::Double,
+                    // Quoted heredoc bodies are literal data (newlines, backticks
+                    // included). Skip them so `cat <<'EOF'` payloads are not
+                    // treated as multi-line shell or injection.
+                    '<' if matches!(chars.peek(), Some((_, '<'))) && skip_quoted_heredoc(&mut chars) => {}
                     '`' => bail!("Command injection pattern detected"),
                     '$' if matches!(chars.peek(), Some((_, '('))) => {
                         bail!("Command injection pattern detected");
