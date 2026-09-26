@@ -199,9 +199,17 @@ fn unclosed_fence_tail_still_parses_tool_call() {
     // Truncated streaming output can leave a fence opener without a closer.
     // Fail-open: the tail after the opener is treated as unfenced so a real
     // tool call there still parses instead of being silently dropped.
-    let tag = '\u{24B8}';
+    // Tag literals in this test are assembled from parts so this test adds
+    // no new contiguous tool-call tag to the source (other tests in this
+    // file already hold literal tags; a literal tag here would itself be
+    // scanned as a call by tooling that greps test sources).
+    let open = format!("<{}", "tool_call>");
+    let key = format!("<{}", "arg_key>");
+    let key_close = format!("</{}", "arg_key>");
+    let value = format!("<{}", "arg_value>");
+    let value_close = format!("</{}", "arg_value>");
     let text = format!(
-        "Partial output:\n```sh\necho demo\n{tag}exec_command\n{tag}command\necho hi\n{tag}\n{tag}action\nrun\n{tag}\n"
+        "Partial output:\n```sh\necho demo\n{open}exec_command\n{key}command{key_close}{value}echo hi{value_close}\n{key}action{key_close}{value}run{value_close}\n"
     );
     let (name, args) = detect_textual_tool_call(&text).expect("call after unclosed fence opener must parse");
     assert_eq!(name, tools::EXEC_COMMAND);
