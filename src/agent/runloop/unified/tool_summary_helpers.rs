@@ -47,6 +47,13 @@ fn extract_command(args: &Value) -> Option<(String, &'static str)> {
 pub(super) const SUMMARY_PREVIEW_LEN: usize = 70;
 pub(super) const COMPACT_PREVIEW_LEN: usize = 120;
 
+/// Shared `• Ran` header wrap widths so expanded summaries and live PTY headers
+/// stay in sync. 62 chars for the first line (`• Ran ` prefix), 58 for
+/// continuation (`  │ ` prefix). Both surfaces wrap the full command with
+/// `wrap_shell_command` (no `…`); TUI reflow owns viewport overflow.
+pub(super) const RAN_COMMAND_FIRST_WIDTH: usize = 62;
+pub(super) const RAN_COMMAND_CONTINUATION_WIDTH: usize = 58;
+
 /// Exact flag tokens that introduce an inline script for a runner.
 /// Token-exact (not substring) so `grep -c` / `--code-review` never match.
 const SCRIPT_RUNNER_FLAGS: &[&str] = &["-c", "-e", "--code"];

@@ -5,7 +5,7 @@ use anstyle::{Color, Reset, Style as AnsiStyle};
 use anyhow::Result;
 use serde_json::Value;
 use vtcode_commons::color_policy;
-use vtcode_commons::formatting::wrap_text_words;
+use vtcode_commons::formatting::wrap_shell_command;
 use vtcode_commons::ui_protocol::{CompactToolSummaryLine, CompactToolSummaryLineKind};
 
 use vtcode_core::config::ToolDisplayMode;
@@ -19,10 +19,11 @@ use vtcode_ui::tui::ui::syntax_highlight;
 
 use crate::agent::runloop::tool_output::render_tree_detail;
 use crate::agent::runloop::unified::tool_summary_helpers::{
-    collect_param_details, command_line_for_args, describe_code_search, describe_fetch_action, describe_grep_file,
-    describe_list_files, describe_path_action, describe_shell_command, display_command_text, exec_session_param_detail,
-    highlight_texts_for_summary, is_exec_session_call, relativize_command_paths, relativize_to_workspace,
-    should_render_command_line, truncate_path_middle,
+    RAN_COMMAND_CONTINUATION_WIDTH, RAN_COMMAND_FIRST_WIDTH, collect_param_details, command_line_for_args,
+    describe_code_search, describe_fetch_action, describe_grep_file, describe_list_files, describe_path_action,
+    describe_shell_command, display_command_text, exec_session_param_detail, highlight_texts_for_summary,
+    is_exec_session_call, relativize_command_paths, relativize_to_workspace, should_render_command_line,
+    truncate_path_middle,
 };
 
 /// Ambient context required to render tool-call summaries.
@@ -34,9 +35,6 @@ use crate::agent::runloop::unified::tool_summary_helpers::{
 pub(crate) struct ToolSummaryRenderContext<'a> {
     pub workspace_root: Option<&'a Path>,
 }
-
-const RUN_SUMMARY_FIRST_WIDTH: usize = 62;
-const RUN_SUMMARY_CONTINUATION_WIDTH: usize = 58;
 
 /// Infer the action string for an internal file-operation call from its arguments.
 /// This is the single source of truth for action inference — all three call sites
@@ -242,7 +240,7 @@ struct SummaryData {
 fn compact_summary_expanded_lines(data: &SummaryData) -> Vec<CompactToolSummaryLine> {
     let mut lines = Vec::new();
     if let Some(command) = data.summary.strip_prefix("Ran ") {
-        let wrapped = wrap_text_words(command, RUN_SUMMARY_FIRST_WIDTH, RUN_SUMMARY_CONTINUATION_WIDTH);
+        let wrapped = wrap_shell_command(command, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
         let first = wrapped.first().map(String::as_str).unwrap_or("command");
         lines.push(CompactToolSummaryLine {
             kind: CompactToolSummaryLineKind::Info,
@@ -376,7 +374,7 @@ fn render_bullet_line(
 ) -> Option<Vec<String>> {
     let mut wrapped_run_segments: Option<Vec<String>> = None;
     if let Some(command) = data.summary.strip_prefix("Ran ") {
-        let wrapped = wrap_text_words(command, RUN_SUMMARY_FIRST_WIDTH, RUN_SUMMARY_CONTINUATION_WIDTH);
+        let wrapped = wrap_shell_command(command, RAN_COMMAND_FIRST_WIDTH, RAN_COMMAND_CONTINUATION_WIDTH);
         let first_segment = wrapped.first().cloned().unwrap_or_else(|| "command".to_string());
         wrapped_run_segments = Some(wrapped);
         line.push_str(&render_styled("Ran", main_color, Some("bold".to_string())));

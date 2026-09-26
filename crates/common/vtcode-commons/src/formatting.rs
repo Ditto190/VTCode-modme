@@ -282,6 +282,146 @@ fn byte_index_for_char_count(input: &str, chars: usize) -> usize {
     input.len()
 }
 
+/// Split `text` into shell-like words, keeping quoted spans atomic.
+///
+/// Whitespace inside single (`'…'`) or double (`"…"`) quotes never separates
+/// words, and a backslash escapes the next character outside single quotes
+/// (like the TUI tokenizer in `pty_stream/segments.rs`, except an escaped
+/// space stays atomic here so `foo\ bar` wraps as one word). Quote
+/// characters and backslashes are kept verbatim so single-spaced words rejoin
+/// losslessly with single spaces. An unclosed quote runs to the end of input.
+fn split_shell_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for ch in text.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && !in_single {
+            current.push(ch);
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            current.push(ch);
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            current.push(ch);
+            continue;
+        }
+        if ch.is_whitespace() && !in_single && !in_double {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// Word-wrap a shell `command` into lines, allowing `first_width` chars on
+/// the first line and `continuation_width` chars on subsequent lines.
+///
+/// Unlike [`wrap_text_words`], breaks happen only at unquoted whitespace, so
+/// quoted patterns containing spaces (e.g. `grep -rn "a b|c" docs`) stay on
+/// one line when they fit instead of splitting mid-quote and reading as
+/// broken shell. Words longer than the active width are hard-split at the
+/// width boundary rather than overflowing. Widths count chars, not bytes.
+///
+/// Returns an empty vec for blank input. Unquoted whitespace runs collapse to
+/// a single space (the transcript pipeline already normalizes via
+/// `collapse_whitespace`), so joining short-word wraps with single spaces
+/// reproduces single-spaced input; hard-split overlong tokens are the
+/// exception (their chunks gain separators when joined).
+///
+/// ```
+/// # use vtcode_commons::formatting::wrap_shell_command;
+/// let lines = wrap_shell_command("grep -rn \"a b\" docs | grep -v x", 20, 20);
+/// assert_eq!(lines, vec!["grep -rn \"a b\" docs", "| grep -v x"]);
+/// assert!(wrap_shell_command("   ", 5, 5).is_empty());
+/// ```
+pub fn wrap_shell_command(text: &str, first_width: usize, continuation_width: usize) -> Vec<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let words = split_shell_words(trimmed);
+    if words.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::with_capacity(words.len());
+    let mut current = String::new();
+    let mut width = first_width.max(1);
+    for word in words {
+        let word_len = word.chars().count();
+        if word_len > width {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+                width = continuation_width.max(1);
+            }
+            current = push_split_word(&mut lines, &word, width, continuation_width);
+            width = continuation_width.max(1);
+            continue;
+        }
+        let current_len = current.chars().count();
+        let need = if current_len == 0 {
+            word_len
+        } else {
+            current_len + 1 + word_len
+        };
+        if need <= width {
+            if current_len > 0 {
+                current.push(' ');
+            }
+            current.push_str(&word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            width = continuation_width.max(1);
+            if word_len > width {
+                // The word fit the wider first line but not the narrower
+                // continuation: hard-split so no emitted row exceeds its
+                // budget (e.g. a 60-char token with 62/58 widths).
+                current = push_split_word(&mut lines, &word, width, continuation_width);
+            } else {
+                current = word;
+            }
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// Push hard-split chunks of an overlong `word` that exceeds `width`,
+/// returning the trailing remainder (which fits `width`) as the new
+/// in-progress line. Subsequent chunks use `continuation_width`.
+fn push_split_word(lines: &mut Vec<String>, word: &str, width: usize, continuation_width: usize) -> String {
+    let mut width = width.max(1);
+    let mut rest = word;
+    while rest.chars().count() > width {
+        let idx = byte_index_for_char_count(rest, width);
+        let (head, tail) = rest.split_at(idx);
+        lines.push(head.to_string());
+        rest = tail;
+        width = continuation_width.max(1);
+    }
+    rest.to_string()
+}
+
 /// Truncate a string so that the retained prefix is at most `max_bytes` bytes,
 /// rounded down to the nearest UTF-8 char boundary.  Returns the truncated
 /// prefix with `suffix` appended, or the original string when it already fits.
@@ -505,6 +645,57 @@ mod tests {
         // Must not panic on multi-byte chars and counts chars, not bytes.
         let wrapped = wrap_text_words("あいう えお かきく", 3, 3);
         assert_eq!(wrapped, vec!["あいう", "えお", "かきく"]);
+    }
+
+    #[test]
+    fn wrap_shell_command_keeps_screenshot_pipeline_in_full() {
+        // Screenshot 2026-09-24 16:37: the quoted grep pattern holds spaces
+        // and pipes but must never split mid-quote; every pipe segment must
+        // survive with no `…`, and rejoining restores the source exactly.
+        let command = "grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs | grep -v node_modules | grep -v package-lock | grep -v \"\\.backup\"";
+        let wrapped = wrap_shell_command(command, 62, 58);
+        assert_eq!(
+            wrapped,
+            vec![
+                "grep -rn \"@vinhnx/vtcode|npm install -g||npx @vinhnx\" docs |",
+                "grep -v node_modules | grep -v package-lock | grep -v",
+                "\"\\.backup\"",
+            ]
+        );
+        assert!(wrapped.iter().all(|line| !line.contains('…')));
+        assert_eq!(wrapped.join(" "), command);
+        assert_eq!(wrapped.join("\n").matches('|').count(), 6);
+    }
+
+    #[test]
+    fn wrap_shell_command_breaks_only_at_unquoted_spaces() {
+        // The quoted span is atomic: `echo` overflows alone rather than the
+        // pattern splitting across lines.
+        assert_eq!(wrap_shell_command("echo \"a b c\" d", 10, 10), vec!["echo", "\"a b c\" d"]);
+        assert_eq!(wrap_shell_command("   ", 5, 5), Vec::<String>::new());
+    }
+
+    #[test]
+    fn wrap_shell_command_splits_overlong_token_at_width() {
+        assert_eq!(wrap_shell_command("abcdefghij", 4, 4), vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn wrap_shell_command_narrow_continuation_never_overflows() {
+        // A token that fits the wider first line but not the narrower
+        // continuation must hard-split after the line break instead of
+        // emitting an over-budget row (62/58 production widths).
+        let token = "b".repeat(60);
+        let command = format!("aa {token} cc");
+        let wrapped = wrap_shell_command(&command, 62, 58);
+        assert!(wrapped.len() >= 3, "expected a split continuation: {wrapped:?}");
+        assert!(wrapped[0].chars().count() <= 62, "first line budget: {wrapped:?}");
+        for line in wrapped.iter().skip(1) {
+            assert!(line.chars().count() <= 58, "continuation budget: {wrapped:?}");
+        }
+        // Same shape with a tiny budget for a fast unit check.
+        let wrapped = wrap_shell_command("aa bbbbbbbb cc", 10, 5);
+        assert_eq!(wrapped, vec!["aa", "bbbbb", "bbb", "cc"]);
     }
 
     #[test]
