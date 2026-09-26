@@ -480,10 +480,17 @@ fn apply_pending_follow_ups_mid_turn(
 /// TUI. Matches the stable openings of every harness-queued follow-up so a
 /// reworded tail cannot reintroduce transcript noise.
 fn is_internal_harness_follow_up(input: &str) -> bool {
-    input.starts_with("The task tracker still has incomplete steps:")
-        || input.starts_with("Plan-mode auto-continue:")
-        || input.starts_with("Review the authoritative background subprocess completion notice")
-        || input.starts_with("Continue autonomously from the last stalled turn.")
+    use crate::agent::runloop::unified::turn::session_loop::{
+        BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX, VERIFICATION_AUTO_RECOVERY_PREFIX,
+    };
+    use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
+        PLAN_MODE_AUTO_CONTINUE_MARKER, TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
+    };
+
+    input.starts_with(TRACKER_CONTINUE_FOLLOW_UP_PREFIX)
+        || input.starts_with(PLAN_MODE_AUTO_CONTINUE_MARKER)
+        || input.starts_with(BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX)
+        || input.starts_with(VERIFICATION_AUTO_RECOVERY_PREFIX)
 }
 
 /// Append a steered user message tagged with its intent id so restart
@@ -1031,17 +1038,25 @@ mod tests {
 
     #[test]
     fn internal_harness_follow_ups_stay_quiet_while_user_steering_echoes() {
+        use crate::agent::runloop::unified::turn::session_loop::{
+            BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX, VERIFICATION_AUTO_RECOVERY_PREFIX,
+        };
+        use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
+            PLAN_MODE_AUTO_CONTINUE_MARKER, TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
+        };
+
         assert!(is_internal_harness_follow_up(
-            "The task tracker still has incomplete steps: #1 do X. This follow-up is the harness resuming the work."
+            format!("{TRACKER_CONTINUE_FOLLOW_UP_PREFIX} #1 do X. This follow-up is the harness resuming the work.")
+                .as_str()
         ));
         assert!(is_internal_harness_follow_up(
-            "Plan-mode auto-continue: no validated persisted plan is ready for approval yet."
+            format!("{PLAN_MODE_AUTO_CONTINUE_MARKER} no validated persisted plan is ready for approval yet.").as_str()
         ));
         assert!(is_internal_harness_follow_up(
-            "Review the authoritative background subprocess completion notice and continue."
+            format!("{BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX} and continue.").as_str()
         ));
         assert!(is_internal_harness_follow_up(
-            "Continue autonomously from the last stalled turn. Verification is still pending."
+            format!("{VERIFICATION_AUTO_RECOVERY_PREFIX} Verification is still pending.").as_str()
         ));
         assert!(!is_internal_harness_follow_up("leftover"));
         assert!(!is_internal_harness_follow_up("please keep going with the build"));

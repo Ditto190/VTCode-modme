@@ -72,7 +72,17 @@ use crate::agent::runloop::unified::turn::turn_loop_helpers::{
 use crate::agent::runloop::unified::workspace_links::LinkedDirectory;
 use crate::updater::{InlineUpdateOutcome, display_update_notice, run_inline_update_prompt};
 
-const BACKGROUND_COMPLETION_CONTINUATION_PROMPT: &str = "Review the authoritative background subprocess completion notice and continue the user's request. Do not poll or wait for those completed tasks.";
+/// Stable opening shared with `is_internal_harness_follow_up`, which keys the
+/// quiet path off this constant instead of a duplicated literal.
+pub(crate) const BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX: &str =
+    "Review the authoritative background subprocess completion notice";
+
+fn background_completion_continuation_prompt() -> String {
+    format!(
+        "{BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX} and continue the user's request. \
+         Do not poll or wait for those completed tasks."
+    )
+}
 
 fn persist_primary_agent(
     session_archive: &mut Option<session_archive::SessionArchive>,
@@ -889,7 +899,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     !queued_inputs.is_empty() || !session.events.is_empty(),
                     runtime.has_pending_follow_up_inputs(),
                 ) {
-                    match runtime.try_queue_follow_up_input(BACKGROUND_COMPLETION_CONTINUATION_PROMPT.to_string()) {
+                    match runtime.try_queue_follow_up_input(background_completion_continuation_prompt()) {
                         Ok(()) => pending_background_completions.mark_continuation_queued(),
                         Err(error) => tracing::warn!(%error, "Unable to queue background completion continuation"),
                     }
@@ -1677,12 +1687,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             Ok(active) => {
                                 let display = active.display_name.clone();
                                 let color = active.color.clone().filter(|c| !c.trim().is_empty());
-                                let policy_overrides = active.tool_policy_overrides.clone();
-                                for (tool_name, policy) in policy_overrides {
-                                    if let Err(err) = tool_registry.set_tool_policy(&tool_name, policy).await {
-                                        tracing::warn!("Failed to apply tool policy override on plan entry: {err}");
-                                    }
-                                }
+                                apply_primary_agent_tool_policy_overrides(&tool_registry, active_primary_agent.active())
+                                    .await;
                                 sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
                                 let mut runtime_sync = PrimaryAgentRuntimeSyncContext {
                                     config: &config,

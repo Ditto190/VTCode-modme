@@ -14,3 +14,8 @@ mod support;
 mod tests;
 
 pub(super) use orchestration::run_single_agent_loop_unified_impl;
+
+/// Re-exported so harness-quiet matching in `turn_loop_helpers` can key off
+/// the producer-owned prompt openings instead of duplicated literals.
+pub(crate) use blocked_handoff::VERIFICATION_AUTO_RECOVERY_PREFIX;
+pub(crate) use orchestration::BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX;

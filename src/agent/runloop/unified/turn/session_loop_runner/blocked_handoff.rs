@@ -81,10 +81,14 @@ const HANDOFF_VERIFIER_SHELL_FORM: &str = "standalone or as a pure `&&` chain (p
 /// input names the generic build/test/lint description instead of presuming
 /// a command that may not exist in this workspace. The leading sentence is
 /// matched by `is_follow_up_prompt_like`.
+/// Stable opening shared with `is_internal_harness_follow_up`, which keys the
+/// quiet path off this constant instead of a duplicated literal.
+pub(crate) const VERIFICATION_AUTO_RECOVERY_PREFIX: &str = "Continue autonomously from the last stalled turn.";
+
 pub(super) fn verification_auto_recovery_follow_up(verifier: Option<&str>) -> String {
     let verifier = verifier_reference(verifier);
     format!(
-        "Continue autonomously from the last stalled turn. Verification is still pending; the request resumes once \
+        "{VERIFICATION_AUTO_RECOVERY_PREFIX} Verification is still pending; the request resumes once \
         {verifier} runs with `exec_command`, standalone or as a pure `&&` chain, and exits 0. {VERIFIER_SHELL_FORM_NOTE} \
         A text-only reply leaves the gate pending, so this turn would end blocked again."
     )

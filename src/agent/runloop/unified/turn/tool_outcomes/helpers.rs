@@ -271,10 +271,14 @@ pub(crate) async fn tracker_completed_count(tool_registry: &vtcode_core::tools::
 }
 
 /// Build the model-facing auto-continue follow-up for incomplete tracker work.
+/// Stable opening shared with `is_internal_harness_follow_up`, which keys the
+/// quiet path off this constant instead of a duplicated literal.
+pub(crate) const TRACKER_CONTINUE_FOLLOW_UP_PREFIX: &str = "The task tracker still has incomplete steps:";
+
 pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
     let joined = incomplete.join(", ");
     format!(
-        "The task tracker still has incomplete steps: {joined}. This follow-up is the harness resuming \
+        "{TRACKER_CONTINUE_FOLLOW_UP_PREFIX} {joined}. This follow-up is the harness resuming \
          the work, so no user reply is needed. The next step is to continue with the next incomplete step \
          using tools and update task_tracker as steps complete. A status-only recap does not advance the \
          tracker. The turn can end when the tracker is complete, or when a user decision or a \
