@@ -3,7 +3,7 @@ feature: session-residual-hygiene
 status: delivered
 updated: 2026-09-26
 branch: fix/session-residual-hygiene
-commits: 69c967153..88e7e660e
+commits: 69c967153..f1aac4d8d
 ---
 
 # Session Residual Hygiene
