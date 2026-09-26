@@ -86,25 +86,13 @@ fn recovery_empty_response_fallback_guidance(mode: RecoveryMode) -> &'static str
     }
 }
 
-pub(super) fn recovery_empty_response_fallback_message(
-    history: &[uni::Message],
-    workspace_root: &Path,
-    mode: RecoveryMode,
-) -> String {
+/// User-facing empty-response fallback answer. Stays concise (spec
+/// tui-diagnostics-cleanup S2D): no embedded multi-line evidence dumps.
+/// Bounded previews belong in the synthesis directive, not the assistant text.
+pub(super) fn recovery_empty_response_fallback_message(mode: RecoveryMode) -> String {
     let intro = recovery_empty_response_fallback_intro(mode);
     let guidance = recovery_empty_response_fallback_guidance(mode);
-
-    let previews = crate::agent::runloop::unified::turn::compaction::build_recovery_context_previews_with_workspace(
-        history,
-        Some(workspace_root),
-    );
-    if previews.is_empty() {
-        format!("{intro}\n\n{guidance}")
-    } else if previews.len() == 1 {
-        format!("{intro}\n\n{}\n\n{guidance}", previews[0])
-    } else {
-        format!("{intro}\n\n{}\n\n{guidance}", previews.join("\n"))
-    }
+    format!("{intro}\n\n{guidance}")
 }
 
 /// Last-resort fallback used when `recovery_empty_response_fallback_message`
