@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 const TASKS_DIR: &str = ".vtcode/tasks";
 const CURRENT_TASK_FILE: &str = "current_task.md";
@@ -79,6 +80,11 @@ pub fn read_spec_summary(workspace_root: &Path) -> Option<String> {
     read_markdown_summary(&current_spec_path(workspace_root), "Spec")
 }
 
+/// Like [`read_spec_summary`], but drop the file when it predates `not_before`.
+pub fn read_spec_summary_fresh(workspace_root: &Path, not_before: Option<SystemTime>) -> Option<String> {
+    read_markdown_summary_fresh(&current_spec_path(workspace_root), "Spec", not_before)
+}
+
 /// Read a short summary of the current contract artifact, or `None` if unavailable.
 pub fn read_contract_summary(workspace_root: &Path) -> Option<String> {
     read_markdown_summary(&current_contract_path(workspace_root), "Contract")
@@ -87,6 +93,47 @@ pub fn read_contract_summary(workspace_root: &Path) -> Option<String> {
 /// Read a short summary of the current evaluation artifact, or `None` if unavailable.
 pub fn read_evaluation_summary(workspace_root: &Path) -> Option<String> {
     read_markdown_summary(&current_evaluation_path(workspace_root), "Evaluation")
+}
+
+/// Like [`read_evaluation_summary`], but drop the file when it predates `not_before`.
+pub fn read_evaluation_summary_fresh(workspace_root: &Path, not_before: Option<SystemTime>) -> Option<String> {
+    read_markdown_summary_fresh(&current_evaluation_path(workspace_root), "Evaluation", not_before)
+}
+
+/// Archive a fully-checked `current_task.md` so a finished checklist cannot
+/// describe the next session. Incomplete checklists stay in place.
+///
+/// Returns the archive path when a move happened.
+pub fn archive_completed_current_task(workspace_root: &Path, session_id: &str) -> Result<Option<PathBuf>> {
+    let task_path = current_task_path(workspace_root);
+    let Ok(content) = fs::read_to_string(&task_path) else {
+        return Ok(None);
+    };
+    let checklist: Vec<&str> = content
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with("- ["))
+        .collect();
+    if checklist.is_empty() || !checklist.iter().all(|line| line.starts_with("- [x]")) {
+        return Ok(None);
+    }
+    let archive_dir = workspace_root.join(TASKS_DIR).join("archive");
+    fs::create_dir_all(&archive_dir).with_context(|| format!("create task archive dir {}", archive_dir.display()))?;
+    let safe_session: String = session_id
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    let archive_path = archive_dir.join(format!("current_task-{safe_session}.md"));
+    fs::rename(&task_path, &archive_path)
+        .with_context(|| format!("archive completed task tracker to {}", archive_path.display()))?;
+    Ok(Some(archive_path))
 }
 
 /// Write the spec artifact content to disk and return the path.
@@ -192,6 +239,20 @@ fn read_markdown_summary(path: &Path, label: &str) -> Option<String> {
 
     let joined = lines.join(" | ");
     Some(format!("{label}: {}", truncate_summary(&joined)))
+}
+
+/// Read a markdown summary only when the file is at least as new as `not_before`.
+///
+/// Workspace-global task artifacts outlive their session. A leftover fixture
+/// must not describe a later session's memory envelope or orient snapshot.
+fn read_markdown_summary_fresh(path: &Path, label: &str, not_before: Option<SystemTime>) -> Option<String> {
+    if let Some(not_before) = not_before {
+        let modified = fs::metadata(path).ok()?.modified().ok()?;
+        if modified < not_before {
+            return None;
+        }
+    }
+    read_markdown_summary(path, label)
 }
 
 fn truncate_summary(text: &str) -> String {
@@ -306,5 +367,51 @@ mod tests {
 
         let paths = existing_harness_artifact_paths(temp.path());
         assert_eq!(paths.len(), 6);
+    }
+
+    #[test]
+    fn stale_spec_summary_is_dropped_for_later_sessions() {
+        let temp = tempdir().expect("tempdir");
+        let spec_path = current_spec_path(temp.path());
+        fs::create_dir_all(spec_path.parent().expect("parent")).expect("tasks dir");
+        fs::write(&spec_path, "# Execution Spec\nExplore the codebase and summarize.\n").expect("write spec");
+        // Make the fixture look old (pre-session).
+        let old = SystemTime::now() - std::time::Duration::from_secs(3600);
+        let file = fs::File::options().write(true).open(&spec_path).expect("open");
+        file.set_modified(old).expect("set mtime");
+
+        assert!(read_spec_summary(temp.path()).is_some(), "unfiltered read still sees the file");
+        assert!(
+            read_spec_summary_fresh(temp.path(), Some(SystemTime::now())).is_none(),
+            "a leftover fixture must not describe a later session"
+        );
+        assert!(
+            read_spec_summary_fresh(temp.path(), Some(old - std::time::Duration::from_secs(10))).is_some(),
+            "fresh reads still accept artifacts written during the session"
+        );
+    }
+
+    #[test]
+    fn archive_completed_current_task_moves_only_fully_checked_trackers() {
+        let temp = tempdir().expect("tempdir");
+        let task_path = current_task_path(temp.path());
+        fs::create_dir_all(task_path.parent().expect("parent")).expect("tasks dir");
+
+        fs::write(&task_path, "# Work\n\n- [ ] open item\n- [x] done item\n").expect("write partial");
+        assert!(
+            archive_completed_current_task(temp.path(), "session-a")
+                .expect("archive")
+                .is_none(),
+            "incomplete checklists stay live"
+        );
+        assert!(task_path.exists());
+
+        fs::write(&task_path, "# Work\n\n- [x] done one\n- [x] done two\n").expect("write complete");
+        let archived = archive_completed_current_task(temp.path(), "session-a")
+            .expect("archive")
+            .expect("fully-checked tracker is archived");
+        assert!(!task_path.exists(), "live path must be clear for the next plan");
+        assert!(archived.ends_with("current_task-session-a.md"));
+        assert!(archived.exists());
     }
 }

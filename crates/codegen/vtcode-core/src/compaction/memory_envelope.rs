@@ -21,7 +21,9 @@ use vtcode_config::loader::VTCodeConfig;
 use crate::compaction::CompactionConfig;
 use crate::config::constants::tools as tool_names;
 use crate::context::history_files::{HistoryFileManager, messages_to_history_messages};
-use crate::core::agent::harness_artifacts::{current_task_path, read_evaluation_summary, read_spec_summary};
+use crate::core::agent::harness_artifacts::{
+    current_task_path, read_evaluation_summary_fresh, read_spec_summary_fresh,
+};
 use crate::core::agent::steering::{
     MAX_APPLIED_FOLLOW_UP_INTENT_IDS, MAX_QUEUED_FOLLOW_UP_INTENTS, QueuedFollowUpIntent,
 };
@@ -271,9 +273,11 @@ pub fn build_session_memory_envelope(
     envelope_update: Option<&SessionMemoryEnvelopeUpdate>,
 ) -> SessionMemoryEnvelope {
     let pe = prior_envelope;
-    let spec_summary = read_spec_summary(workspace_root).or_else(|| pe.and_then(|e| e.spec_summary.clone()));
-    let evaluation_summary =
-        read_evaluation_summary(workspace_root).or_else(|| pe.and_then(|e| e.evaluation_summary.clone()));
+    let artifact_cutoff = session_artifact_cutoff(workspace_root, session_id);
+    let spec_summary =
+        read_spec_summary_fresh(workspace_root, artifact_cutoff).or_else(|| pe.and_then(|e| e.spec_summary.clone()));
+    let evaluation_summary = read_evaluation_summary_fresh(workspace_root, artifact_cutoff)
+        .or_else(|| pe.and_then(|e| e.evaluation_summary.clone()));
     let merge = |prior: &[String], updates: &[String]| merge_recent_strings(prior, updates, MEMORY_LIST_LIMIT);
     let constraints = merge(
         pe.map(|e| e.constraints.as_slice()).unwrap_or(&[]),
@@ -699,6 +703,28 @@ fn sanitize_session_id(session_id: &str) -> String {
         .collect()
 }
 
+/// Best-effort start time of `session_id`, used to reject leftover workspace
+/// task artifacts that predate the session.
+fn session_artifact_cutoff(workspace_root: &Path, session_id: &str) -> Option<std::time::SystemTime> {
+    let sessions_root = workspace_root.join(".vtcode").join("sessions");
+    let candidates = [
+        sessions_root.join(session_id),
+        sessions_root.join(sanitize_session_id(session_id)),
+    ];
+    for dir in candidates {
+        let Ok(metadata) = fs::metadata(&dir) else {
+            continue;
+        };
+        if let Ok(created) = metadata.created() {
+            return Some(created);
+        }
+        if let Ok(modified) = metadata.modified() {
+            return Some(modified);
+        }
+    }
+    None
+}
+
 fn memory_envelope_file_matches_session(name: &str, session_id: &str) -> bool {
     let session_prefix = sanitize_session_id(session_id);
     name == format!("{session_prefix}{MEMORY_ENVELOPE_SUFFIX}")
@@ -770,6 +796,21 @@ fn extract_verification_summary(content: &str, checklist: &[String]) -> Option<S
     (!fallback_lines.is_empty()).then(|| fallback_lines.join("\n"))
 }
 
+/// Split the tail of a `verify:` line into clean commands.
+///
+/// Plan writers sometimes emit `verify: [a] and verify: [b]` on one line.
+/// Bracket-strip each piece and drop empties so a spliced marker can never
+/// leak into `verification_summary`.
+fn split_verify_command_tail(rest: &str) -> Vec<String> {
+    rest.split(" and verify:")
+        .map(str::trim)
+        .map(|piece| piece.trim().trim_start_matches('[').trim_end_matches(']').trim())
+        .filter(|piece| !piece.is_empty())
+        .map(normalize_whitespace)
+        .filter(|piece| !piece.is_empty())
+        .collect()
+}
+
 fn collect_structured_verify_commands(content: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut in_verify_block = false;
@@ -777,13 +818,10 @@ fn collect_structured_verify_commands(content: &str) -> Vec<String> {
     for line in content.lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix("verify:") {
-            let command = normalize_whitespace(rest);
-            if command.is_empty() {
-                in_verify_block = true;
-            } else {
+            for command in split_verify_command_tail(rest) {
                 commands.push(command);
-                in_verify_block = false;
             }
+            in_verify_block = rest.trim().is_empty();
             continue;
         }
 
@@ -1548,5 +1586,29 @@ mod tests {
         ];
 
         assert_eq!(extract_compaction_summary(&compacted, &[]), "new local summary");
+    }
+
+    #[test]
+    fn split_verify_command_tail_splits_and_strips_brackets() {
+        let tail = " [cargo nextest run -E 'test(turn_loop_helpers) or test(tool_outcomes) or test(blocked_handoff)'] and verify: [cargo check --locked";
+        let commands = super::split_verify_command_tail(tail);
+        assert_eq!(
+            commands,
+            vec![
+                "cargo nextest run -E 'test(turn_loop_helpers) or test(tool_outcomes) or test(blocked_handoff)'"
+                    .to_string(),
+                "cargo check --locked".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn structured_verify_commands_do_not_splice_bracketed_pairs() {
+        let content =
+            "# Fix\n\n- [x] step\n  files: src/x.rs\n  verify: [cargo check --locked] and verify: [cargo fmt --check\n";
+        let commands = super::collect_structured_verify_commands(content);
+        assert_eq!(commands, vec!["cargo check --locked".to_string(), "cargo fmt --check".to_string()]);
+        let summary = super::extract_verification_summary(content, &[]).expect("summary");
+        assert!(!summary.contains("] and verify:"), "splice marker must not leak: {summary}");
     }
 }

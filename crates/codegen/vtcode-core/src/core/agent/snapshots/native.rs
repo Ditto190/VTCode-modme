@@ -388,6 +388,35 @@ impl SnapshotManager {
         }
     }
 
+    /// Bound a finished session's navigation record so it cannot pin every turn
+    /// snapshot for the full retention window. Keeps the newest
+    /// [`REWIND_ACTIVE_KEEP`] active turns for a possible resume, drops the
+    /// rest (those `turn_*.json` files become prune-eligible), clears the redo
+    /// stack, and releases the workspace rewind lock.
+    pub async fn complete_session_navigation(&self, session: &str) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let mut state = self.navigation(session)?;
+        if state.active.len() > REWIND_ACTIVE_KEEP {
+            let drop_count = state.active.len() - REWIND_ACTIVE_KEEP;
+            state.active.drain(..drop_count);
+        }
+        for entry in std::mem::take(&mut state.redo) {
+            self.retire_recovery_record(&entry.snapshot).await;
+        }
+        atomic_json(&self.navigation_path(session)?, &state)?;
+        let lock_path = self.storage_dir.join("rewind.lock");
+        match fs::remove_file(&lock_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                tracing::debug!(%error, "failed to remove rewind.lock after session completion");
+            }
+        }
+        Ok(())
+    }
+
     fn build_ignore(&self, policy: &str) -> Result<filesnap::Gitignore> {
         anyhow::ensure!(policy.len() <= 1024 * 1024, "Ignore policy is too large");
         let mut builder = filesnap::GitignoreBuilder::new(&self.canonical_workspace);
@@ -922,6 +951,49 @@ mod tests {
             .navigate_prompt(None, RevertScope::Both, &session, &restored.conversation)
             .await?;
         assert_eq!(redone.conversation, current);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn complete_session_navigation_trims_active_and_clears_redo() -> Result<()> {
+        let dir = TempDir::new()?;
+        let manager = SnapshotManager::new(SnapshotConfig::new(dir.path().into()))?;
+        let storage = dir.path().join(".vtcode").join("checkpoints");
+        let session = uuid::Uuid::new_v4().to_string();
+        let key: String = session.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let branch_path = storage.join(format!("branch_{key}.json"));
+        let lock_path = storage.join("rewind.lock");
+        fs::write(&lock_path, b"")?;
+
+        // 20 protected turns plus a redo entry: the completion trim must keep
+        // only the newest REWIND_ACTIVE_KEEP actives and drop redo entirely.
+        let active: Vec<usize> = (1435..=1454).collect();
+        let recovery = Recovery {
+            policy: String::new(),
+            snapshot: uuid::Uuid::new_v4().to_string(),
+            active: vec![1435],
+        };
+        let recovery_path = recovery_path(&storage, &recovery.snapshot);
+        atomic_json(&recovery_path, &serde_json::json!({}))?;
+        let state = Navigation {
+            active: active.clone(),
+            redo: vec![recovery],
+            pending: None,
+        };
+        atomic_json(&branch_path, &state)?;
+
+        manager.complete_session_navigation(&session).await?;
+
+        let saved: Navigation = serde_json::from_slice(&fs::read(&branch_path)?)?;
+        assert_eq!(
+            saved.active,
+            active[active.len() - REWIND_ACTIVE_KEEP..].to_vec(),
+            "only the newest rewind window stays pinned"
+        );
+        assert!(saved.redo.is_empty(), "completion must clear redo");
+        assert!(saved.pending.is_none());
+        assert!(!lock_path.exists(), "completion must release the workspace rewind lock");
+        assert!(!recovery_path.exists(), "completion must retire redo recovery records");
         Ok(())
     }
 }

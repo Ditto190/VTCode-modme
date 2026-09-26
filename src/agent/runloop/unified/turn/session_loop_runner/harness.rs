@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use tokio::task::spawn_blocking;
 use vtcode_config::loader::VTCodeConfig;
@@ -119,6 +120,73 @@ pub(super) async fn run_harness_retention(workspace: &Path, vt_cfg: Option<&VTCo
             tracing::warn!(target: "vtcode.harness", phase = "canonical_retention", error = %error, "canonical session retention task failed")
         }
     }
+
+    let history_workspace = workspace.to_path_buf();
+    let history_preserve = turn_run_id.0.clone();
+    match spawn_blocking(move || prune_history_envelopes(&history_workspace, &history_preserve)).await {
+        Ok(Ok(removed)) if removed > 0 => {
+            tracing::debug!(target: "vtcode.harness", removed, "pruned legacy history memory envelopes");
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(target: "vtcode.harness", phase = "history_envelope_retention", error = %error, "history envelope pruning failed")
+        }
+        Err(error) => {
+            tracing::warn!(target: "vtcode.harness", phase = "history_envelope_retention", error = %error, "history envelope pruning task failed")
+        }
+    }
+}
+
+/// Cap `.vtcode/history/*.memory.json` so legacy envelopes cannot grow without
+/// bound while dual writes still land there.
+///
+/// Keeps the `HISTORY_ENVELOPE_KEEP` newest files and anything belonging to
+/// `preserve_session_id`; drops envelopes older than `max_age_days`.
+fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str) -> Result<usize> {
+    const HISTORY_ENVELOPE_KEEP: usize = 50;
+    const MAX_AGE_DAYS: u64 = 30;
+
+    let history_dir = workspace.join(".vtcode").join("history");
+    let Ok(entries) = std::fs::read_dir(&history_dir) else {
+        return Ok(0);
+    };
+    let mut envelopes: Vec<(PathBuf, SystemTime)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(".memory.json") || !path.is_file() {
+            continue;
+        }
+        if name.contains(preserve_session_id) {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        envelopes.push((path, modified));
+    }
+    envelopes.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
+
+    let cutoff = SystemTime::now() - Duration::from_secs(MAX_AGE_DAYS * 24 * 3600);
+    let mut removed = 0usize;
+    for (index, (path, modified)) in envelopes.iter().enumerate() {
+        let over_count = index >= HISTORY_ENVELOPE_KEEP;
+        let aged_out = *modified < cutoff;
+        if !over_count && !aged_out {
+            continue;
+        }
+        match std::fs::remove_file(path) {
+            Ok(()) => removed += 1,
+            Err(error) => {
+                tracing::warn!(target: "vtcode.harness", path = %path.display(), %error, "failed to prune history envelope");
+            }
+        }
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]
@@ -145,5 +213,27 @@ mod tests {
         let turn = TurnRunId("test-harness-retention".to_string());
         run_harness_retention(temp.path(), None, &turn).await;
         run_harness_retention(temp.path(), None, &turn).await;
+    }
+
+    #[test]
+    fn prune_history_envelopes_keeps_newest_and_preserved_session() {
+        let temp = TempDir::new().expect("temp dir");
+        let history = temp.path().join(".vtcode").join("history");
+        std::fs::create_dir_all(&history).expect("history dir");
+        for i in 0..60 {
+            let name = format!("session-{i:03}.memory.json");
+            std::fs::write(history.join(name), b"{}").expect("write envelope");
+        }
+        std::fs::write(history.join("session-keep.memory.json"), b"{}").expect("write preserved");
+
+        let removed = prune_history_envelopes(temp.path(), "session-keep").expect("prune");
+        assert!(removed >= 10, "count cap should drop the oldest extras: {removed}");
+        assert!(history.join("session-keep.memory.json").exists(), "preserved session stays");
+        let remaining: Vec<_> = std::fs::read_dir(&history)
+            .expect("read history")
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(remaining.len() <= 51, "bounded history envelopes: {}", remaining.len());
     }
 }

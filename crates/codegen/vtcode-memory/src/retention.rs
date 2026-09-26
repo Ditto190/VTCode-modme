@@ -59,6 +59,10 @@ pub fn apply_retention_preserving(
     if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
         return Ok(0);
     }
+    // Crashed/killed threads never emit thread.completed; surface those
+    // abandoned `active` stores as completed so the eviction phases can
+    // reclaim them. Live sessions stay `active` and remain unpinned.
+    mark_abandoned_active_sessions(workspace, policy.max_age_days)?;
     let preserve_path = preserve_session_id.map(|session_id| crate::session_dir(workspace, session_id));
     let mut sessions = retention_candidates(&root, preserve_path.as_deref())?;
     let mut removed = 0usize;
@@ -153,6 +157,63 @@ fn retention_candidates(
         candidates.push(RetentionCandidate { path, summary });
     }
     Ok(candidates)
+}
+
+/// Flip `active` manifests that have been idle past `max_age_days` to
+/// `completed` so ordinary retention can evict them.
+///
+/// A crashed or killed thread never emits `thread.completed`, so its manifest
+/// stays `active` forever and would otherwise pin the store. Live sessions are
+/// younger than the cutoff and are left untouched. `max_age_days == 0` disables
+/// the sweep (the hard "never evict active" contract used by force-evict tests).
+/// Returns how many manifests were marked abandoned.
+pub fn mark_abandoned_active_sessions(workspace: &Path, max_age_days: u64) -> Result<usize, SessionStoreError> {
+    if max_age_days == 0 {
+        return Ok(0);
+    }
+    let root = sessions_root(workspace);
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Ok(0);
+    };
+    let cutoff = age_cutoff(max_age_days);
+    let mut marked = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if session_retention_pinned(&path) {
+            continue;
+        }
+        let manifest_path = path.join("manifest.json");
+        let Ok(bytes) = std::fs::read(&manifest_path) else {
+            continue;
+        };
+        let Ok(mut summary) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        let is_active = summary.get("status").and_then(serde_json::Value::as_str) == Some("active");
+        if !is_active {
+            continue;
+        }
+        let updated_at = summary
+            .get("updated_at")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !older_than(updated_at, cutoff) {
+            continue;
+        }
+        if let Some(object) = summary.as_object_mut() {
+            object.insert("status".to_string(), serde_json::Value::String("completed".to_string()));
+        } else {
+            continue;
+        }
+        let body = serde_json::to_vec_pretty(&summary)
+            .map_err(|error| SessionStoreError::io(manifest_path.clone(), std::io::Error::other(error)))?;
+        std::fs::write(&manifest_path, body).map_err(|e| SessionStoreError::io(manifest_path.clone(), e))?;
+        marked += 1;
+    }
+    Ok(marked)
 }
 
 /// Remove the legacy `history/` and `logs/` directories after they have been
