@@ -1265,6 +1265,19 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     false,
                                 )
                                 .await;
+                                let session_id = tool_registry.harness_context_snapshot().session_id;
+                                record_plan_selection_failure_tail(
+                                    &mut runtime,
+                                    &mut session_archive,
+                                    &session_stats,
+                                    &loaded_skills,
+                                    next_checkpoint_turn,
+                                    config.workspace.as_path(),
+                                    &session_id,
+                                    vt_cfg.as_ref(),
+                                    harness_config.max_tool_wall_clock_secs,
+                                )
+                                .await;
                                 continue;
                             }
                             Err(err) => {
@@ -1830,10 +1843,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .filter(|name| !name.trim().is_empty());
                         // Selection failure must stay recoverable: the plan is
                         // already approved, so aborting the session here would
-                        // leave a half-switched state with no retry path. The
-                        // `continue` intentionally skips this iteration's
-                        // metrics/checkpoint tail: the next successful turn
-                        // persists the same messages, so the skip self-heals.
+                        // leave a half-switched state with no retry path. Run
+                        // the turn-persistence tail before `continue` so a
+                        // finished turn is checkpointed here, not deferred.
                         let execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,

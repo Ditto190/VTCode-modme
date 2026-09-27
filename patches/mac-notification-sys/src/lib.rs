@@ -144,18 +144,30 @@ pub fn get_bundle_identifier(app_name: &str) -> Option<String> {
         .map(NSString::to_string)
 }
 
-/// Sets the application if not already set
+/// Sets the application if not already set.
+///
+/// The state lock is released before calling `set_application` — a held
+/// `MutexGuard` from a `match` scrutinee would still be alive in the arm and
+/// deadlock on the same non-reentrant mutex.
 fn ensure_application_set() -> NotificationResult<()> {
-    match *lock_application_state() {
-        ApplicationState::Set => Ok(()),
-        // Do not fall through to AppleScript app discovery after a failed
-        // explicit registration — that is the Automation-permission path this
-        // wrapper exists to avoid. Callers retry `set_application` instead.
-        ApplicationState::Failed => Err(ApplicationError::CouldNotSet("application".into()).into()),
-        ApplicationState::Unset => {
-            let bundle = get_bundle_identifier_or_default("use_default");
-            set_application(&bundle)
+    let needs_discovery = {
+        let state = lock_application_state();
+        match *state {
+            ApplicationState::Set => return Ok(()),
+            // Do not fall through to AppleScript app discovery after a failed
+            // explicit registration — that is the Automation-permission path
+            // this wrapper exists to avoid. Callers retry `set_application`.
+            ApplicationState::Failed => {
+                return Err(ApplicationError::CouldNotSet("application".into()).into());
+            }
+            ApplicationState::Unset => true,
         }
+    };
+    if needs_discovery {
+        let bundle = get_bundle_identifier_or_default("use_default");
+        set_application(&bundle)
+    } else {
+        Ok(())
     }
 }
 

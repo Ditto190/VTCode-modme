@@ -98,8 +98,9 @@ and patch via `[patch.crates-io]`:
 - Replace `INIT_APPLICATION_SET: Once` with an explicit state
   (`Unset` / `Set` / `Failed`) so a failed `setApplication` can be retried and
   a successful set is idempotent (`Ok` on later calls instead of `AlreadySet`).
-- `ensure_application_set` treats only `Set` as done; `Failed` retries through
-  `set_application`.
+- `ensure_application_set` treats only `Set` as done. `Failed` returns an error
+  (no AppleScript fallthrough); callers retry `set_application` until success.
+  The state lock is released before any re-entrant call.
 - Preserve the AppleScript-skip behavior: callers still `set_application` first.
 
 Update `vtcode-core::notifications::ensure_macos_notification_application`:
