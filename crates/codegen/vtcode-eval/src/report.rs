@@ -131,12 +131,17 @@ pub struct CostEfficiency {
     pub mean_turns_per_attempt: Option<f64>,
 }
 
+/// Finite, non-negative attempt cost. Unpriced is not free.
+pub fn priced_cost(cost_usd: Option<f64>) -> Option<f64> {
+    cost_usd.filter(|value| value.is_finite() && *value >= 0.0)
+}
+
 impl CostEfficiency {
     /// Compute efficiency metrics from attempt results.
     ///
     /// `cost_usd` / `trace_summary` come from each `EvalRunResult`. Token and
     /// turn means use only attempts that carry a trace summary.
-    pub fn from_runs(results: &[crate::task::EvalRunResult]) -> Self {
+    pub fn from_runs<'a>(results: impl IntoIterator<Item = &'a crate::task::EvalRunResult>) -> Self {
         let mut total_cost = 0.0_f64;
         let mut known_cost_runs = 0_u32;
         let mut unpriced_runs = 0_u32;
@@ -150,7 +155,7 @@ impl CostEfficiency {
             if result.outcome == crate::task::RunOutcome::Pass {
                 passed_runs = passed_runs.saturating_add(1);
             }
-            match result.cost_usd.filter(|value| value.is_finite() && *value >= 0.0) {
+            match priced_cost(result.cost_usd) {
                 Some(cost) => {
                     total_cost += cost;
                     known_cost_runs = known_cost_runs.saturating_add(1);
@@ -160,7 +165,10 @@ impl CostEfficiency {
                 }
             }
             if let Some(summary) = &result.trace_summary {
-                let gross = (summary.token_usage.input_tokens + summary.token_usage.output_tokens) as f64;
+                let gross = (summary
+                    .token_usage
+                    .input_tokens
+                    .saturating_add(summary.token_usage.output_tokens)) as f64;
                 token_sum += gross;
                 token_count = token_count.saturating_add(1);
                 turn_sum += summary.turns as f64;
