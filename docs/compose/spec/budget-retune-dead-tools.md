@@ -1,14 +1,23 @@
 ---
 feature: budget-retune-dead-tools
-status: in-progress
+status: delivered
 updated: 2026-09-27
 branch: feat/budget-retune-dead-tools
-commits: # leave empty while in progress; fill at delivery
+commits: 12a631c1d..e2dfe4e86
 ---
 
 # Budget Retune and Dead Tool IDs
 
 ## Report
+
+**What was built** — Progressive tool-schema budget raised from 1,800 to **2,000** (~10% headroom over the measured 1,793 on the Codex-4 default profile) so small description tweaks no longer trip the gate. First-request ceilings stay 6k/8k. Audit of `BUILTIN_TOOLS` found **no dead registered tools** (`get_errors` remains LLM-hidden for back-compat); four unused `*_ID` constants in `tools/mod.rs` were deleted. `ToolDocumentationMode::Progressive` docs now distinguish measured size vs budgeted cap.
+
+**Verification** — `./scripts/check-dev.sh` PASS. `cargo nextest run -p vtcode-core -p vtcode --no-fail-fast` **7364 passed, 1 failed, 12 skipped**; failure is **PRE-EXISTING** `cli_harness_failures::print_mode_requires_prompt_or_stdin` (auth env). Targeted: schema budget, first-request budget, `get_errors` back-compat — PASS. Independent review: **approve**.
+
+**Journey log**
+- "Remove dead tools if needed" audit outcome is often "none registered are dead" — record that explicitly rather than inventing removals.
+- Progressive schema budget has two doc surfaces: EXECUTION_POLICY (the gate) and the `ToolDocumentationMode` doc comment (the measurement). Reconcile both when the cap moves.
+- Historical compose-spec reports must not be retro-edited when budgets change.
 
 ## [S1] Problem
 
@@ -42,5 +51,5 @@ Settled (grill 2026-09-27): re-tune schema cap to **2,000** (keep first-request 
 
 ## Tasks
 
-- [ ] T1: schema budget 2,000 + docs — acceptance: `emitted_model_tool_schema_fits_within_first_request_budget` asserts `<= 2_000` and passes; EXECUTION_POLICY numbers say 2,000 (covers: S2-budget)
-- [ ] T2: drop unused tool ID constants — acceptance: `CREATE_APPLY_PATCH_FREEFORM_TOOL_ID`, `CREATE_APPLY_PATCH_JSON_TOOL_ID`, `INTERCEPT_APPLY_PATCH_ID`, `NEW_SHARED_TRACKER_ID` no longer exist; `cargo check` / clippy clean; no other references (covers: S2-dead)
+- [x] T1: schema budget 2,000 + docs — acceptance: `emitted_model_tool_schema_fits_within_first_request_budget` asserts `<= 2_000` and passes; EXECUTION_POLICY numbers say 2,000 (covers: S2-budget)
+- [x] T2: drop unused tool ID constants — acceptance: `CREATE_APPLY_PATCH_FREEFORM_TOOL_ID`, `CREATE_APPLY_PATCH_JSON_TOOL_ID`, `INTERCEPT_APPLY_PATCH_ID`, `NEW_SHARED_TRACKER_ID` no longer exist; `cargo check` / clippy clean; no other references (covers: S2-dead)
