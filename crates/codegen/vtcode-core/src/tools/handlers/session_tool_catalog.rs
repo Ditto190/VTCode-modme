@@ -1221,11 +1221,14 @@ mod tests {
         let properties = &entry.parameters["properties"];
 
         assert_eq!(entry.parameters["required"], json!(["cmd"]));
-        assert!(properties["cmd"]["description"].as_str().is_some_and(|text| {
-            ["ls", "rg", "find", "cat", "sed", "awk"]
-                .iter()
-                .all(|command| text.contains(command))
-        }));
+        // The example commands live once in EXEC_COMMAND_DESCRIPTION; the
+        // `cmd` property defers to the tool description instead of repeating
+        // the list on every request.
+        assert!(
+            properties["cmd"]["description"]
+                .as_str()
+                .is_some_and(|text| text.contains("tool description lists covered tools"))
+        );
         assert_eq!(properties["tty"]["type"], "boolean");
         for command in ["ls", "rg", "find", "cat", "sed", "awk"] {
             assert!(properties.get(command).is_none(), "{command} must not be modelled as a separate schema property");

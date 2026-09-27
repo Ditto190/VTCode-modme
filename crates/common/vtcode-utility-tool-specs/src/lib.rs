@@ -31,13 +31,14 @@ pub(crate) use tool_kind::{CanonicalToolMeta, TokenBucket, ToolKind, ToolNamespa
 pub const SEMANTIC_ANCHOR_GUIDANCE: &str =
     "Prefer stable semantic @@ anchors such as function, class, method, or impl names.";
 
-/// Explicit, format-bearing description for the `patch` alias field. The old
-/// value ("Alias for input") gave the model no format guidance, so it often
-/// placed a standard unified diff (`---`/`+++`) there — which `apply_patch`
-/// rejects. This mirrors the `input` description so both alias fields carry
-/// identical, complete format guidance (see checkpoint turn_615 for the
-/// failure this prevents).
-pub const APPLY_PATCH_ALIAS_DESCRIPTION: &str = "Patch in VT Code format (*** Begin Patch, *** Update File: path, @@ hunk, -/+ lines, *** End Patch). Same envelope as 'input'; standard unified diffs (--- /+++ format) are rejected. Every patch path must be workspace-relative; absolute paths, `..`, and traversal-like forms are rejected.";
+/// Model-visible description of the `patch` alias field. The old value
+/// ("Alias for input") gave the model no format guidance, so it often placed
+/// a standard unified diff (`---`/`+++`) there — which `apply_patch` rejects
+/// (checkpoint turn_615). The full envelope and path rules live on the tool
+/// description and the `input` field; this alias keeps only the
+/// turn_615-critical rejection signal plus the alias relationship, so the
+/// same guidance is not sent three times per request.
+pub const APPLY_PATCH_ALIAS_DESCRIPTION: &str = "Alias for 'input': same VT Code patch envelope (*** Begin Patch … *** End Patch); unified diffs (---/+++ format) are rejected.";
 pub const DEFAULT_APPLY_PATCH_INPUT_DESCRIPTION: &str = "Patch in VT Code format: *** Begin Patch, *** Update File: path, @@ hunk, -/+ lines, *** End Patch. Every patch path must be workspace-relative; absolute paths, `..`, and traversal-like forms are rejected.";
 /// Model-visible description of the `apply_patch` tool. It leads with the
 /// accepted envelope so the model writes the right format on the first try,
@@ -219,7 +220,7 @@ pub fn exec_command_parameters() -> Value {
         "type": "object",
         "required": ["cmd"],
         "properties": {
-            "cmd": {"type": "string", "description": "Shell command to execute, subject to command policy. Examples include `ls`, `rg`, `find`, `cat`, `sed`, `awk`, build tools, and test tools."},
+            "cmd": {"type": "string", "description": "Shell command to execute, subject to command policy. The tool description lists covered tools."},
             "yield_time_ms": {"type": "integer", "description": "Wait before returning output (ms). If the command is still running, the response includes a session_id for write_stdin. Values above 10000 turn this into a single-call long run: no outer timeout applies and the response returns after the yield window or command exit, whichever is first.", "default": 10000},
             "background": {"type": "boolean", "description": "Start a retained background process and return after a bounded initial output window. At most three live background processes are allowed per VT Code runtime; use the returned session_id with write_stdin to wait, poll, write, inspect, terminate, or close.", "default": false},
             "max_output_tokens": {"type": "integer", "minimum": 1, "maximum": 50000, "default": 10000, "description": "Output token cap. Large or truncated output can return a spool_path; an active session may set spool_complete=false for a readable partial snapshot, while an exited pending spool is withheld until a later wait."},
@@ -523,13 +524,20 @@ mod tests {
                 .contains("Required when sandbox_permissions is `require_escalated` or `bypass_sandbox`")
         );
         assert_eq!(exec_params["additionalProperties"], false);
+        // Example commands live once, in EXEC_COMMAND_DESCRIPTION; the `cmd`
+        // property defers to it instead of repeating the list on every
+        // request.
+        assert!(
+            exec_params["properties"]["cmd"]["description"]
+                .as_str()
+                .expect("cmd description")
+                .contains("tool description lists covered tools"),
+            "cmd description must defer the example list to the tool description"
+        );
         for command in ["ls", "rg", "find", "cat", "sed", "awk"] {
             assert!(
-                exec_params["properties"]["cmd"]["description"]
-                    .as_str()
-                    .expect("cmd description")
-                    .contains(command),
-                "{command} should be described as an exec_command.cmd example"
+                EXEC_COMMAND_DESCRIPTION.contains(command),
+                "{command} should be described as an exec_command example"
             );
             assert!(
                 exec_params["properties"].get(command).is_none(),
