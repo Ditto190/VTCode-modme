@@ -86,7 +86,7 @@ review changes before they land.
 ### 1. Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vinhnx/vtcode/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vinhnx/VTCode/main/scripts/install.sh | bash
 ```
 
 The installer also sets up `ripgrep` and `ast-grep` on macOS/Linux. Other
@@ -234,7 +234,9 @@ For session lifecycle and day-to-day operations:
 More: `vtcode config`, `vtcode dependencies`, `vtcode acp`, `vtcode a2a`,
 `vtcode webmcp`, `vtcode session-store`, `vtcode schema` (built-in tool
 schemas), `vtcode analyze` (workspace structure/security/performance),
-`vtcode check` (built-in repository checks), and `vtcode man` (man pages).
+`vtcode check` (built-in repository checks), `vtcode update` (binary
+updates), `vtcode logout` (clear stored credentials), and `vtcode man`
+(man pages).
 Full list: `vtcode --help` or the
 [command reference](./docs/user-guide/commands.md).
 
@@ -306,7 +308,7 @@ graph LR
 Rust stable, edition 2024, MSRV 1.98.1. Clone and run the fast gate:
 
 ```bash
-git clone https://github.com/vinhnx/vtcode.git
+git clone https://github.com/vinhnx/VTCode.git
 cd vtcode
 ./scripts/run-debug.sh     # build and launch a debug binary
 ./scripts/check-dev.sh     # fast gate: clippy, fmt, check (10-30s)
@@ -317,7 +319,7 @@ CI runs with `RUSTFLAGS="-D warnings"` and `--locked`; match locally with
 `cargo check --locked`. Details: [development overview](./docs/development/README.md)
 · [testing guide](./docs/development/testing.md).
 
-Release binaries and notes: [GitHub releases](https://github.com/vinhnx/vtcode/releases)
+Release binaries and notes: [GitHub releases](https://github.com/vinhnx/VTCode/releases)
 (Windows artifacts may lag behind macOS/Linux).
 
 ## Contributing
@@ -389,10 +391,10 @@ alongside me. Thank you, all of you.
 **Want to see your avatar here?** Every bit counts: one-line fixes, bug
 reports, and feedback are all welcome.
 
-[Report a bug](https://github.com/vinhnx/vtcode/issues/new?template=bug_report.md) ·
-[Request a feature](https://github.com/vinhnx/vtcode/issues/new?template=feature_request.md) ·
-[Share feedback](https://github.com/vinhnx/vtcode/discussions) ·
-[Star the repo](https://github.com/vinhnx/vtcode/stargazers) ·
+[Report a bug](https://github.com/vinhnx/VTCode/issues/new?template=bug_report.md) ·
+[Request a feature](https://github.com/vinhnx/VTCode/issues/new?template=feature_request.md) ·
+[Share feedback](https://github.com/vinhnx/VTCode/discussions) ·
+[Star the repo](https://github.com/vinhnx/VTCode/stargazers) ·
 [Contribute](./docs/CONTRIBUTING.md)
 
 ## Community
@@ -410,9 +412,9 @@ reports, and feedback are all welcome.
 ### Contact
 
 Partnership and collaboration: `vinhnguyen2308 [at] gmail [dot] com`.
-Bugs and feature requests: [GitHub Issues](https://github.com/vinhnx/vtcode/issues).
+Bugs and feature requests: [GitHub Issues](https://github.com/vinhnx/VTCode/issues).
 Security vulnerabilities: report privately via
-[GitHub private vulnerability reporting](https://github.com/vinhnx/vtcode/security/advisories/new);
+[GitHub private vulnerability reporting](https://github.com/vinhnx/VTCode/security/advisories/new);
 never open a public issue. Details: [security policy](./docs/SECURITY.md).
 
 ### Share VT Code
