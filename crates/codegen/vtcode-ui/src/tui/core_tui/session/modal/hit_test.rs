@@ -19,11 +19,13 @@ use crate::tui::core_tui::session::inline_list;
 /// Map a terminal `row` to a visible list index, or `None` when the row holds
 /// no item (summary row, padding past the last item, or outside `area`).
 ///
-/// `footer_hint` and `inline_editor` must match what render passed to
-/// `render_modal_list`: plain modals pass their footer hint and no editor,
-/// wizard steps pass no hint and the step's [`super::render::inline_editor_for_step`].
+/// `footer_hint`, `inline_editor`, and `show_numbers` must match what render
+/// passed to `render_modal_list`: plain modals pass their footer hint and no
+/// editor, wizard steps pass no hint and the step's [`super::render::inline_editor_for_step`].
 /// `is_selected` is always `false` here: it only affects styling, not row
 /// height (the blank spacer depends on `item.selection`, not selection state).
+/// Number badges render inline without adding rows, so the flag preserves
+/// the render/hit-test contract rather than changing geometry.
 pub(crate) fn visible_index_at_row(
     list: &ModalListState,
     footer_hint: Option<&str>,
@@ -31,6 +33,7 @@ pub(crate) fn visible_index_at_row(
     styles: &ModalRenderStyles,
     area: Rect,
     row: u16,
+    show_numbers: bool,
 ) -> Option<usize> {
     if row < area.y || row >= area.y.saturating_add(area.height) {
         return None;
@@ -45,8 +48,13 @@ pub(crate) fn visible_index_at_row(
     let list_height = usize::from(area.height).saturating_sub(info_rows);
     let offset = list.list_state.offset();
     let mut consumed_rows = 0usize;
+    // Same one-shot gate as the render path: crowded lists measure without
+    // numbers, keeping hit geometry identical to what was painted.
+    let numbered = show_numbers && list.numbered_shortcuts();
     for (visible_index, &item_index) in list.visible_indices.iter().enumerate().skip(offset) {
-        let lines = modal_list_item_lines(list, visible_index, item_index, styles, content_width, inline_editor, false);
+        let number = numbered.then(|| list.shortcut_number(visible_index)).flatten();
+        let lines =
+            modal_list_item_lines(list, visible_index, item_index, styles, content_width, inline_editor, false, number);
         let height = usize::from(inline_list::row_height(&lines));
         if relative_row < consumed_rows + height {
             return Some(visible_index);
@@ -103,11 +111,11 @@ mod tests {
         // Adjustable density + footer hint renders one summary row above the items.
         let area = Rect::new(0, 10, 40, 6);
 
-        assert_eq!(visible_index_at_row(&list, Some("hint"), None, &styles, area, 10), None);
-        assert_eq!(visible_index_at_row(&list, Some("hint"), None, &styles, area, 11), Some(0));
-        assert_eq!(visible_index_at_row(&list, Some("hint"), None, &styles, area, 13), Some(1));
+        assert_eq!(visible_index_at_row(&list, Some("hint"), None, &styles, area, 10, false), None);
+        assert_eq!(visible_index_at_row(&list, Some("hint"), None, &styles, area, 11, false), Some(0));
+        assert_eq!(visible_index_at_row(&list, Some("hint"), None, &styles, area, 13, false), Some(1));
         // Without the hint there is no summary row, so the first item is at the top.
-        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 10), Some(0));
+        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 10, false), Some(0));
     }
 
     #[test]
@@ -131,11 +139,11 @@ mod tests {
 
         // The first item occupies title + editor + padding rows. Without the
         // editor the same rows would (wrongly) map one item lower.
-        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 10), Some(0));
-        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 11), Some(0));
-        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 12), Some(0));
-        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 13), Some(1));
-        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 12), Some(1));
+        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 10, false), Some(0));
+        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 11, false), Some(0));
+        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 12, false), Some(0));
+        assert_eq!(visible_index_at_row(&list, None, Some(&editor), &styles, area, 13, false), Some(1));
+        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 12, false), Some(1));
     }
 
     #[test]
@@ -144,7 +152,25 @@ mod tests {
         let list = ModalListState::new(vec![selectable_item("a")], None);
         let area = Rect::new(0, 10, 40, 3);
 
-        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 9), None);
-        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 13), None);
+        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 9, false), None);
+        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 13, false), None);
+    }
+
+    #[test]
+    fn numbered_badges_do_not_shift_hit_geometry() {
+        // Badges render inline without adding rows: the same rows must map
+        // identically with numbers shown or hidden.
+        let styles = test_styles();
+        let list = ModalListState::new(vec![selectable_item("a"), selectable_item("b")], None);
+        let area = Rect::new(0, 10, 40, 6);
+        for row in 10..16 {
+            assert_eq!(
+                visible_index_at_row(&list, None, None, &styles, area, row, true),
+                visible_index_at_row(&list, None, None, &styles, area, row, false),
+                "row {row} must map identically"
+            );
+        }
+        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 10, true), Some(0));
+        assert_eq!(visible_index_at_row(&list, None, None, &styles, area, 12, true), Some(1));
     }
 }

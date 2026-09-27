@@ -155,13 +155,29 @@ impl Session {
             // Render passes the inline custom-note editor, which appends one row
             // to its item; the shared helper measures the same heights.
             let inline_editor = modal::inline_editor_for_step(step);
-            return modal::visible_index_at_row(&step.list, None, inline_editor.as_ref(), &styles, area, row);
+            return modal::visible_index_at_row(
+                &step.list,
+                None,
+                inline_editor.as_ref(),
+                &styles,
+                area,
+                row,
+                wizard.numbered_shortcuts(),
+            );
         }
 
         let modal = self.modal_state()?;
         let list = modal.list.as_ref()?;
         // Plain modals never render an inline editor (render passes `None`).
-        modal::visible_index_at_row(list, modal.footer_hint.as_deref(), None, &styles, area, row)
+        modal::visible_index_at_row(
+            list,
+            modal.footer_hint.as_deref(),
+            None,
+            &styles,
+            area,
+            row,
+            modal.search.is_none(),
+        )
     }
 
     fn handle_active_overlay_click(

@@ -877,6 +877,259 @@ fn list_modal_backtab_moves_backward() {
     assert_eq!(selection, Some(InlineListSelection::Model(0)));
 }
 
+fn searchless_approval_modal() -> ModalState {
+    fn option(title: &str, selection: InlineListSelection) -> InlineListItem {
+        InlineListItem {
+            title: title.to_owned(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: Some(selection),
+            search_value: None,
+        }
+    }
+    ModalState {
+        title: "Test".to_owned(),
+        lines: vec![],
+        footer_hint: None,
+        hotkeys: Vec::new(),
+        list: Some(ModalListState::new(
+            vec![
+                option("Approve once", InlineListSelection::Model(0)),
+                option("Allow for session", InlineListSelection::Model(1)),
+                InlineListItem {
+                    title: String::new(),
+                    subtitle: None,
+                    badge: None,
+                    indent: 0,
+                    selection: None,
+                    search_value: None,
+                },
+                option("Deny once", InlineListSelection::Model(2)),
+            ],
+            None,
+        )),
+        secure_prompt: None,
+        restore_input: true,
+        restore_cursor: true,
+        search: None,
+        is_help_modal: false,
+    }
+}
+
+#[test]
+fn digit_key_selects_nth_option_without_submitting() {
+    let mut modal = searchless_approval_modal();
+    let key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
+    let result = modal.handle_list_key_event(&key, ModalKeyModifiers::default());
+
+    // Two-step: highlight moves (Emit), Enter still confirms.
+    assert!(matches!(
+        result,
+        ModalListKeyResult::Emit(InlineEvent::Overlay(OverlayEvent::SelectionChanged(OverlaySelectionChange::List(
+            InlineListSelection::Model(1)
+        ))))
+    ));
+    let selection = modal.list.as_ref().and_then(|list| list.current_selection());
+    assert_eq!(selection, Some(InlineListSelection::Model(1)));
+}
+
+#[test]
+fn digit_key_skips_separator_row() {
+    let mut modal = searchless_approval_modal();
+    let key = KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE);
+    let result = modal.handle_list_key_event(&key, ModalKeyModifiers::default());
+
+    // The separator carries no number: 3 lands on Deny, not the gap.
+    assert!(matches!(
+        result,
+        ModalListKeyResult::Emit(InlineEvent::Overlay(OverlayEvent::SelectionChanged(OverlaySelectionChange::List(
+            InlineListSelection::Model(2)
+        ))))
+    ));
+    let selection = modal.list.as_ref().and_then(|list| list.current_selection());
+    assert_eq!(selection, Some(InlineListSelection::Model(2)));
+}
+
+#[test]
+fn digit_for_current_selection_redraws_without_leaking() {
+    let mut modal = searchless_approval_modal();
+    let key = KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE);
+    let result = modal.handle_list_key_event(&key, ModalKeyModifiers::default());
+
+    // Already there: no selection change, but the keypress is still
+    // consumed — repeat presses must not fall through to the composer.
+    assert!(matches!(result, ModalListKeyResult::Redraw));
+    let selection = modal.list.as_ref().and_then(|list| list.current_selection());
+    assert_eq!(selection, Some(InlineListSelection::Model(0)));
+}
+
+#[test]
+fn out_of_range_and_zero_digits_are_swallowed() {
+    for digit in ['0', '9'] {
+        let mut modal = searchless_approval_modal();
+        let key = KeyEvent::new(KeyCode::Char(digit), KeyModifiers::NONE);
+        let result = modal.handle_list_key_event(&key, ModalKeyModifiers::default());
+
+        assert!(matches!(result, ModalListKeyResult::HandledNoRedraw), "digit {digit} must not leak");
+        let selection = modal.list.as_ref().and_then(|list| list.current_selection());
+        assert_eq!(selection, Some(InlineListSelection::Model(0)), "digit {digit} must not move selection");
+    }
+}
+
+#[test]
+fn digit_with_command_modifier_is_ignored() {
+    let mut modal = searchless_approval_modal();
+    let key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
+    let result = modal.handle_list_key_event(&key, ModalKeyModifiers { command: true, ..ModalKeyModifiers::default() });
+
+    assert!(matches!(result, ModalListKeyResult::NotHandled));
+    let selection = modal.list.as_ref().and_then(|list| list.current_selection());
+    assert_eq!(selection, Some(InlineListSelection::Model(0)));
+}
+
+#[test]
+fn digit_with_open_search_filters_instead_of_selecting() {
+    let mut modal = sample_list_modal();
+    let key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
+    let _ = modal.handle_list_key_event(&key, ModalKeyModifiers::default());
+
+    // Search owns digits while open: the query filters, selection is untouched.
+    assert_eq!(modal.search.as_ref().map(|search| search.query.as_str()), Some("2"));
+}
+
+#[test]
+fn numbered_shortcuts_gate_covers_empty_and_crowded_lists() {
+    let empty = ModalListState::new(Vec::new(), None);
+    assert!(!empty.numbered_shortcuts());
+
+    let nine: Vec<InlineListItem> = (0..9)
+        .map(|index| InlineListItem {
+            title: format!("Option {index}"),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::Model(index)),
+            search_value: None,
+        })
+        .collect();
+    let nine = ModalListState::new(nine, None);
+    assert!(nine.numbered_shortcuts());
+    assert_eq!(nine.shortcut_number(8), Some(9));
+
+    let mut ten = (0..10)
+        .map(|index| InlineListItem {
+            title: format!("Option {index}"),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::Model(index)),
+            search_value: None,
+        })
+        .collect::<Vec<_>>();
+    ten.push(InlineListItem {
+        title: String::new(),
+        subtitle: None,
+        badge: None,
+        indent: 0,
+        selection: None,
+        search_value: None,
+    });
+    let ten = ModalListState::new(ten, None);
+    assert!(!ten.numbered_shortcuts(), "crowded lists offer no digits");
+}
+
+fn wizard_step_with_options(count: usize) -> WizardStep {
+    WizardStep {
+        title: "Q1".to_owned(),
+        question: "Pick".to_owned(),
+        items: (0..count)
+            .map(|index| InlineListItem {
+                title: format!("Choice {}", index + 1),
+                selection: Some(InlineListSelection::AskUserChoice {
+                    tab_id: "q1".to_owned(),
+                    choice_id: format!("c{index}"),
+                    text: None,
+                }),
+                ..base_item(&format!("Choice {}", index + 1))
+            })
+            .collect(),
+        completed: false,
+        answer: None,
+        allow_freeform: false,
+        freeform_label: None,
+        freeform_placeholder: None,
+        freeform_default: None,
+    }
+}
+
+#[test]
+fn wizard_numbered_shortcuts_require_multistep_searchless_capped_step() {
+    let multistep = WizardModalState::new(
+        "Pick".to_owned(),
+        vec![wizard_step_with_options(2)],
+        0,
+        None,
+        WizardModalMode::MultiStep,
+    );
+    assert!(multistep.numbered_shortcuts());
+
+    let crowded = WizardModalState::new(
+        "Pick".to_owned(),
+        vec![wizard_step_with_options(10)],
+        0,
+        None,
+        WizardModalMode::MultiStep,
+    );
+    assert!(!crowded.numbered_shortcuts(), "crowded steps offer no digits");
+
+    let tabbed = WizardModalState::new(
+        "Pick".to_owned(),
+        vec![wizard_step_with_options(2)],
+        0,
+        None,
+        WizardModalMode::TabbedList,
+    );
+    assert!(!tabbed.numbered_shortcuts(), "tabbed wizards navigate by tabs, not digits");
+
+    let searching = WizardModalState::new(
+        "Pick".to_owned(),
+        vec![wizard_step_with_options(2)],
+        0,
+        Some(InlineListSearchConfig { label: "Search".to_owned(), placeholder: None }),
+        WizardModalMode::MultiStep,
+    );
+    assert!(!searching.numbered_shortcuts(), "digits filter while search is open");
+}
+
+#[test]
+fn wizard_crowded_step_swallows_digits_instead_of_submitting() {
+    let mut wizard = WizardModalState::new(
+        "Pick".to_owned(),
+        vec![wizard_step_with_options(10)],
+        0,
+        None,
+        WizardModalMode::MultiStep,
+    );
+    let result = wizard.handle_key_event(&make_key(KeyCode::Char('1')), ModalKeyModifiers::default());
+
+    assert!(matches!(result, ModalListKeyResult::HandledNoRedraw), "dead digits must not submit");
+}
+
+#[test]
+fn wizard_tabbed_list_leaves_digits_unbound() {
+    let mut wizard = WizardModalState::new(
+        "Pick".to_owned(),
+        vec![wizard_step_with_options(2)],
+        0,
+        None,
+        WizardModalMode::TabbedList,
+    );
+    let result = wizard.handle_key_event(&make_key(KeyCode::Char('1')), ModalKeyModifiers::default());
+
+    assert!(matches!(result, ModalListKeyResult::NotHandled));
+}
+
 #[test]
 fn list_modal_control_navigation_moves_selection() {
     let mut modal = sample_list_modal();

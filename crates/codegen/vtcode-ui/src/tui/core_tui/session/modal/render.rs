@@ -148,6 +148,7 @@ struct ModalListPanelModel<'a> {
     list: &'a mut ModalListState,
     styles: &'a ModalRenderStyles,
     inline_editor: Option<&'a ModalInlineEditor>,
+    show_numbers: bool,
 }
 
 impl SharedListWidgetModel for ModalListPanelModel<'_> {
@@ -165,6 +166,9 @@ impl SharedListWidgetModel for ModalListPanelModel<'_> {
         let selection_gutter = selection_padding_width() as u16;
         let content_width = width.saturating_sub(selection_gutter) as usize;
         let selected_visible = self.list.list_state.selected();
+        // Gate once: per-row numbers stay cheap so crowded lists do not
+        // pay a quadratic scan for badges they will not show.
+        let numbered = self.show_numbers && self.list.numbered_shortcuts();
         self.list
             .visible_indices
             .iter()
@@ -172,6 +176,7 @@ impl SharedListWidgetModel for ModalListPanelModel<'_> {
             .map(|(visible_index, &item_index)| {
                 let is_selected = selected_visible == Some(visible_index)
                     && self.list.items.get(item_index).is_some_and(|i| i.selection.is_some());
+                let shortcut_number = numbered.then(|| self.list.shortcut_number(visible_index)).flatten();
                 let lines = modal_list_item_lines(
                     self.list,
                     visible_index,
@@ -180,6 +185,7 @@ impl SharedListWidgetModel for ModalListPanelModel<'_> {
                     content_width,
                     self.inline_editor,
                     is_selected,
+                    shortcut_number,
                 );
                 (
                     InlineListRow {
@@ -218,13 +224,14 @@ pub fn render_modal_list(
     styles: &ModalRenderStyles,
     footer_hint: Option<&str>,
     inline_editor: Option<&ModalInlineEditor>,
+    show_numbers: bool,
 ) -> Rect {
     if area.width == 0 || area.height == 0 {
         return area;
     }
 
     let summary = modal_list_summary_line(list, styles, footer_hint);
-    let mut panel_model = ModalListPanelModel { list, styles, inline_editor };
+    let mut panel_model = ModalListPanelModel { list, styles, inline_editor, show_numbers };
     let sections = SharedListPanelSections {
         header: Vec::new(),
         info: summary.into_iter().collect(),
@@ -473,11 +480,19 @@ pub(crate) fn render_wizard_modal_body(
         idx += 1;
     }
 
+    let wizard_numbers = wizard.numbered_shortcuts();
     if let Some(step) = wizard.steps.get_mut(wizard.current_step)
         && idx < chunks.len()
     {
-        outcome.list_area =
-            Some(render_modal_list(frame, chunks[idx], &mut step.list, styles, None, inline_editor.as_ref()));
+        outcome.list_area = Some(render_modal_list(
+            frame,
+            chunks[idx],
+            &mut step.list,
+            styles,
+            None,
+            inline_editor.as_ref(),
+            wizard_numbers,
+        ));
     }
 
     outcome
@@ -661,6 +676,7 @@ pub(crate) fn render_modal_body(
                         context.styles,
                         context.footer_hint,
                         None,
+                        context.search.is_none(),
                     ));
                 }
             }
@@ -1118,6 +1134,7 @@ pub fn modal_list_item_lines(
     content_width: usize,
     inline_editor: Option<&ModalInlineEditor>,
     is_selected: bool,
+    shortcut_number: Option<usize>,
 ) -> Vec<Line<'static>> {
     let item = match list.items.get(item_index) {
         Some(i) => i,
@@ -1156,6 +1173,14 @@ pub fn modal_list_item_lines(
     let mut primary_spans = Vec::new();
     if gutter_width > 0 {
         primary_spans.push(Span::styled(cursor_indicator, cursor_style));
+    }
+
+    // Numbered shortcut badge (`1.`–`9.`) for search-less modals, mirroring
+    // the digit keys that jump to each option. Non-selectable rows (dividers,
+    // separators) carry no number.
+    if let Some(number) = shortcut_number {
+        primary_spans.push(Span::styled(format!("{number}."), styles.detail));
+        primary_spans.push(Span::raw(" "));
     }
 
     if !indent.is_empty() {
@@ -1405,6 +1430,111 @@ mod tests {
         // tokenizer output instead of gaining a marker span.
         let second = lines.iter().find(|line| line_text(line).contains("bye")).expect("second row");
         assert_ne!(second.spans[1].content.as_ref(), "$ ", "got: {second:?}");
+    }
+
+    fn numbered_option(title: &str) -> InlineListItem {
+        InlineListItem {
+            title: title.to_string(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::SlashCommand(title.to_string())),
+            search_value: None,
+        }
+    }
+
+    fn separator_option() -> InlineListItem {
+        InlineListItem {
+            title: String::new(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: None,
+            search_value: None,
+        }
+    }
+
+    #[test]
+    fn modal_list_item_numbers_skip_non_selectable_rows() {
+        let styles = modal_render_styles();
+        let list = ModalListState::new(
+            vec![
+                numbered_option("Approve once"),
+                numbered_option("Allow for session"),
+                separator_option(),
+                numbered_option("Deny once"),
+            ],
+            None,
+        );
+
+        let first_lines: Vec<String> = (0..4)
+            .map(|visible_index| {
+                let item_index = list.visible_indices[visible_index];
+                let number = list.shortcut_number(visible_index);
+                let rows = modal_list_item_lines(&list, visible_index, item_index, &styles, 60, None, false, number);
+                line_text(&rows[0])
+            })
+            .collect();
+        assert!(
+            first_lines[0].contains("1.") && first_lines[0].contains("Approve once"),
+            "got: {:?}",
+            first_lines[0]
+        );
+        assert_eq!(
+            line_text(
+                &modal_list_item_lines(
+                    &list,
+                    0,
+                    list.visible_indices[0],
+                    &styles,
+                    60,
+                    None,
+                    false,
+                    list.shortcut_number(0)
+                )[0]
+            )
+            .trim_start(),
+            "1. Approve once"
+        );
+        assert!(
+            first_lines[1].contains("2.") && first_lines[1].contains("Allow for session"),
+            "got: {:?}",
+            first_lines[1]
+        );
+        assert!(!first_lines[2].contains("3."), "separator must carry no number, got: {:?}", first_lines[2]);
+        assert!(first_lines[3].contains("3.") && first_lines[3].contains("Deny once"), "got: {:?}", first_lines[3]);
+    }
+
+    #[test]
+    fn modal_list_item_numbers_hidden_when_disabled() {
+        let styles = modal_render_styles();
+        let list = ModalListState::new(vec![numbered_option("Approve once"), numbered_option("Deny once")], None);
+
+        for visible_index in 0..2 {
+            let item_index = list.visible_indices[visible_index];
+            let rows = modal_list_item_lines(&list, visible_index, item_index, &styles, 60, None, false, None);
+            let text = line_text(&rows[0]);
+            assert!(!text.contains("1.") && !text.contains("2."), "numbers must stay hidden, got: {text}");
+        }
+    }
+
+    #[test]
+    fn modal_list_item_numbers_hidden_on_crowded_lists() {
+        // Ten selectables fail the shared gate: no row may show a number,
+        // or digits would advertise shortcuts that routing swallows.
+        let styles = modal_render_styles();
+        let items: Vec<InlineListItem> = (1..=10).map(|number| numbered_option(&format!("Option {number}"))).collect();
+        let list = ModalListState::new(items, None);
+        assert!(!list.numbered_shortcuts());
+
+        for visible_index in 0..10 {
+            let item_index = list.visible_indices[visible_index];
+            let number = list.shortcut_number(visible_index);
+            assert_eq!(number, None, "crowded row {visible_index} must have no number");
+            let rows = modal_list_item_lines(&list, visible_index, item_index, &styles, 60, None, false, number);
+            let text = line_text(&rows[0]);
+            assert!(!text.contains("1."), "dead number leaked on crowded row, got: {text}");
+        }
     }
 
     #[test]

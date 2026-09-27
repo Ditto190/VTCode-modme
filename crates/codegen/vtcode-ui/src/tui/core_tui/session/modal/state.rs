@@ -232,6 +232,30 @@ impl ModalState {
             // swallow the legacy toggle chord so it never leaks into the
             // composer behind the modal.
             KeyCode::Char('d') | KeyCode::Char('D') if modifiers.alt => ModalListKeyResult::HandledNoRedraw,
+            // Numbered shortcuts (1-9) for search-less modals: two-step
+            // select, Enter confirms. The search block above already consumed
+            // character keys while a search box is open, so reaching here
+            // with a digit means no search is active; the guard restates it
+            // for robustness. Every digit outcome is consumed so shortcuts
+            // never leak into the composer behind the modal.
+            KeyCode::Char(ch)
+                if !modifiers.control && !modifiers.alt && !modifiers.command && self.search.is_none() =>
+            {
+                if !ch.is_ascii_digit() {
+                    ModalListKeyResult::NotHandled
+                } else if matches!(ch, '1'..='9')
+                    && list.numbered_shortcuts()
+                    && list.select_nth_selectable((ch as u8 - b'1') as usize)
+                {
+                    if let Some(event) = selection_change_event(list, previous_selection) {
+                        ModalListKeyResult::Emit(event)
+                    } else {
+                        ModalListKeyResult::Redraw
+                    }
+                } else {
+                    ModalListKeyResult::HandledNoRedraw
+                }
+            }
             KeyCode::Up => {
                 if modifiers.command {
                     list.select_first();
@@ -706,6 +730,39 @@ impl ModalListState {
         false
     }
 
+    /// Max numbered shortcut: digit keys 1-9 jump to the nth visible option.
+    pub(super) const MAX_NUMBERED_SHORTCUT: usize = 9;
+
+    /// Whether digit shortcuts are offered for this list: a scannable number
+    /// of visible selectable options. Key routing ANDs the modal search
+    /// state (digits filter while a search box is open); render callers
+    /// pass their own search knowledge — one shared count gate so the two
+    /// sides can never disagree.
+    pub(super) fn numbered_shortcuts(&self) -> bool {
+        let count = self.visible_selectable_count();
+        count > 0 && count <= Self::MAX_NUMBERED_SHORTCUT
+    }
+
+    /// 1-based shortcut number for a visible row: its position among visible
+    /// selectable options, skipping dividers and other non-selectable rows.
+    /// Returns `None` unless the whole list qualifies (`numbered_shortcuts`),
+    /// so crowded lists never show dead numbers. Mirrors
+    /// `select_nth_selectable` so badges and digit keys agree.
+    pub(super) fn shortcut_number(&self, visible_pos: usize) -> Option<usize> {
+        if !self.numbered_shortcuts() {
+            return None;
+        }
+        let &item_index = self.visible_indices.get(visible_pos)?;
+        self.items.get(item_index)?.selection.as_ref()?;
+        let ordinal = self
+            .visible_indices
+            .iter()
+            .take(visible_pos + 1)
+            .filter(|&&idx| self.items.get(idx).is_some_and(|item| item.selection.is_some()))
+            .count();
+        (ordinal <= Self::MAX_NUMBERED_SHORTCUT).then_some(ordinal)
+    }
+
     fn page_up(&mut self) {
         let step = self.page_step();
         if step == 0 {
@@ -946,6 +1003,20 @@ impl ModalListState {
 }
 
 impl WizardModalState {
+    /// Whether digit shortcuts submit the current step's option: MultiStep
+    /// wizards only, no search box, and a scannable option count.
+    /// TabbedList navigates by tabs, so its digits stay unbound — and the
+    /// badge renderer uses this same gate, so unbound digits never show
+    /// dead numbers.
+    pub(crate) fn numbered_shortcuts(&self) -> bool {
+        self.mode == WizardModalMode::MultiStep
+            && self.search.is_none()
+            && self
+                .steps
+                .get(self.current_step)
+                .is_some_and(|step| step.list.numbered_shortcuts())
+    }
+
     /// Create a new wizard modal state from wizard steps
     pub(crate) fn new(
         title: String,
@@ -1108,8 +1179,11 @@ impl WizardModalState {
             && ch.is_ascii_digit()
             && ch != '0'
         {
+            // Same scannability gate as plain modals: crowded steps offer
+            // no digits rather than dead ones.
             let target_index = ch.to_digit(10).unwrap_or(1).saturating_sub(1) as usize;
-            if let Some(step) = self.steps.get_mut(self.current_step)
+            if self.numbered_shortcuts()
+                && let Some(step) = self.steps.get_mut(self.current_step)
                 && step.list.select_nth_selectable(target_index)
             {
                 return self.submit_current_selection();
