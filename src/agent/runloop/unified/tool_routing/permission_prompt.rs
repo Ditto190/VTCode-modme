@@ -316,6 +316,22 @@ fn shell_command_preview_lines(tool_name: &str, tool_args: Option<&Value>) -> Op
     (!command.is_empty()).then(|| command.lines().map(str::to_string).collect())
 }
 
+/// Sandbox posture row for shell approvals (`Environment: ...`), mirroring
+/// the reference approval UX. Labels describe the *requested* posture only —
+/// the execution boundary enforces the policy — so `UseDefault` never
+/// claims a sandbox this layer cannot verify. `None` for non-shell tools,
+/// which have no shell execution environment to review.
+fn shell_environment_row(tool_name: &str, tool_args: Option<&Value>) -> Option<String> {
+    let args = shell_run_args(tool_name, tool_args)?;
+    let posture = match parse_shell_sandbox_permissions(args) {
+        CoreSandboxPermissions::UseDefault => "default policy",
+        CoreSandboxPermissions::WithAdditionalPermissions => "default policy + extra grants",
+        CoreSandboxPermissions::RequireEscalated => "escalated privileges",
+        CoreSandboxPermissions::BypassSandbox => "no sandbox",
+    };
+    Some(format!("Environment: {posture}"))
+}
+
 /// Full, untruncated URL for web-fetch approval modals. The modal description
 /// must show the exact fetch target (not just the domain) so approval is
 /// informed. No truncation is applied here; modal wrapping handles width.
@@ -361,12 +377,13 @@ fn format_command_preview_line(line: &str) -> String {
 
 /// Full command lines for the approval modal. Shown lines are never
 /// truncated, so the quote-aware `shell_syntax_segments` highlighter (fed
-/// by the tree-sitter-bash safety pipeline) sees intact tokens. Only the
-/// row count is bounded: beyond `MAX_COMMAND_PREVIEW_LINES` the middle
-/// collapses behind an explicit omission count, keeping head and tail
-/// reviewable inside the modal viewport. Mirrors `preview_full_command`
-/// for transcript `• Ran` headers (821a9c35a) and the untruncated
-/// web-fetch URL (99cc2fdfe).
+/// by the tree-sitter-bash safety pipeline) sees intact tokens. The first
+/// row carries a `$ ` shell marker (rendered dimmed by the modal) so the
+/// block reads as a command to execute. Only the row count is bounded:
+/// beyond `MAX_COMMAND_PREVIEW_LINES` the middle collapses behind an
+/// explicit omission count, keeping head and tail reviewable inside the
+/// modal viewport. Mirrors `preview_full_command` for transcript `• Ran`
+/// headers (821a9c35a) and the untruncated web-fetch URL (99cc2fdfe).
 fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
     let visible: Vec<String> = command_lines
         .iter()
@@ -374,7 +391,9 @@ fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
         .map(|line| format_command_preview_line(line))
         .collect();
     if visible.len() <= MAX_COMMAND_PREVIEW_LINES {
-        return visible;
+        let mut preview = visible;
+        prefix_shell_marker(preview.first_mut());
+        return preview;
     }
     const HEAD_LINES: usize = 5;
     const TAIL_LINES: usize = 2;
@@ -383,7 +402,19 @@ fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
     preview.extend(visible.iter().take(HEAD_LINES).cloned());
     preview.push(format!("… +{hidden} more lines (full command runs on approval)"));
     preview.extend(visible.iter().skip(visible.len().saturating_sub(TAIL_LINES)).cloned());
+    prefix_shell_marker(preview.first_mut());
     preview
+}
+
+/// Prefix the first preview row with the `$ ` shell marker, inside the
+/// backtick code fence so the modal renderer keeps highlighting the body.
+/// Index-free: rows that do not open with a backtick are left untouched.
+fn prefix_shell_marker(first_row: Option<&mut String>) {
+    if let Some(row) = first_row
+        && let Some(body) = row.strip_prefix('`')
+    {
+        *row = format!("`$ {body}");
+    }
 }
 
 /// Friendly label for the agent's goal in the permission popup. The modal
@@ -501,10 +532,20 @@ fn tool_args_diff_preview(tool_name: &str, tool_args: Option<&Value>) -> Option<
     Some(preview)
 }
 
+/// Overlay title for the approval popup. Shell commands ask the plain
+/// question directly; every other tool keeps the generic title.
+fn tool_permission_title(has_command_preview: bool) -> &'static str {
+    if has_command_preview {
+        "Would you like to run the following command?"
+    } else {
+        "Tool Permission Required"
+    }
+}
+
 /// Intro rows for the approval popup, written as plain permission language.
-/// Shell commands get a dedicated command block below, so their truncated
-/// action summary is omitted. Other tools reuse the human-friendly action
-/// summary directly in the intro sentence.
+/// Shell commands need no intro sentence: the overlay title already asks
+/// the question and the command block follows. Other tools reuse the
+/// human-friendly action summary directly in the intro sentence.
 fn tool_permission_header_lines(
     tool_name: &str,
     display_name: &str,
@@ -513,7 +554,7 @@ fn tool_permission_header_lines(
 ) -> Vec<String> {
     let mut lines = Vec::new();
     if has_command_preview {
-        lines.push("The agent wants to run a shell command and needs your approval.".to_string());
+        // Title carries the question; fall through to the source row only.
     } else if !display_name.trim().is_empty() {
         let trimmed = display_name.trim();
         // `describe_tool_action` prefixes MCP tools with "MCP " (e.g. "MCP Search
@@ -627,7 +668,11 @@ fn build_tool_permission_options(
             PersistentApprovalTarget::ToolLevel => "this tool".to_string(),
             PersistentApprovalTarget::ExactInvocation { display_label }
             | PersistentApprovalTarget::PrefixRule { display_label, .. } => {
-                vtcode_commons::modal_hints::truncate_modal_text(display_label, MAX_APPROVAL_LABEL_CHARS)
+                // Middle-truncation keeps both the executable prefix and the
+                // trailing flags/destinations that can change what is
+                // remembered — head-truncation would hide the dangerous
+                // suffix behind the option-row budget.
+                vtcode_commons::formatting::truncate_middle(display_label, MAX_APPROVAL_LABEL_CHARS)
             }
         };
         let subtitle = format!("Remember {short_label} in this workspace");
@@ -722,12 +767,17 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
     }
     let prompt_kind = tool_permission_prompt_kind(tool_name);
     let command_preview = shell_command_preview_lines(tool_name, tool_args);
+    let has_command_preview = command_preview.is_some();
     let diff_preview = command_preview
         .is_none()
         .then(|| tool_args_diff_preview(tool_name, tool_args))
         .flatten();
     let mut description_lines =
-        tool_permission_header_lines(tool_name, display_name, command_preview.is_some(), source_thread_label);
+        tool_permission_header_lines(tool_name, display_name, has_command_preview, source_thread_label);
+
+    if has_command_preview && let Some(environment_row) = shell_environment_row(tool_name, tool_args) {
+        description_lines.push(environment_row);
+    }
 
     if let Some(url) = web_fetch_approval_url(tool_name, tool_args) {
         let url_line = format!("URL: {url}");
@@ -787,7 +837,7 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
         handle,
         session,
         TransientRequest::List(ListOverlayRequest {
-            title: "Tool Permission Required".to_string(),
+            title: tool_permission_title(has_command_preview).to_string(),
             lines: description_lines,
             footer_hint: Some(navigation_hint),
             items: options,
@@ -947,8 +997,8 @@ mod tests {
         extract_shell_approval_justification, extract_shell_approval_scope_signature, extract_shell_command_text,
         extract_shell_persistent_approval_prefix_rule, format_command_preview_lines, lowercase_first_action,
         push_capped_context_line, render_shell_persistent_approval_prefix_entry, shell_allows_persistent_decisions,
-        shell_command_preview_lines, shell_permission_cache_suffix, tool_permission_header_lines,
-        tool_permission_prompt_kind, truncate_arg_preview,
+        shell_command_preview_lines, shell_environment_row, shell_permission_cache_suffix,
+        tool_permission_header_lines, tool_permission_prompt_kind, tool_permission_title, truncate_arg_preview,
     };
     use crate::agent::runloop::unified::tool_routing::shell_approval::PersistentApprovalTarget;
 
@@ -1254,9 +1304,21 @@ mod tests {
     }
 
     #[test]
-    fn shell_header_uses_permission_intro_without_tool_jargon() {
+    fn shell_header_omits_intro_because_title_asks_the_question() {
         let lines = tool_permission_header_lines("exec_command", "python3 -c 'truncated…'", true, None);
-        assert_eq!(lines, vec!["The agent wants to run a shell command and needs your approval."]);
+        assert!(lines.is_empty(), "shell intro lives in the overlay title, got: {lines:?}");
+    }
+
+    #[test]
+    fn shell_header_keeps_source_row_without_intro() {
+        let lines = tool_permission_header_lines("exec_command", "cargo test", true, Some("agent-1"));
+        assert_eq!(lines, vec!["Requested from: agent-1"]);
+    }
+
+    #[test]
+    fn permission_title_asks_the_question_only_for_shell_commands() {
+        assert_eq!(tool_permission_title(true), "Would you like to run the following command?");
+        assert_eq!(tool_permission_title(false), "Tool Permission Required");
     }
 
     #[test]
@@ -1389,7 +1451,9 @@ mod tests {
 
     #[test]
     fn permanent_option_subtitle_truncates_long_command_label() {
-        let long_label = format!("command `python3 -c '{}'`", "y".repeat(200));
+        // Asymmetric head/tail: middle-truncation must keep the executable
+        // prefix AND the dangerous destination suffix.
+        let long_label = format!("command `python3 {}` --output ../../critical.txt", "x".repeat(200));
         let items = build_tool_permission_options(
             ToolPermissionPromptKind::Standard,
             Some(&PersistentApprovalTarget::ExactInvocation { display_label: long_label }),
@@ -1400,6 +1464,8 @@ mod tests {
             .expect("permanent option");
         let subtitle = permanent.subtitle.as_deref().expect("subtitle");
         assert!(subtitle.contains('…'), "long label should be truncated, got: {subtitle}");
+        assert!(subtitle.contains("python3"), "executable prefix missing from {subtitle:?}");
+        assert!(subtitle.contains("../../critical.txt"), "dangerous suffix missing from {subtitle:?}");
         assert!(subtitle.chars().count() <= "Remember  in this workspace".len() + super::MAX_APPROVAL_LABEL_CHARS + 8);
     }
 
@@ -1415,12 +1481,16 @@ mod tests {
             !first[0].contains('…') && !second[0].contains('…'),
             "full command must not truncate: {first:?} {second:?}"
         );
+        assert!(
+            first[0].starts_with("`$ ") && second[0].starts_with("`$ "),
+            "first row carries the shell marker: {first:?} {second:?}"
+        );
     }
 
     #[test]
     fn command_preview_preserves_short_unicode_command() {
         let preview = format_command_preview_lines(vec!["printf 'xin chào 世界'".to_string()]);
-        assert_eq!(preview, vec!["`printf 'xin chào 世界'`"]);
+        assert_eq!(preview, vec!["`$ printf 'xin chào 世界'`"]);
     }
 
     #[test]
@@ -1430,6 +1500,7 @@ mod tests {
         let command = "awk 'NR==FNR {if ($0 ~ /^#+ /) {h=$0; sub(/^#+ /, \"\", h); gsub(/ +$/, \"\", h)}}' README.md README.md; echo 'anchor-check exit=$?'";
         let preview = format_command_preview_lines(vec![command.to_string()]);
         assert_eq!(preview.len(), 1);
+        assert!(preview[0].starts_with("`$ awk"), "got: {:?}", preview[0]);
         assert!(!preview[0].contains('…'), "got: {:?}", preview[0]);
         for fragment in ["awk", "NR==FNR", "/^#+ /", "README.md", "anchor-check"] {
             assert!(preview[0].contains(fragment), "missing {fragment:?} in {:?}", preview[0]);
@@ -1444,7 +1515,7 @@ mod tests {
         let lines: Vec<String> = (1..=12).map(|line| format!("line {line} {}", "x".repeat(150))).collect();
         let preview = format_command_preview_lines(lines);
         assert_eq!(preview.len(), 8);
-        assert_eq!(preview[0], format!("`line 1 {}`", "x".repeat(150)));
+        assert_eq!(preview[0], format!("`$ line 1 {}`", "x".repeat(150)));
         assert_eq!(preview[4], format!("`line 5 {}`", "x".repeat(150)));
         assert_eq!(preview[5], "… +5 more lines (full command runs on approval)");
         assert_eq!(preview[6], format!("`line 11 {}`", "x".repeat(150)));
@@ -1472,7 +1543,39 @@ mod tests {
             String::new(),
             "echo beta".to_string(),
         ]);
-        assert_eq!(preview, vec!["`echo alpha`", "`echo beta`"]);
+        assert_eq!(preview, vec!["`$ echo alpha`", "`echo beta`"]);
+    }
+
+    #[test]
+    fn shell_environment_row_reports_requested_posture() {
+        let run = |extra: serde_json::Value| {
+            let mut args = serde_json::Map::new();
+            args.insert("action".to_string(), json!("run"));
+            args.insert("command".to_string(), json!("cargo check --locked"));
+            if let serde_json::Value::Object(map) = extra {
+                args.extend(map);
+            }
+            shell_environment_row(tools::UNIFIED_EXEC, Some(&serde_json::Value::Object(args)))
+        };
+        assert_eq!(run(json!({})).as_deref(), Some("Environment: default policy"));
+        assert_eq!(
+            run(json!({"sandbox_permissions": "require_escalated"})).as_deref(),
+            Some("Environment: escalated privileges")
+        );
+        assert_eq!(run(json!({"sandbox_permissions": "bypass_sandbox"})).as_deref(), Some("Environment: no sandbox"));
+        assert_eq!(
+            run(json!({"additional_permissions": {"fs_write": ["/tmp/demo.txt"]}})).as_deref(),
+            Some("Environment: default policy + extra grants")
+        );
+    }
+
+    #[test]
+    fn shell_environment_row_is_absent_for_non_shell_tools() {
+        assert!(
+            shell_environment_row(tools::UNIFIED_EXEC, Some(&json!({"action": "poll", "session_id": "run-1"})))
+                .is_none()
+        );
+        assert!(shell_environment_row("edit_file", Some(&json!({"path": "src/main.rs"}))).is_none());
     }
 
     #[test]

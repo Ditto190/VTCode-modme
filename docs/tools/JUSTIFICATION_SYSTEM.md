@@ -117,10 +117,15 @@ pub struct JustificationExtractor;
          Expected outcome and auto-approval suggestions remain in logs only.
          `format_for_dialog()` remains the verbose log/test format.
     d. Show approval dialog with:
-       - A plain permission intro (no `Tool:` jargon, no `COMMAND` / `WHY`
-         headers, no `│` gutter). Command tools show an indented,
-         syntax-highlighted command block; file tools show the diff preview
-         directly.
+       - A question-style overlay title for shell commands (`Would you
+         like to run the following command?`); other tools keep the
+         generic title. No `Tool:` jargon, no `COMMAND` / `WHY`
+         headers, no `│` gutter. Command tools show an indented,
+         `$ `-prefixed, syntax-highlighted command block; file tools
+         show the diff preview directly.
+       - An `Environment:` row for shell commands naming the requested
+         sandbox posture (`default policy`, `default policy + extra
+         grants`, `escalated privileges`, `no sandbox`).
        - The full shell command for command tools, without per-line
          truncation. Modal wrapping owns viewport width; scripts beyond
          8 lines collapse middle lines behind an explicit omission
@@ -130,7 +135,9 @@ pub struct JustificationExtractor;
          your approval.`)
        - Agent goal + risk level as subordinate context rows, with a fallback
          explanation when the agent provided no details
-       - Concise options; the permanent option truncates long command labels to 60 chars
+       - Concise options; the permanent option middle-truncates long
+         command labels to 60 chars so the executable prefix and the
+         trailing flags stay visible.
     e. Wait for user decision
    ↓
 5. Record decision (if learning enabled)
@@ -214,9 +221,9 @@ User requests: "Run the build and check for errors"
    - Extracted reason: "Need to verify code compiles before refactoring"
 4. Approval dialog shows (plain permission language, no COMMAND / WHY headers):
 
-    Tool Permission Required
-    The agent wants to run a shell command and needs your approval.
-        cargo build
+    Would you like to run the following command?
+    Environment: default policy
+        $ cargo build
       What the agent is trying to do: Need to verify code compiles before refactoring
       Risk: High
 

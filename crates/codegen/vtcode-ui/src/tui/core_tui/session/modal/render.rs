@@ -713,9 +713,9 @@ fn is_plan_overflow_row(trimmed: &str) -> bool {
 }
 
 /// Split `Label: value` metadata rows (`Risk`, `Source`, the permission-popup
-/// agent goal, …) so the label can render dimmed and the value in body style.
-/// Returns the trimmed label and value; `Tool:` stays a header and never
-/// matches here.
+/// agent goal, the approval sandbox posture, …) so the label can render
+/// dimmed and the value in body style. Returns the trimmed label and value;
+/// `Tool:` stays a header and never matches here.
 fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
     const CONTEXT_LABELS: &[&str] = &[
         "Reason",
@@ -727,6 +727,7 @@ fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
         "Source",
         "Summary",
         "Plan",
+        "Environment",
         "What the agent is trying to do",
         "Requested from",
     ];
@@ -791,6 +792,7 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
 
     let mut items: Vec<Vec<Line<'static>>> = Vec::new();
     let mut first_content_rendered = false;
+    let mut first_code_row_seen = false;
     let content_width = area.width.saturating_sub(2) as usize;
     let bullet_prefix = format!("{} ", ui::MODAL_INSTRUCTIONS_BULLET);
     let bullet_indent = " ".repeat(UnicodeWidthStr::width(bullet_prefix.as_str()));
@@ -826,7 +828,23 @@ fn modal_instruction_lines(area: Rect, instructions: &[String], styles: &ModalRe
             let command = code.trim();
             first_content_rendered = true;
             let mut spans = vec![Span::styled(code_gutter.to_string(), styles.divider)];
-            for segment in shell_syntax_segments(command, &shell_styles, true) {
+            // The approval command block opens with a `$ ` shell marker on
+            // its first row. Paint it dimmed and keep it out of the syntax
+            // tokenizer, where a lone `$` would highlight as a variable.
+            // Only the first code row is eligible, so a continuation line
+            // that literally starts with `$ ` keeps its token colors.
+            // Generic path: any modal's first `$ `-prefixed code fence gets
+            // this treatment; today only the approval preview emits one.
+            let (marker, body) = if !first_code_row_seen {
+                first_code_row_seen = true;
+                command.strip_prefix("$ ").map(|rest| ("$ ", rest)).unwrap_or(("", command))
+            } else {
+                ("", command)
+            };
+            if !marker.is_empty() {
+                spans.push(Span::styled(marker.to_string(), styles.detail));
+            }
+            for segment in shell_syntax_segments(body, &shell_styles, true) {
                 spans.push(Span::styled(segment.text, ratatui_style_from_inline(&segment.style, None)));
             }
             items.push(vec![Line::from(spans)]);
@@ -1356,6 +1374,40 @@ mod tests {
     }
 
     #[test]
+    fn modal_instruction_command_renders_shell_marker_as_own_span() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(Rect::new(0, 0, 80, 6), &["`$ cargo test --locked`".to_string()], &styles);
+
+        let command_line = lines
+            .iter()
+            .find(|line| line_text(line).contains("cargo"))
+            .expect("command row");
+        // Gutter + marker + at least command/option token segments.
+        assert!(command_line.spans.len() > 3, "marker must not swallow body tokens, got: {command_line:?}");
+        assert_eq!(command_line.spans[1].content.as_ref(), "$ ");
+        assert_eq!(line_text(command_line).trim_start(), "$ cargo test --locked");
+    }
+
+    #[test]
+    fn modal_instruction_shell_marker_applies_only_to_first_code_row() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 8),
+            &["`$ echo hi`".to_string(), "`$ echo bye`".to_string()],
+            &styles,
+        );
+
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+        assert_eq!(texts.len(), 2);
+        let first = lines.iter().find(|line| line_text(line).contains("hi")).expect("first row");
+        assert_eq!(first.spans[1].content.as_ref(), "$ ");
+        // A continuation line that literally starts with `$ ` keeps its
+        // tokenizer output instead of gaining a marker span.
+        let second = lines.iter().find(|line| line_text(line).contains("bye")).expect("second row");
+        assert_ne!(second.spans[1].content.as_ref(), "$ ", "got: {second:?}");
+    }
+
+    #[test]
     fn narrow_modal_keeps_command_tail_and_omission_evidence() {
         let styles = modal_render_styles();
         let lines = modal_instruction_lines(
@@ -1392,6 +1444,25 @@ mod tests {
         let text = line_text(risk_line);
         assert!(!text.contains('•'), "context row must not use bullet, got: {text}");
         assert!(risk_line.spans.len() > 1, "label and value should be separate spans");
+    }
+
+    #[test]
+    fn modal_instruction_environment_row_splits_label_and_value() {
+        let styles = modal_render_styles();
+        let lines = modal_instruction_lines(
+            Rect::new(0, 0, 80, 6),
+            &["Environment: default policy + extra grants".to_string()],
+            &styles,
+        );
+
+        let env_line = lines
+            .iter()
+            .find(|line| line_text(line).contains("extra grants"))
+            .expect("env row");
+        let text = line_text(env_line);
+        assert!(!text.contains('•'), "env row must not use bullet, got: {text}");
+        assert!(env_line.spans.len() > 1, "label and value should be separate spans");
+        assert!(env_line.spans.iter().any(|span| span.content.as_ref() == "Environment:"));
     }
 
     #[test]
