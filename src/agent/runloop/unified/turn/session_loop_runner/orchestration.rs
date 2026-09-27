@@ -96,7 +96,10 @@ fn persist_primary_agent(
 /// iteration may already have produced history (plan-approval handoff after a
 /// finished turn), so metrics/checkpoint run before `continue` instead of being
 /// skipped until the next successful turn.
-#[allow(clippy::too_many_arguments, reason = "turn-tail context is a flat bag of loop locals")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "turn-tail context is a flat bag of loop locals"
+)]
 async fn record_plan_selection_failure_tail(
     runtime: &mut AgentRuntime,
     session_archive: &mut Option<session_archive::SessionArchive>,

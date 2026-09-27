@@ -242,8 +242,14 @@ async fn read_only_primary_agents_hide_local_tools() {
     let plan_names = definition_names(agent.tool_definitions(true, &enabled_tools, "plan").unwrap());
     let build_names = definition_names(agent.tool_definitions(true, &enabled_tools, "build").unwrap());
 
+    // Duck is bash-denied, so only the direct read tools remain on the wire.
     assert_eq!(duck_names, vec![tools::LIST_FILES.to_string()]);
-    assert_eq!(plan_names, duck_names);
+    // Plan intentionally keeps `bash` permitted so read-only shell inspection
+    // (`rg`, `cat`, ...) stays advertised while planning; the planning dispatch
+    // gate blocks mutating commands at execution time. See
+    // `plan_agent_permissions` in vtcode-config.
+    assert!(plan_names.contains(&tools::LIST_FILES.to_string()));
+    assert!(plan_names.contains(&tools::EXEC_COMMAND.to_string()));
     let removed_tool = format!("switch_{}", "mode");
     assert!(!build_names.contains(&removed_tool));
     assert!(build_names.contains(&tools::LIST_FILES.to_string()));

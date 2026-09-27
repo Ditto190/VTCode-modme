@@ -262,7 +262,17 @@ enum ShellInvocationKind {
 /// handle the syntax, preserving the previous whole-string behavior.
 fn policy_segments(command_text: &str) -> Vec<String> {
     match crate::command_safety::shell_parser::parse_shell_commands(command_text) {
-        Ok(segments) if !segments.is_empty() => segments.into_iter().map(|argv| argv.join(" ")).collect(),
+        Ok(segments) if !segments.is_empty() => segments
+            .into_iter()
+            .map(|argv| {
+                // The shell parser keeps leading `KEY=value` assignments as
+                // words so intent/activity classification can inspect injection
+                // keys. For policy matching they are the command's environment,
+                // not its executable: strip them so `FOO=bar rg …` still matches
+                // the allow rule for `rg` (shared helper, single source of truth).
+                crate::tools::command_args::command_words_after_environment_prefix(&argv).join(" ")
+            })
+            .collect(),
         _ => vec![command_text.to_string()],
     }
 }
@@ -311,6 +321,33 @@ mod tests {
         let evaluator = CommandPolicyEvaluator::from_config(&config);
         assert!(evaluator.allows_text("cargo fmt"));
         assert!(evaluator.allows(&["cargo".into(), "check".into()]));
+    }
+
+    /// Environment-assignment prefixes are the command's environment, not its
+    /// executable: `FOO=bar rg …` / `IFS= read …` must still match the allow
+    /// rule for the real program. Regression guard for the shell parser keeping
+    /// `KEY=value` words so intent/activity classification can inspect them.
+    #[test]
+    fn environment_prefix_does_not_block_allow_rules() {
+        let prefix = CommandsConfig {
+            allow_list: vec!["rg".into(), "read".into(), "printf".into()],
+            ..Default::default()
+        };
+        let prefixed = CommandPolicyEvaluator::from_config(&prefix);
+        assert!(prefixed.allows(&["LANG=C".into(), "rg".into(), "foo".into()]));
+        assert!(prefixed.allows(&["IFS=".into(), "read".into(), "-r".into(), "line".into()]));
+        // An explicit shell wrapper carries the prefix inside its script.
+        assert!(prefixed.allows_text("LANG=C rg foo"));
+
+        // A denied program stays denied even behind an assignment prefix.
+        let deny = CommandsConfig {
+            allow_list: vec!["rg".into()],
+            deny_list: vec!["rm".into()],
+            ..Default::default()
+        };
+        let denying = CommandPolicyEvaluator::from_config(&deny);
+        assert!(denying.allows(&["LANG=C".into(), "rg".into()]));
+        assert!(!denying.allows(&["FOO=1".into(), "rm".into(), "-rf".into(), "/".into()]));
     }
 
     #[test]
