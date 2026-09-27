@@ -1,14 +1,64 @@
 ---
 feature: risk-audit-deferred-items
-status: in-progress
+status: delivered
 updated: 2026-09-27
 branch: fix/risk-audit-deferred
-commits: 
+commits: f10535ad1..0e9155b0b
 ---
 
 # Risk-Audit Deferred Items
 
 ## Report
+
+**What was built** — Closed the four open risk-audit deferred items (A4, C2, C3,
+model-catalog) on `fix/risk-audit-deferred`.
+
+1. **A4 env-value injection.** `environment_prefix_has_injection_keys` in
+   `command_args.rs` inspects `env KEY=value` / bare `KEY=value` prefixes for a
+   denylist of config/loader/interpreter injection keys (`GIT_CONFIG_*`,
+   `LD_PRELOAD`, `BASH_ENV`, `NODE_OPTIONS`, …) plus the `GIT_CONFIG_KEY_` /
+   `GIT_CONFIG_VALUE_` families. Wired into `has_unsafe_readonly_options` so
+   every readonly/activity path rejects those commands. Tree-sitter extraction
+   now keeps `variable_assignment` and `concatenation` spans so bare
+   `NODE_OPTIONS='…'` prefixes reach the scanner (they were previously dropped).
+2. **C2 turn tail.** Extracted `complete_turn_persistence_tail` (metrics →
+   session checkpoint → memory envelope) into `turn_tail.rs`. All four
+   `select_approved_plan_execution_agent` failure arms run it before `continue`;
+   the post-turn arm passes the real `turn_diagnostics` / elapsed / history
+   bytes.
+3. **C3 notifications.** Vendored `mac-notification-sys` 0.6.15 under
+   `patches/mac-notification-sys` with an explicit `Unset`/`Set`/`Failed` state
+   instead of `Once`: failed setup is retryable, success is idempotent, and
+   `ensure_application_set` does not fall through to AppleScript after failure.
+   The vtcode wrapper calls `set_application` on every send (no failure cache).
+4. **Model catalog.** `supported_models_include_current_reasoning_models` is
+   pinned to the pruned catalog: `O3`/`O4_MINI` stay out of `REASONING_MODELS`
+   (remap constants only).
+
+**Verification** —
+- `cargo nextest run -p vtcode-core -E 'test(env_value_injection) or test(env_prefix_injection) or test(readonly)'` — PASS 45/45
+- `cargo nextest run -p vtcode-llm -E 'test(supported_models_include_current_reasoning_models)'` — PASS 1/1
+- `cargo nextest run -p vtcode-core --features desktop-notifications -E 'test(macos_notification)'` — PASS 2/2
+- `cargo nextest run -p vtcode-safety` — PASS 278/278
+- `cargo nextest run -p vtcode -E 'test(session_loop_runner)'` — PASS 81/81
+- `cargo test --manifest-path patches/mac-notification-sys/Cargo.toml --lib` — PASS 19/19
+- `cargo clippy -p vtcode -p vtcode-core -p vtcode-safety -p vtcode-llm --tests -- -D warnings` — PASS
+- Independent review of `f10535ad1..934a79668` found 1 high (MutexGuard held
+  across re-lock in `ensure_application_set`) and 1 medium (fresh_context Err
+  arm skipped the tail). Both fixed in `0e9155b0b`; targeted suites re-ran green.
+
+**Journey log** —
+- Tree-sitter drops bare `KEY=value` from command words (`variable_assignment` /
+  `concatenation` nodes), so the env scanner never saw the A4 vector until
+  extraction kept those spans. `env KEY=value` worked earlier only because `env`
+  receives the assignment as an argument word.
+- `match *lock_application_state()` keeps the `MutexGuard` temporary alive for
+  the whole match — calling `set_application` from the `Unset` arm deadlocks on
+  the same mutex. Drop the guard before re-entering.
+- The spec counted three selection-failure sites; the loop has four Err arms
+  because `fresh_context` splits one. Enumerate arms, not call sites.
+- Model-catalog "flake" was a hard fail: the prune dropped `O3`/`O4_MINI` from
+  `REASONING_MODELS` while the test still asserted the old comment.
 
 ## [S1] Problem
 
@@ -134,10 +184,10 @@ Pin `supported_models_include_current_reasoning_models` to the pruned catalog:
 - Unrelated uncommitted TUI work sitting on `main`.
 
 ## Tasks
-- [ ] T1: Add `environment_prefix_has_injection_keys` and deny readonly/activity classification when it fires — acceptance: `env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=x git status` and `LD_PRELOAD=evil.so ls` are not readonly; `LANG=C rg foo` and `FOO=bar git status` remain readonly (covers: S2.A)
-- [ ] T2: Adversarial regression tests for env-value injection in `tool_intent/readonly.rs` — acceptance: tests cover exact keys, `GIT_CONFIG_KEY_*`/`VALUE_*` prefixes, `env` vs bare prefixes, `env -u` non-assignment, and the benign-allow cases (covers: S2.A; depends: T1)
-- [ ] T3: Extract `complete_turn_persistence_tail` and call it from the three selection-failure sites with outcome `aborted` before `continue` — acceptance: a simulated selection failure still emits turn metrics and persists the session checkpoint; no hard session abort (covers: S2.B)
-- [ ] T4: Vendor patched `mac-notification-sys` under `third-party/mac-notification-sys` with retryable `set_application` and `[patch.crates-io]` — acceptance: unit test in the vendored crate shows failed setup can retry and second success returns Ok; workspace still builds with `desktop-notifications` (covers: S2.C)
-- [ ] T5: Point `ensure_macos_notification_application` at the retryable API (no permanent failure cache) — acceptance: macOS notification setup failure no longer poisons later sends; wrapper treats already-set as Ok (covers: S2.C; depends: T4)
-- [ ] T6: Pin `supported_models_include_current_reasoning_models` to the pruned catalog — acceptance: `cargo nextest run -p vtcode-llm -E 'test(supported_models_include_current_reasoning_models)'` passes (covers: S2.D)
-- [ ] T7: Record verification and journey in this document's Report — acceptance: Report has What was built / Verification / Journey log (covers: S1)
+- [x] T1: Add `environment_prefix_has_injection_keys` and deny readonly/activity classification when it fires — acceptance: `env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=x git status` and `LD_PRELOAD=evil.so ls` are not readonly; `LANG=C rg foo` and `FOO=bar git status` remain readonly (covers: S2.A)
+- [x] T2: Adversarial regression tests for env-value injection in `tool_intent/readonly.rs` — acceptance: tests cover exact keys, `GIT_CONFIG_KEY_*`/`VALUE_*` prefixes, `env` vs bare prefixes, `env -u` non-assignment, and the benign-allow cases (covers: S2.A; depends: T1)
+- [x] T3: Extract `complete_turn_persistence_tail` and call it from the selection-failure sites with outcome `aborted` before `continue` — acceptance: a selection failure still emits turn metrics and persists the session checkpoint; no hard session abort (covers: S2.B)
+- [x] T4: Vendor patched `mac-notification-sys` under `patches/mac-notification-sys` with retryable `set_application` and `[patch.crates-io]` — acceptance: unit test in the vendored crate shows failed setup can retry and second success returns Ok; workspace still builds with `desktop-notifications` (covers: S2.C)
+- [x] T5: Point `ensure_macos_notification_application` at the retryable API (no permanent failure cache) — acceptance: macOS notification setup failure no longer poisons later sends; wrapper treats already-set as Ok (covers: S2.C; depends: T4)
+- [x] T6: Pin `supported_models_include_current_reasoning_models` to the pruned catalog — acceptance: `cargo nextest run -p vtcode-llm -E 'test(supported_models_include_current_reasoning_models)'` passes (covers: S2.D)
+- [x] T7: Record verification and journey in this document's Report — acceptance: Report has What was built / Verification / Journey log (covers: S1)
