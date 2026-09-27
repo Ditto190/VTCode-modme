@@ -2213,7 +2213,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     tracing::warn!(%err, "Tracker auto-continue queue full; falling through to turn end");
                                     let _ = renderer.line(
                                         MessageStyle::Info,
-                                        "[i] Tracker auto-continue could not resume automatically; incomplete tracker steps remain. Type `continue` to resume remaining steps.",
+                                        if incomplete.is_empty() {
+                                            "[i] Blocked-end auto-continue could not resume automatically. Type `continue` to retry the request."
+                                        } else {
+                                            "[i] Tracker auto-continue could not resume automatically; incomplete tracker steps remain. Type `continue` to resume remaining steps."
+                                        },
                                     );
                                     tracker_auto_continue_exhausted = true;
                                     false
@@ -2228,7 +2232,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         if !budget_remaining {
                             let _ = renderer.line(
                                 MessageStyle::Info,
-                                "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume remaining steps.",
+                                if incomplete.is_empty() {
+                                    "[i] Blocked-end auto-continue budget exhausted. Type `continue` to retry the request."
+                                } else {
+                                    "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume remaining steps."
+                                },
                             );
                             tracker_auto_continue_exhausted = true;
                         }
