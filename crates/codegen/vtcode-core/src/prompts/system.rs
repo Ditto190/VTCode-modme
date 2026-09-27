@@ -1102,6 +1102,8 @@ mod tests {
         std::fs::write(workspace.path().join("src/lib.rs"), "pub fn main() {}\n").expect("write lib.rs");
 
         let mut config = VTCodeConfig::default();
+        // Pin Default: this gate covers the fuller profile with instructions.
+        config.agent.system_prompt_mode = SystemPromptMode::Default;
         config.agent.include_temporal_context = false;
         config.agent.include_working_directory = false;
         let base = compose_system_instruction_text(workspace.path(), Some(&config), None).await;

@@ -1053,6 +1053,16 @@ mod tests {
             total_with_mcp <= 8_000,
             "first-request token budget with MCP exceeded: {total_with_mcp} tokens; expected <= 8_000"
         );
+
+        // Explicit Default-mode profile must also stay inside the no-MCP
+        // ceiling when selected (S2-prompt).
+        let default_prompt = static_profile_prompt(SystemPromptMode::Default);
+        let total_default_mode =
+            default_prompt.len() / 4 + tool_schema_tokens + instruction_appendix_tokens + welcome_addendum_tokens;
+        assert!(
+            total_default_mode <= 6_000,
+            "Default-mode first-request budget exceeded: {total_default_mode} tokens; expected <= 6_000"
+        );
     }
 
     /// Cache-stability guard: building the same system prompt + Progressive
