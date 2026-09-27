@@ -301,6 +301,25 @@ fn read_markdown_summary(path: &Path, label: &str) -> Option<String> {
 /// far outside it.
 const ARTIFACT_FRESHNESS_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
+/// Whether `path` predates the freshness window of `not_before`.
+///
+/// Single source of the artifact staleness rule shared by the fresh readers
+/// and the memory-envelope constraints channel. Unreadable metadata counts as
+/// stale so a checked artifact never falls back to content of unknown age;
+/// `not_before == None` disables the check.
+pub fn artifact_is_stale(path: &Path, not_before: Option<SystemTime>) -> bool {
+    let Some(not_before) = not_before else {
+        return false;
+    };
+    let Some(modified) = fs::metadata(path).ok().and_then(|meta| meta.modified().ok()) else {
+        return true;
+    };
+    let stale_before = not_before
+        .checked_sub(ARTIFACT_FRESHNESS_GRACE)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    modified < stale_before
+}
+
 /// Read a markdown summary only when the file is at least as new as `not_before`.
 ///
 /// Workspace-global task artifacts outlive their session. A leftover fixture
@@ -308,14 +327,8 @@ const ARTIFACT_FRESHNESS_GRACE: std::time::Duration = std::time::Duration::from_
 /// Files within [`ARTIFACT_FRESHNESS_GRACE`] of `not_before` still count as
 /// live so a just-written handoff artifact is kept.
 fn read_markdown_summary_fresh(path: &Path, label: &str, not_before: Option<SystemTime>) -> Option<String> {
-    if let Some(not_before) = not_before {
-        let modified = fs::metadata(path).ok()?.modified().ok()?;
-        let stale_before = not_before
-            .checked_sub(ARTIFACT_FRESHNESS_GRACE)
-            .unwrap_or(SystemTime::UNIX_EPOCH);
-        if modified < stale_before {
-            return None;
-        }
+    if artifact_is_stale(path, not_before) {
+        return None;
     }
     read_markdown_summary(path, label)
 }

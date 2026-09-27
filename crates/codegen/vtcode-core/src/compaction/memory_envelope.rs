@@ -22,7 +22,7 @@ use crate::compaction::CompactionConfig;
 use crate::config::constants::tools as tool_names;
 use crate::context::history_files::{HistoryFileManager, messages_to_history_messages};
 use crate::core::agent::harness_artifacts::{
-    current_evaluation_path, current_spec_path, current_task_path, read_evaluation_summary_fresh,
+    artifact_is_stale, current_evaluation_path, current_spec_path, current_task_path, read_evaluation_summary_fresh,
     read_spec_summary_fresh, session_artifact_cutoff,
 };
 use crate::core::agent::steering::{
@@ -176,10 +176,18 @@ fn merge_applied_intent_ids(prior: &[String], updates: &[String]) -> Vec<String>
 
 fn extract_constraints_from_summary(text: Option<&str>) -> Vec<String> {
     text.into_iter()
-        .flat_map(|value| value.lines())
+        .flat_map(|value| value.split(" | "))
         .map(normalize_whitespace)
         .filter(|line| !line.is_empty())
         .filter_map(|line| {
+            let line = line.as_str();
+            // Artifact summaries join their lines as "Spec: - a | - b"; strip
+            // the label only when the payload keeps the bullet so ordinary
+            // "key: value" lines are never misread as constraint bullets.
+            let line = match line.split_once(": ") {
+                Some((_, rest)) if rest.starts_with("- ") || rest.starts_with("* ") => rest,
+                _ => line,
+            };
             if let Some(rest) = line.strip_prefix("- ") {
                 return Some(rest.trim().to_string());
             }
@@ -292,9 +300,13 @@ pub fn build_session_memory_envelope(
     };
     let merge = |prior: &[String], updates: &[String]| merge_recent_strings(prior, updates, MEMORY_LIST_LIMIT);
     // Constraints extracted from a dropped stale artifact must not re-enter via
-    // the prior envelope. When a live artifact file exists that channel is
-    // authoritative (fresh content or explicitly dropped).
-    let prior_constraints: &[String] = if spec_present || evaluation_present {
+    // the prior envelope: a present artifact that failed the freshness check
+    // resets the channel. Fresh artifacts (or no artifact files) keep the
+    // continuity merge of inherited constraints.
+    let artifact_channel_reset = (spec_present
+        && artifact_is_stale(&current_spec_path(workspace_root), artifact_cutoff))
+        || (evaluation_present && artifact_is_stale(&current_evaluation_path(workspace_root), artifact_cutoff));
+    let prior_constraints: &[String] = if artifact_channel_reset {
         &[]
     } else {
         pe.map(|e| e.constraints.as_slice()).unwrap_or(&[])
@@ -1587,6 +1599,85 @@ mod tests {
         assert_eq!(envelope.objective.as_deref(), Some("task-1"));
         assert!(envelope.verification_todo.contains(&"keep me".to_string()));
         assert!(envelope.verification_todo.contains(&"new item".to_string()));
+    }
+
+    #[test]
+    fn envelope_stale_artifact_resets_prior_constraints() {
+        let workspace = tempfile::tempdir().expect("tempdir");
+        let tasks_dir = workspace.path().join(".vtcode").join("tasks");
+        std::fs::create_dir_all(&tasks_dir).expect("tasks dir");
+        std::fs::create_dir_all(workspace.path().join(".vtcode").join("sessions").join("sess-stale"))
+            .expect("session dir anchors the artifact cutoff");
+        let spec_path = tasks_dir.join("current_spec.md");
+        std::fs::write(&spec_path, "# Spec\n- Do not touch prod config\n").expect("write stale spec");
+        let stale = std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 60 * 60);
+        let file = std::fs::File::options().write(true).open(&spec_path).expect("open");
+        file.set_modified(stale).expect("set mtime");
+
+        let prior = SessionMemoryEnvelope {
+            session_id: "sess-stale".to_string(),
+            constraints: vec!["Do not touch prod config".to_string(), "Keep user budget".to_string()],
+            ..Default::default()
+        };
+
+        let envelope = build_session_memory_envelope(
+            "sess-stale",
+            workspace.path(),
+            &[],
+            &[],
+            "summary".to_string(),
+            None,
+            Some(&prior),
+            &tracker_snapshot("continuing", "sess-stale", &["cargo check"]),
+            None,
+        );
+
+        assert!(envelope.spec_summary.is_none(), "stale spec must not describe the session");
+        assert!(
+            envelope.constraints.is_empty(),
+            "a stale artifact resets the constraints channel so its lines cannot re-enter: {:?}",
+            envelope.constraints
+        );
+    }
+
+    #[test]
+    fn envelope_fresh_artifact_merges_prior_constraints() {
+        let workspace = tempfile::tempdir().expect("tempdir");
+        let tasks_dir = workspace.path().join(".vtcode").join("tasks");
+        std::fs::create_dir_all(&tasks_dir).expect("tasks dir");
+        std::fs::create_dir_all(workspace.path().join(".vtcode").join("sessions").join("sess-fresh"))
+            .expect("session dir anchors the artifact cutoff");
+        std::fs::write(tasks_dir.join("current_spec.md"), "# Spec\n- Keep coverage at 70%\n")
+            .expect("write fresh spec");
+
+        let prior = SessionMemoryEnvelope {
+            session_id: "sess-fresh".to_string(),
+            constraints: vec!["Do not redesign the harness".to_string()],
+            ..Default::default()
+        };
+
+        let envelope = build_session_memory_envelope(
+            "sess-fresh",
+            workspace.path(),
+            &[],
+            &[],
+            "summary".to_string(),
+            None,
+            Some(&prior),
+            &tracker_snapshot("continuing", "sess-fresh", &["cargo check"]),
+            None,
+        );
+
+        assert!(
+            envelope.constraints.contains(&"Do not redesign the harness".to_string()),
+            "fresh artifacts keep the continuity merge of inherited constraints: {:?}",
+            envelope.constraints
+        );
+        assert!(
+            envelope.constraints.contains(&"Keep coverage at 70%".to_string()),
+            "fresh artifact constraints are extracted: {:?}",
+            envelope.constraints
+        );
     }
 
     #[test]
