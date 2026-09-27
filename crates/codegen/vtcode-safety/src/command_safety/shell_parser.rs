@@ -377,6 +377,23 @@ fn extract_command_from_node(node: tree_sitter::Node, source: &str) -> Option<Ve
             continue;
         }
 
+        // Leading `KEY=value` prefixes and concatenated assignment values
+        // (`NODE_OPTIONS='--require ./x'`) are part of the command's
+        // environment contract. Keep them as one word so intent/activity
+        // classification can inspect injection keys;
+        // `command_words_after_environment_prefix` still strips them before
+        // locating the executable. `concatenation` must use the full span
+        // text — its children are only the `NAME=` and quoted value pieces.
+        if matches!(child.kind(), "variable_assignment" | "concatenation") {
+            if let Ok(arg) = child.utf8_text(source.as_bytes()) {
+                let trimmed = arg.trim();
+                if !trimmed.is_empty() {
+                    command.push(trimmed.to_string());
+                }
+            }
+            continue;
+        }
+
         if matches!(
             child.kind(),
             "word" | "string" | "raw_string" | "ansi_c_string" | "simple_expansion" | "variable_expansion"

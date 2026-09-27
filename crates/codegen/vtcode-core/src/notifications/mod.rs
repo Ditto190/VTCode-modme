@@ -617,16 +617,13 @@ impl NotificationManager {
 
 #[cfg(all(target_os = "macos", feature = "desktop-notifications"))]
 fn ensure_macos_notification_application() -> Result<()> {
-    static APPLICATION: OnceLock<Result<(), String>> = OnceLock::new();
-
     // notify-rust otherwise asks mac-notification-sys to discover an app with
     // AppleScript, which triggers a macOS Automation permission dialog.
-    let result =
-        APPLICATION.get_or_init(|| notify_rust::set_application("com.apple.finder").map_err(|error| error.to_string()));
-    result
-        .as_ref()
-        .map_err(|error| anyhow::anyhow!("failed to configure macOS notification application: {error}"))?;
-    Ok(())
+    // `set_application` is idempotent after success and retryable after failure
+    // (patches/mac-notification-sys/PATCH.md). Call it on every send instead of
+    // caching a failure in `OnceLock` for the process lifetime.
+    notify_rust::set_application("com.apple.finder")
+        .map_err(|error| anyhow::anyhow!("failed to configure macOS notification application: {error}"))
 }
 
 #[cfg(all(target_os = "macos", feature = "desktop-notifications"))]

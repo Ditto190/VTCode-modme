@@ -180,6 +180,9 @@ exclude = [
 
 [patch.crates-io]
 crossterm = { path = "patches/crossterm" }
+# Patched mac-notification-sys 0.6.15: retryable set_application (see
+# patches/mac-notification-sys/PATCH.md).
+mac-notification-sys = { path = "patches/mac-notification-sys" }
 vtcode-diff = { path = "crates/common/vtcode-diff" }
 vtcode-commons = { path = "crates/common/vtcode-commons" }
 vtcode-acp = { path = "crates/codegen/vtcode-acp" }
