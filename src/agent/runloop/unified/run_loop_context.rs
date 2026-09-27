@@ -136,6 +136,15 @@ const TOOL_PREVIEW_METADATA_STRING_LIMIT: usize = 512;
 /// point; oversized or malformed payloads keep only the generic byte count.
 const TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES: usize = 128 * 1024;
 
+/// Minimal probe for the exhaustion marker. Decoding only the single control
+/// flag avoids materializing the full tool payload (`Value` IR) on every
+/// response when all we need is one bool.
+#[derive(serde::Deserialize)]
+struct PreviewBudgetExhaustedProbe {
+    #[serde(default)]
+    preview_budget_exhausted: Option<bool>,
+}
+
 impl ToolBudgetWarning {
     pub(crate) fn system_message(self) -> String {
         format!(
@@ -1055,9 +1064,9 @@ impl HarnessTurnState {
         // force a second unbounded JSON parse before the local limiter runs.
         let exhausted = content.len() <= TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES
             && content.contains("\"preview_budget_exhausted\"")
-            && serde_json::from_str::<serde_json::Value>(content)
+            && serde_json::from_str::<PreviewBudgetExhaustedProbe>(content)
                 .ok()
-                .and_then(|value| value.get("preview_budget_exhausted").and_then(serde_json::Value::as_bool))
+                .and_then(|probe| probe.preview_budget_exhausted)
                 == Some(true);
         if !exhausted {
             return false;
@@ -2372,6 +2381,26 @@ mod tests {
         let diagnostics = state.snapshot_turn_diagnostics(Default::default(), 0);
         assert!(diagnostics.model_visible_tool_preview_budget_exhausted);
         assert_eq!(diagnostics.suppressed_tool_previews, 2);
+    }
+
+    #[test]
+    fn upstream_preview_exhaustion_ignores_non_marker_payloads() {
+        let mut state = HarnessTurnState::new(TurnRunId("run-1".to_string()), TurnId("turn-1".to_string()), 32, 10, 1);
+        let cases = [
+            ("plain text is not JSON", "tool output without any marker"),
+            ("missing flag defaults to absent", r#"{"tool":"exec_command","exit_code":0}"#),
+            ("wrong-typed flag is not exhaustion", r#"{"preview_budget_exhausted":"true"}"#),
+            ("explicit false is not exhaustion", r#"{"preview_budget_exhausted":false}"#),
+            ("non-object JSON is not exhaustion", r#"["preview_budget_exhausted"]"#),
+        ];
+        for (name, content) in cases {
+            assert!(
+                !state.observe_upstream_preview_budget_exhaustion("call", content, TURN_PREVIEW_BUDGET_BYTES),
+                "{name} must not latch exhaustion"
+            );
+        }
+        assert!(!state.model_visible_preview_budget_exhausted());
+        assert_eq!(state.suppressed_tool_previews, 0);
     }
 
     #[test]

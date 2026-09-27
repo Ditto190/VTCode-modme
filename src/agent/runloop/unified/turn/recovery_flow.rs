@@ -181,8 +181,7 @@ pub(crate) async fn execute_recovery_prompt(
     ctrl_c_state: &Arc<CtrlCState>,
     ctrl_c_notify: &Arc<Notify>,
 ) -> Result<Value> {
-    let parsed: RecoveryPromptArgs =
-        serde_json::from_value(args.clone()).context("Invalid recovery prompt arguments")?;
+    let parsed = RecoveryPromptArgs::deserialize(args).context("Invalid recovery prompt arguments")?;
 
     if parsed.tabs.is_empty() {
         return Ok(json!({ "cancelled": true, "error": "No tabs provided" }));
