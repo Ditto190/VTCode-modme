@@ -736,6 +736,15 @@ mod tracker_continue_tests {
         assert!(plan_mode_recoverable_block(no_final.expect("no final")));
         assert!(should_queue_plan_mode_auto_continue(true, true, false, false, no_final, false, 8, 0));
 
+        // Tools outside the named remedy set use the default remedy. Keep that
+        // prose free of the deny token `permission` so a fuse trip on e.g.
+        // `write_file` still auto-continues plan-mode research.
+        let default_remedy_fuse = Some(
+            "Blocked tool-call limit reached after 3 consecutive blocked calls (streak 3, total 3). Last blocked call: 'write_file'. Adjust arguments, policy, or approvals instead of retrying the identical call. A bounded recovery response will run without more tool calls. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.",
+        );
+        assert!(plan_mode_recoverable_block(default_remedy_fuse.expect("default remedy fuse")));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, default_remedy_fuse, false, 8, 0));
+
         // True permission handoffs still never auto-continue.
         assert!(!plan_mode_recoverable_block(
             "Blocked tool-call limit reached; permission denied for apply_patch; user input required."
