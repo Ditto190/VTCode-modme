@@ -48,7 +48,7 @@ session:
 
 ===
 
-check commit and apply for full command display instead of condensed for user review. check recent commits for context. '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-27 at 10.26.59.png'
+for command human in the loop modal pop up: check commit and apply for full command display instead of condensed for user review. check recent commits for context. '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-27 at 10.26.59.png'
 
 ===
 
@@ -71,4 +71,26 @@ https://harnesstax.github.io/
 
 ===
 
-can you check: there is something wrong with vtcode. when it is running (via tui cli, and ghostty, can happen on other terminals too, and macos currently). sometimes it showing a brief security permsiion and disappear briefly. it is very annoying because it show and hide very quickly ana can't see anything or act. please check and deep dive and fix between vtcode and macos security permission. also check for other env/os too.
+can you check: there is something wrong with vtcode. when it is running (via tui cli, and ghostty, can happen on other terminals too, and macos currently). sometimes it showing a brief security permsiion and disappear briefly. it is very annoying because it show and hide very quickly ana can't see anything or act. please check and deep dive and fix between vtcode and macos security permission. also check for other env/os too. it showing someting like "Verifying vtcode-qiweqwio021323{id}" in the gatekeeper dialog. when the dialog showing, and disappearing, it steals and dismissed every active modal on the system which is very annoying (like dismissing the firefox tab dropdown and popup)
+
+===
+
+refine and rework file picker functionality and UI. Ensure it handles various file types correctly and provides a smooth user experience. it should andle both files and folders hierarchically visually and respect files ignored by the system.
+
+===
+
+add back "revert(tui): remove Jump to last change navigation" functionality, commit 2c8c7ff0b8dbf52ca8598775d7f3fab968e4b14b and refine it for better user experience and stability. keep it minimal and simple. KISS and DRY
+
+===
+
+add numbering keyboard shortcut for shared/common human in the loop modal to quickly select options. for example, pressing "1" selects the first option, "2" selects the second, and so on. ensure it works consistently across different terminals and respects the modal's current focus state. and provide visual feedback for the selected option. also reference the image attached for design and structure guidance.
+
+ref: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-27 at 16.25.34.png'
+
+===
+
+add /config option to let user copy on click on TUI or copy manually from keyboard shortcuts.
+
+===
+
+implement /config options searchs functionality to allow users to quickly find and access specific configuration options within the TUI. Ensure the search is responsive and provides relevant results as the user types.
