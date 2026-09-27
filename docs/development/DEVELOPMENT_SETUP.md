@@ -43,6 +43,10 @@ For debug or release launches:
 ./scripts/run-debug.sh
 ```
 
+On macOS 14 and later, `run-debug.sh` packages the freshly built CLI into a
+local app bundle and uses `gktool` to prewarm Gatekeeper before launching it.
+This avoids the brief first-launch “Verifying…” sheet after a debug rebuild.
+
 ## Daily Development Loop
 
 ```bash
