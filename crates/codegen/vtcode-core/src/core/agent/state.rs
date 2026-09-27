@@ -376,10 +376,11 @@ const CLEARED_TOOL_RESULT_NOTE: &str = "Older tool result cleared to bound conte
 ///
 /// Providers without `context_management.edits` never get native tool-result
 /// clearing, so long histories keep paying full price for every old tool body
-/// on each request. This rewrites older tool-result *request* messages to a
-/// bounded stub once estimated history tokens exceed `trigger_tokens`, keeping
-/// the newest `keep_tool_uses` results intact and stopping after at least
-/// `clear_at_least_tokens` have been reclaimed.
+/// on each request. Once estimated history tokens exceed `trigger_tokens`, this
+/// rewrites every tool-result *request* message except the newest
+/// `keep_tool_uses` to a bounded stub. `clear_at_least_tokens` is a floor on
+/// reclaimed tokens (not a ceiling): clearing must stub all non-kept results so
+/// re-running on full durable history cannot leave a permanently growing tail.
 ///
 /// Contract (same as [`normalize_history_for_request`]):
 /// - never mutates durable session history or `ThreadEvent`s;
@@ -389,7 +390,8 @@ const CLEARED_TOOL_RESULT_NOTE: &str = "Older tool result cleared to bound conte
 ///   trigger and cannot re-clear stubs usefully.
 ///
 /// When `clear_tool_inputs` is set, assistant `tool_calls[].function.arguments`
-/// for cleared results are replaced with a short placeholder as well.
+/// for cleared results are replaced with a JSON placeholder (never prose —
+/// providers send `arguments` verbatim on the wire).
 pub fn clear_old_tool_results(
     messages: &[Message],
     trigger_tokens: u64,
@@ -422,13 +424,11 @@ pub fn clear_old_tool_results(
 
     let mut cleared_tokens = 0u64;
     let mut cleared_call_ids: HashSet<String> = HashSet::new();
-    // Clear oldest tool results first (Anthropic `clear_tool_uses` order):
-    // reclaim the farthest bodies and stop once `clear_at_least_tokens` is met.
+    // Stub every non-kept tool result (oldest-first). `clear_at_least_tokens`
+    // is a floor on reclaimed tokens; stopping early would leave a permanently
+    // growing tail on the next request that re-shapes full durable history.
     let mut out = messages.to_vec();
     for &tool_index in &tool_indices[..tool_indices.len() - keep] {
-        if cleared_tokens >= clear_at_least_tokens {
-            break;
-        }
         let original = &messages[tool_index];
         let original_tokens = original.estimate_tokens() as u64;
         let stub = build_cleared_tool_result_stub(original);
@@ -438,6 +438,17 @@ pub fn clear_old_tool_results(
         }
         out[tool_index] = stub;
         cleared_tokens = cleared_tokens.saturating_add(original_tokens.saturating_sub(stub_tokens));
+    }
+
+    // Floor is advisory: all non-kept results are already stubbed, so the
+    // floor is met whenever anything was reclaimable. Surface a miss only if
+    // the keep window left less than the configured floor (tiny histories).
+    if cleared_tokens < clear_at_least_tokens {
+        tracing::debug!(
+            cleared_tokens,
+            clear_at_least_tokens,
+            "tool-result clearing reclaimed less than the configured floor"
+        );
     }
 
     if clear_tool_inputs && !cleared_call_ids.is_empty() {
@@ -451,7 +462,9 @@ pub fn clear_old_tool_results(
             for call in tool_calls.iter_mut() {
                 if cleared_call_ids.contains(&call.id) {
                     if let Some(function) = call.function.as_mut() {
-                        function.arguments = CLEARED_TOOL_RESULT_NOTE.to_string();
+                        // Valid JSON placeholder: providers send `arguments`
+                        // verbatim; prose would break OpenAI tool-call parsing.
+                        function.arguments = CLEARED_TOOL_INPUT_PLACEHOLDER.to_string();
                     }
                 }
             }
@@ -459,6 +472,22 @@ pub fn clear_old_tool_results(
     }
 
     out
+}
+
+/// JSON placeholder for cleared tool-call inputs (must stay valid JSON).
+const CLEARED_TOOL_INPUT_PLACEHOLDER: &str = "{\"cleared\":\"tool_input\"}";
+
+/// Whether request assembly should apply local [`clear_old_tool_results`].
+///
+/// Local clearing and Anthropic `clear_tool_uses` are mutually exclusive:
+/// native edits already reclaim tool bodies on the wire, so applying both
+/// would double-shape the same history.
+pub fn should_apply_local_tool_result_clearing(
+    provider_name: &str,
+    context_edits: bool,
+    clearing_enabled: bool,
+) -> bool {
+    clearing_enabled && !(provider_name.eq_ignore_ascii_case("anthropic") && context_edits)
 }
 
 fn build_cleared_tool_result_stub(original: &Message) -> Message {
@@ -988,18 +1017,17 @@ mod tests {
     }
 
     #[test]
-    fn clear_old_tool_results_keeps_newest_and_stubs_older() {
-        // Four large tool results; keep 1, clear only the oldest (budget 1).
+    fn clear_old_tool_results_keeps_newest_and_stubs_all_older() {
+        // Four large tool results; keep 1. Every non-kept result is stubbed so
+        // re-shaping full durable history cannot leave a growing tail.
         let messages = bulky_tool_history(4, 4_000);
         let cleared = clear_old_tool_results(&messages, 1, 1, 1, false);
         let tool_msgs: Vec<&Message> = cleared.iter().filter(|m| m.role == MessageRole::Tool).collect();
         assert_eq!(tool_msgs.len(), 4);
-        assert!(is_cleared_stub(tool_msgs[0]), "oldest result is cleared first");
+        assert!(is_cleared_stub(tool_msgs[0]), "oldest result is cleared");
+        assert!(is_cleared_stub(tool_msgs[1]));
+        assert!(is_cleared_stub(tool_msgs[2]));
         assert!(!is_cleared_stub(tool_msgs[3]), "newest result stays intact");
-        assert!(
-            !is_cleared_stub(tool_msgs[1]) && !is_cleared_stub(tool_msgs[2]),
-            "clear_at_least_tokens stops after the first reclaim"
-        );
         // Protocol pairing survives.
         for (original, rewritten) in messages.iter().zip(cleared.iter()) {
             assert_eq!(original.role, rewritten.role);
@@ -1031,8 +1059,7 @@ mod tests {
             call.arguments = "{\"path\":\"secret-path\"}".to_string();
         }
 
-        // Reclaim budget large enough to clear both older results and their inputs.
-        let cleared = clear_old_tool_results(&messages, 1, 1, 10_000, true);
+        let cleared = clear_old_tool_results(&messages, 1, 1, 1, true);
         let first_call_args = cleared
             .get(1)
             .and_then(|m| m.tool_calls.as_ref())
@@ -1041,6 +1068,14 @@ mod tests {
             .map(|function| function.arguments.as_str())
             .unwrap_or_default();
         assert!(!first_call_args.contains("secret-path"), "cleared call arguments must drop the original payload");
+        assert!(
+            first_call_args.contains("\"cleared\":\"tool_input\""),
+            "cleared arguments must be a JSON placeholder, got {first_call_args:?}"
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(first_call_args).is_ok(),
+            "cleared arguments must stay valid JSON for the wire"
+        );
         // Newest retained call keeps its arguments.
         let last_call_args = cleared
             .get(5)
@@ -1060,5 +1095,31 @@ mod tests {
         let stubs_once = once.iter().filter(|m| is_cleared_stub(m)).count();
         let stubs_twice = twice.iter().filter(|m| is_cleared_stub(m)).count();
         assert_eq!(stubs_once, stubs_twice);
+    }
+
+    #[test]
+    fn clear_old_tool_results_leaves_durable_history_unchanged() {
+        let messages = bulky_tool_history(3, 2_500);
+        let snapshot: Vec<String> = messages.iter().map(|m| m.content.as_text().into_owned()).collect();
+        let request_messages = clear_old_tool_results(&messages, 1, 1, 1, false);
+        let after: Vec<String> = messages.iter().map(|m| m.content.as_text().into_owned()).collect();
+        assert_eq!(snapshot, after, "durable history must not be mutated");
+        assert!(
+            request_messages
+                .iter()
+                .filter(|m| m.role == MessageRole::Tool)
+                .any(is_cleared_stub),
+            "request messages should carry stubs"
+        );
+    }
+
+    #[test]
+    fn local_tool_result_clearing_gate_mirrors_native_edits() {
+        use super::should_apply_local_tool_result_clearing as gate;
+        assert!(gate("zai", false, true), "non-Anthropic uses local clearing");
+        assert!(gate("openai", false, true), "OpenAI uses local clearing");
+        assert!(gate("anthropic", false, true), "Anthropic without edits falls back to local");
+        assert!(!gate("anthropic", true, true), "Anthropic with context_edits uses native clear_tool_uses only");
+        assert!(!gate("zai", false, false), "disabled config never clears");
     }
 }

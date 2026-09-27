@@ -340,11 +340,12 @@ pub(super) async fn build_turn_request(
         .into_owned();
     // Local stand-in for Anthropic `clear_tool_uses` when the wire will not
     // carry native context edits. Request-only: durable history is untouched.
-    let uses_native_tool_result_clearing =
-        turn_snapshot.provider_name.eq_ignore_ascii_case("anthropic") && turn_snapshot.capabilities.context_edits;
-    if !uses_native_tool_result_clearing
-        && let Some(vt_cfg) = ctx.vt_cfg
-        && vt_cfg.agent.harness.tool_result_clearing.enabled
+    if let Some(vt_cfg) = ctx.vt_cfg
+        && vtcode_core::core::agent::state::should_apply_local_tool_result_clearing(
+            &turn_snapshot.provider_name,
+            turn_snapshot.capabilities.context_edits,
+            vt_cfg.agent.harness.tool_result_clearing.enabled,
+        )
     {
         let clearing = &vt_cfg.agent.harness.tool_result_clearing;
         normalized_history = vtcode_core::core::agent::state::clear_old_tool_results(

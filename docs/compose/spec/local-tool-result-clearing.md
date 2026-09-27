@@ -47,15 +47,16 @@ Semantics (mirror Anthropic `clear_tool_uses_20250919`):
 1. Estimate total history tokens (`Message::estimate_tokens`).
    If estimate < `trigger_tokens`, return `messages.to_vec()` unchanged.
 2. Collect Tool-role message indices from the end. Keep the newest
-   `keep_tool_uses` results untouched.
-3. For older tool results (newest-of-old first), replace `content` with a
-   bounded stub; accumulate cleared tokens; stop once
-   `cleared >= clear_at_least_tokens`.
+   `keep_tool_uses` results untouched. Stub **every** older tool result
+   (oldest-first). `clear_at_least_tokens` is a floor on reclaimed tokens,
+   not a stop ceiling — stopping early would leave a permanently growing
+   tail when the function re-shapes full durable history each request.
 4. Preserve `role`, `tool_call_id`, `origin_tool`, and message order so
    provider tool-pairing validation still passes.
 5. When `clear_tool_inputs`, also replace `tool_calls[].function.arguments`
-   on Assistant messages whose paired results were cleared, with a short
-   placeholder.
+   on Assistant messages whose paired results were cleared, with the JSON
+   placeholder `{"cleared":"tool_input"}` (never prose — providers send
+   `arguments` verbatim).
 
 **Stub shape** (stable, compact, actionable):
 
