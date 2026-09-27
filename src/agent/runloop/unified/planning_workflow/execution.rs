@@ -8,8 +8,7 @@ use vtcode_core::tools::registry::ExecSettlementMode;
 use vtcode_core::utils::ansi::MessageStyle;
 
 use crate::agent::runloop::unified::planning_workflow_state::{
-    PLAN_PRIMARY_AGENT_NAME, apply_plan_agent_header, render_planning_workflow_next_step_hint,
-    transition_to_planning_workflow,
+    apply_plan_agent_header, render_planning_workflow_next_step_hint, transition_to_planning_workflow,
 };
 use crate::agent::runloop::unified::run_loop_context::RunLoopContext;
 use crate::agent::runloop::unified::state::CtrlCState;
@@ -104,12 +103,11 @@ pub(crate) async fn handle_start_planning(
 
         if status == Some(PLAN_STATUS_SUCCESS) {
             enter_planning_workflow_after_start(ctx).await;
-            let mut outcome = ToolPipelineOutcome::from_status(tool_result);
-            // Mid-turn entry cannot mutate `ActivePrimaryAgentState`; queue the
-            // full plan-agent switch on the existing post-turn modes handoff so
-            // prompt/tools match the Plan badge already shown in the header.
-            outcome.pending_primary_agent = Some(PLAN_PRIMARY_AGENT_NAME.to_string());
-            return Some(outcome);
+            // Do not set `ToolPipelineOutcome::pending_primary_agent` here:
+            // that becomes `SwitchPrimaryAgent` and ends the turn before the
+            // model can research. The plan-agent switch is deferred to natural
+            // turn completion via `queue_plan_entry_agent_switch`.
+            return Some(ToolPipelineOutcome::from_status(tool_result));
         }
     }
 
@@ -133,18 +131,27 @@ async fn enter_planning_workflow_after_start(ctx: &mut RunLoopContext<'_>) {
         false,
     )
     .await;
-    // Header must show Plan as soon as the user confirms; the full primary-agent
-    // switch is queued on `pending_primary_agent` for the post-turn handoff.
+    // Header must show Plan as soon as the user confirms. The full primary-agent
+    // switch is deferred to natural turn completion so research continues in
+    // this turn (`queue_plan_entry_agent_switch` / `take_plan_entry_agent_switch`).
     apply_plan_agent_header(ctx.handle);
+    ctx.plan_session.queue_plan_entry_agent_switch();
     if let Err(err) = render_planning_workflow_next_step_hint(ctx.renderer) {
-        tracing::warn!("failed to render planning workflow next-step hint: {}", err);
+        tracing::warn!(
+            target: "vtcode.planning_workflow",
+            switch_path = "plan_entry",
+            error = %err,
+            "failed to render planning workflow next-step hint"
+        );
     }
     // Mid-turn entry: the turn is already running, so promote to the Planning
     // stage now. Idle-mode entries stay Idle until their first turn starts.
     crate::agent::runloop::unified::planning_workflow_state::mark_planning_turn_started(ctx.renderer, ctx.handle);
     tracing::info!(
         target: "vtcode.planning_workflow",
-        "Agent entered Planning workflow with planner profile (read-only, mutating tools blocked)"
+        switch_path = "plan_entry",
+        deferred_plan_agent_switch = true,
+        "Agent entered Planning workflow with planner profile (read-only, mutating tools blocked); plan-agent switch deferred to turn end"
     );
 }
 
@@ -219,9 +226,9 @@ async fn handle_enter_pending_confirmation(
         let status = output.get("status").and_then(|s| s.as_str());
         if status == Some(PLAN_STATUS_SUCCESS) {
             enter_planning_workflow_after_start(ctx).await;
-            let mut outcome = ToolPipelineOutcome::from_status(tool_result);
-            outcome.pending_primary_agent = Some(PLAN_PRIMARY_AGENT_NAME.to_string());
-            return outcome;
+            // Deferred plan-agent switch (see `enter_planning_workflow_after_start`);
+            // do not break the turn via `pending_primary_agent`.
+            return ToolPipelineOutcome::from_status(tool_result);
         }
     }
 
@@ -230,10 +237,7 @@ async fn handle_enter_pending_confirmation(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        PLAN_PRIMARY_AGENT_NAME, headless_planning_entry_requires_confirmation,
-        inline_planning_entry_requires_confirmation,
-    };
+    use super::{headless_planning_entry_requires_confirmation, inline_planning_entry_requires_confirmation};
 
     #[test]
     fn headless_entry_waits_for_confirmation_under_interactive_policy() {
@@ -253,12 +257,5 @@ mod tests {
         assert!(!inline_planning_entry_requires_confirmation(true, true, false));
         assert!(!inline_planning_entry_requires_confirmation(true, false, true));
         assert!(!inline_planning_entry_requires_confirmation(false, false, false));
-    }
-
-    #[test]
-    fn plan_entry_handoff_targets_plan_primary_agent() {
-        // Confirmed start_planning must queue the plan agent on the post-turn
-        // modes handoff so the header and active agent agree after the switch.
-        assert_eq!(PLAN_PRIMARY_AGENT_NAME, "plan");
     }
 }

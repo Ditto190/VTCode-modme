@@ -1975,6 +1975,24 @@ pub(crate) async fn run_turn_loop(
         }
     }
 
+    // Deferred plan-entry agent switch: mid-turn `start_planning` must not
+    // break the turn (research continues in the entry turn). Apply the queued
+    // plan-agent handoff only after final-response validation so a normal
+    // completed planning turn still requires a published final.
+    if pending_primary_agent.is_none()
+        && pending_plan_execution_target.is_none()
+        && ctx.plan_session.take_plan_entry_agent_switch()
+    {
+        pending_primary_agent =
+            Some(crate::agent::runloop::unified::planning_workflow_state::PLAN_PRIMARY_AGENT_NAME.to_string());
+        tracing::info!(
+            target: "vtcode.planning_workflow",
+            switch_path = "plan_entry",
+            agent = %crate::agent::runloop::unified::planning_workflow_state::PLAN_PRIMARY_AGENT_NAME,
+            "Applying deferred plan primary-agent switch after turn completion"
+        );
+    }
+
     ctx.renderer.flush_compact_command_group();
     ctx.set_phase(TurnPhase::Finalizing);
     finalize_turn(&mut ctx, working_history, &result, &turn_usage).await;

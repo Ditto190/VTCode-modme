@@ -117,7 +117,8 @@ Enter Planning workflow?
 - **Enter Planning workflow** — starts planning; read-only research begins and
   mutating tools stay disabled until you approve execution. The header badge
   switches to Plan immediately, and the plan primary agent is selected after
-  the turn so prompt/tools match. The runtime persists the validated plan after
+  the turn so prompt/tools match. Research continues in the same turn (the
+  entry does not stop the turn). The runtime persists the validated plan after
   the final `<proposed_plan>` is emitted.
 - **Continue without Planning workflow** — the agent proceeds without planning
   (mutating tools remain enabled).
@@ -125,6 +126,12 @@ Enter Planning workflow?
 This gate prevents the agent from silently switching into plan mode; you decide
 whether to plan before any edits begin. Full-auto and skip-confirmations
 policies accept the suggestion directly, including in an interactive UI.
+
+Mode-switch failures are recoverable and logged under the
+`vtcode.planning_workflow` target with a `switch_path` field (`plan_entry`,
+`plan_approval`, `plan_exit`, `startup_plan_entry`). A failed plan-agent
+selection keeps Planning active and the Plan header visible; a failed
+approval handoff keeps the approved plan and allows retry.
 
 Execution agents such as `build`, `auto`, and `duck` can invoke the
 `start_planning` tool when a request is demanding, ambiguous, or has multiple

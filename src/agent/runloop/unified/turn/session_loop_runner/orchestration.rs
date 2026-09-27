@@ -124,9 +124,19 @@ async fn apply_startup_plan_agent_selection(
             let display = active.display_name.clone();
             let color = active.color.clone().filter(|c| !c.trim().is_empty());
             handle.set_primary_agent(Some(display), color);
+            tracing::info!(
+                target: "vtcode.planning_workflow",
+                switch_path = "startup_plan_entry",
+                "Selected plan primary agent at startup planning entry"
+            );
         }
         Err(err) => {
-            tracing::warn!(error = %err, "Startup planning entry could not select plan primary agent");
+            tracing::warn!(
+                target: "vtcode.planning_workflow",
+                switch_path = "startup_plan_entry",
+                error = %err,
+                "Startup planning entry could not select plan primary agent; header will still show Plan"
+            );
             apply_plan_agent_header(handle);
         }
     }
@@ -1685,10 +1695,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         };
                         match active_primary_agent.select_from_specs(&specs, PLAN_PRIMARY_AGENT_NAME) {
                             Ok(active) => {
-                                let display = active.display_name.clone();
+                                let agent_display = active.display_name.clone();
                                 let color = active.color.clone().filter(|c| !c.trim().is_empty());
-                                apply_primary_agent_tool_policy_overrides(&tool_registry, active_primary_agent.active())
-                                    .await;
+                                apply_primary_agent_tool_policy_overrides(
+                                    &tool_registry,
+                                    active_primary_agent.active(),
+                                )
+                                .await;
                                 sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
                                 let mut runtime_sync = PrimaryAgentRuntimeSyncContext {
                                     config: &config,
@@ -1704,15 +1717,36 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     pending_mcp_refresh: &mut pending_mcp_refresh,
                                     provider_client: &*provider_client,
                                 };
-                                harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
-                                handle.set_primary_agent(Some(display), color);
+                                if let Err(err) = sync_primary_agent_runtime(&mut runtime_sync).await {
+                                    tracing::error!(
+                                        target: "vtcode.planning_workflow",
+                                        switch_path = "plan_entry",
+                                        requested_agent = %requested_agent,
+                                        resolved_agent = %agent_display,
+                                        error = %err,
+                                        "Plan-entry runtime sync failed; header will still show Plan and planning stays active"
+                                    );
+                                    harness_try!(renderer.line(
+                                        MessageStyle::Warning,
+                                        &format!("Plan mode is active, but runtime sync failed: {err}"),
+                                    ));
+                                }
+                                handle.set_primary_agent(Some(agent_display), color);
                                 tracing::info!(
                                     target: "vtcode.planning_workflow",
+                                    switch_path = "plan_entry",
                                     "Switched primary agent to plan after confirmed planning entry"
                                 );
                                 persist_primary_agent(&mut session_archive, &active_primary_agent);
                             }
                             Err(err) => {
+                                tracing::warn!(
+                                    target: "vtcode.planning_workflow",
+                                    switch_path = "plan_entry",
+                                    requested_agent = %requested_agent,
+                                    error = %err,
+                                    "Could not select plan primary agent after planning entry; planning stays active"
+                                );
                                 harness_try!(renderer.line(
                                     MessageStyle::Warning,
                                     &format!("Could not select plan primary agent after planning entry: {err}"),
@@ -1735,6 +1769,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         let execution_agent = harness_try!(execution_agent);
                         if execution_agent != requested_agent {
                             tracing::warn!(
+                                target: "vtcode.planning_workflow",
+                                switch_path = "plan_approval",
                                 requested_agent = %requested_agent,
                                 resolved_agent = %execution_agent,
                                 "Approved plan requested a non-executable primary agent; using a write-capable agent"
@@ -1769,12 +1805,25 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             pending_mcp_refresh: &mut pending_mcp_refresh,
                             provider_client: &*provider_client,
                         };
-                        harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
+                        if let Err(err) = sync_primary_agent_runtime(&mut runtime_sync).await {
+                            tracing::error!(
+                                target: "vtcode.planning_workflow",
+                                switch_path = "plan_approval",
+                                agent = %execution_agent,
+                                error = %err,
+                                "Approved-plan runtime sync failed; plan remains approved and can be retried"
+                            );
+                            harness_try!(renderer.line(
+                                MessageStyle::Error,
+                                &format!("Approved plan is ready, but mode switch failed: {err}"),
+                            ));
+                        }
                         let display = active_primary_agent.active().display_name.clone();
                         let color = active_primary_agent.active().color.clone().filter(|c| !c.trim().is_empty());
                         handle.set_primary_agent(Some(display), color);
                         tracing::info!(
                             target: "vtcode.planning_workflow",
+                            switch_path = "plan_approval",
                             agent = %execution_agent,
                             "Switched primary agent after plan approval"
                         );
