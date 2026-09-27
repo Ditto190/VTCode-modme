@@ -121,9 +121,10 @@ pub struct JustificationExtractor;
          headers, no `│` gutter). Command tools show an indented,
          syntax-highlighted command block; file tools show the diff preview
          directly.
-       - A bounded shell-command preview for command tools. Long lines retain
-         their beginning and end; multiline commands retain head and tail rows
-         with an explicit omitted-line count.
+       - The full shell command for command tools, without per-line
+         truncation. Modal wrapping owns viewport width; scripts beyond
+         8 lines collapse middle lines behind an explicit omission
+         count so head and tail stay reviewable.
        - A human-friendly action sentence for non-command tools
          (for example, `The agent wants to edit file src/main.rs and needs
          your approval.`)

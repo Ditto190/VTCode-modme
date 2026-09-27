@@ -338,12 +338,10 @@ fn web_fetch_approval_url(tool_name: &str, tool_args: Option<&Value>) -> Option<
         .map(ToOwned::to_owned)
 }
 
-/// Max logical rows shown for the approved command block; longer commands
-/// collapse behind an overflow count so the popup fits its viewport budget.
+/// Max logical command lines shown in the approval modal; longer scripts
+/// collapse their middle lines behind an explicit omission count so the
+/// popup fits its 8-row viewport while head and tail stay reviewable.
 const MAX_COMMAND_PREVIEW_LINES: usize = 8;
-/// Max chars per command line. Middle truncation preserves both the executable
-/// prefix and trailing flags/destinations that can materially change behavior.
-const MAX_COMMAND_LINE_CHARS: usize = 120;
 /// Max chars for persistent-approval display labels embedded in option
 /// subtitles; the dedicated command block carries the reviewable invocation.
 const MAX_APPROVAL_LABEL_CHARS: usize = 60;
@@ -352,33 +350,39 @@ const MAX_CONTEXT_LINE_CHARS: usize = 160;
 const MAX_RISK_LINE_CHARS: usize = 32;
 
 fn format_command_preview_line(line: &str) -> String {
-    format!("`{}`", vtcode_commons::formatting::truncate_middle(line, MAX_COMMAND_LINE_CHARS))
+    // Same control-char mapping as `truncate_middle`: a lone `\r` survives
+    // `str::lines` and could otherwise hide a suffix at render time.
+    // No length cap: per-line truncation splits shell tokens and quoted
+    // script bodies (screenshot 2026-09-27 `awk 'NR==FNR ...'`), defeating
+    // review; modal wrapping owns viewport width.
+    let sanitized: String = line.chars().map(|c| if matches!(c, '\r' | '\t') { ' ' } else { c }).collect();
+    format!("`{sanitized}`")
 }
 
-/// Format command lines as bounded head + tail evidence. Keeping the tail is
-/// required for informed approval because destructive flags and destinations
-/// commonly occur at the end of an invocation.
+/// Full command lines for the approval modal. Shown lines are never
+/// truncated, so the quote-aware `shell_syntax_segments` highlighter (fed
+/// by the tree-sitter-bash safety pipeline) sees intact tokens. Only the
+/// row count is bounded: beyond `MAX_COMMAND_PREVIEW_LINES` the middle
+/// collapses behind an explicit omission count, keeping head and tail
+/// reviewable inside the modal viewport. Mirrors `preview_full_command`
+/// for transcript `• Ran` headers (821a9c35a) and the untruncated
+/// web-fetch URL (99cc2fdfe).
 fn format_command_preview_lines(command_lines: Vec<String>) -> Vec<String> {
-    if command_lines.len() <= MAX_COMMAND_PREVIEW_LINES {
-        return command_lines.iter().map(|line| format_command_preview_line(line)).collect();
+    let visible: Vec<String> = command_lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| format_command_preview_line(line))
+        .collect();
+    if visible.len() <= MAX_COMMAND_PREVIEW_LINES {
+        return visible;
     }
     const HEAD_LINES: usize = 5;
     const TAIL_LINES: usize = 2;
-    let hidden = command_lines.len().saturating_sub(HEAD_LINES + TAIL_LINES);
+    let hidden = visible.len().saturating_sub(HEAD_LINES + TAIL_LINES);
     let mut preview = Vec::with_capacity(MAX_COMMAND_PREVIEW_LINES);
-    preview.extend(
-        command_lines
-            .iter()
-            .take(HEAD_LINES)
-            .map(|line| format_command_preview_line(line)),
-    );
+    preview.extend(visible.iter().take(HEAD_LINES).cloned());
     preview.push(format!("… +{hidden} more lines (full command runs on approval)"));
-    preview.extend(
-        command_lines
-            .iter()
-            .skip(command_lines.len().saturating_sub(TAIL_LINES))
-            .map(|line| format_command_preview_line(line)),
-    );
+    preview.extend(visible.iter().skip(visible.len().saturating_sub(TAIL_LINES)).cloned());
     preview
 }
 
@@ -1407,7 +1411,10 @@ mod tests {
         assert_ne!(first, second);
         assert!(first[0].contains("report.txt"), "tail missing from {first:?}");
         assert!(second[0].contains("../../critical.txt"), "dangerous tail missing from {second:?}");
-        assert!(first[0].contains('…') && second[0].contains('…'));
+        assert!(
+            !first[0].contains('…') && !second[0].contains('…'),
+            "full command must not truncate: {first:?} {second:?}"
+        );
     }
 
     #[test]
@@ -1417,15 +1424,55 @@ mod tests {
     }
 
     #[test]
-    fn multiline_command_preview_keeps_head_tail_and_omission_count() {
-        let lines = (1..=12).map(|line| format!("line {line}")).collect();
+    fn command_preview_shows_long_single_line_in_full_without_truncation() {
+        // Screenshot 2026-09-27: `awk 'NR==FNR ...'` was middle-truncated in
+        // the HITL modal, hiding the script body under review.
+        let command = "awk 'NR==FNR {if ($0 ~ /^#+ /) {h=$0; sub(/^#+ /, \"\", h); gsub(/ +$/, \"\", h)}}' README.md README.md; echo 'anchor-check exit=$?'";
+        let preview = format_command_preview_lines(vec![command.to_string()]);
+        assert_eq!(preview.len(), 1);
+        assert!(!preview[0].contains('…'), "got: {:?}", preview[0]);
+        for fragment in ["awk", "NR==FNR", "/^#+ /", "README.md", "anchor-check"] {
+            assert!(preview[0].contains(fragment), "missing {fragment:?} in {:?}", preview[0]);
+        }
+    }
+
+    #[test]
+    fn multiline_command_preview_collapses_middle_but_keeps_full_lines() {
+        // Viewport budget: 12 logical lines collapse to 5 head + marker +
+        // 2 tail, but every shown line is complete. Each line exceeds the
+        // old 120-char truncation cap, locking in no per-line truncation.
+        let lines: Vec<String> = (1..=12).map(|line| format!("line {line} {}", "x".repeat(150))).collect();
         let preview = format_command_preview_lines(lines);
         assert_eq!(preview.len(), 8);
-        assert_eq!(preview[0], "`line 1`");
-        assert_eq!(preview[4], "`line 5`");
+        assert_eq!(preview[0], format!("`line 1 {}`", "x".repeat(150)));
+        assert_eq!(preview[4], format!("`line 5 {}`", "x".repeat(150)));
         assert_eq!(preview[5], "… +5 more lines (full command runs on approval)");
-        assert_eq!(preview[6], "`line 11`");
-        assert_eq!(preview[7], "`line 12`");
+        assert_eq!(preview[6], format!("`line 11 {}`", "x".repeat(150)));
+        assert_eq!(preview[7], format!("`line 12 {}`", "x".repeat(150)));
+    }
+
+    #[test]
+    fn command_preview_neutralizes_carriage_return_and_tab() {
+        // A lone `\r` survives `str::lines`; without sanitization the
+        // terminal could hide the suffix of the preview row under review.
+        let preview = format_command_preview_lines(vec!["echo ok\r\trm -rf /tmp/review-target".to_string()]);
+        assert_eq!(preview.len(), 1);
+        assert!(
+            preview[0].chars().all(|c| c != '\r' && c != '\t'),
+            "control chars must be neutralized, got: {preview:?}"
+        );
+        assert!(preview[0].contains("rm -rf /tmp/review-target"), "suffix must stay visible: {preview:?}");
+    }
+
+    #[test]
+    fn command_preview_skips_blank_lines_to_save_viewport_rows() {
+        let preview = format_command_preview_lines(vec![
+            "echo alpha".to_string(),
+            "   ".to_string(),
+            String::new(),
+            "echo beta".to_string(),
+        ]);
+        assert_eq!(preview, vec!["`echo alpha`", "`echo beta`"]);
     }
 
     #[test]
