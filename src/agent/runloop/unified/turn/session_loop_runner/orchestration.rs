@@ -2768,6 +2768,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             final_response: final_response.as_deref(),
             resume_identifier,
             budget_limit: session_stats.budget_limit(),
+            first_call_composition: session_stats.first_call_composition(),
         });
         if let Some(controller) = tool_registry.subagent_controller() {
             controller.signal_shutdown().await;

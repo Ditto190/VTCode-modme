@@ -462,8 +462,18 @@ pub(super) async fn build_turn_request(
             on_wire_tools,
             client_local_deferral: turn_snapshot.client_local_tool_deferral,
             tool_free_recovery: turn_snapshot.tool_free_recovery,
+            first_call: ctx.session_stats.first_call_composition().is_none(),
         },
     );
+    // Capture the first assembled request so the exit summary can surface the
+    // per-call harness tax (HarnessTax-style initial-context breakdown).
+    ctx.session_stats
+        .record_first_call_composition(crate::agent::runloop::unified::state::FirstCallComposition {
+            system_prompt_tokens,
+            tool_schema_tokens,
+            message_history_tokens,
+            on_wire_tools,
+        });
 
     Ok(TurnRequestBuildResult {
         request: request_plan.request,
@@ -902,6 +912,40 @@ mod tests {
             .expect("clean request should build");
 
         assert!(Arc::ptr_eq(&built.request.messages, &built.continuation_messages));
+    }
+
+    #[tokio::test]
+    async fn first_call_composition_captures_on_first_build_only() {
+        let mut backing = TestTurnProcessingBacking::new(4).await;
+        let mut ctx = backing.turn_processing_context();
+        ctx.working_history.push(uni::Message::user("hello".to_string()));
+
+        assert!(ctx.session_stats.first_call_composition().is_none());
+        let snapshot = capture_turn_request_snapshot(&mut ctx, "noop-model", false);
+        build_turn_request(&mut ctx, 1, "noop-model", &snapshot, Some(320), None, false)
+            .await
+            .expect("first request should build");
+
+        let first = ctx
+            .session_stats
+            .first_call_composition()
+            .expect("first build must capture composition");
+        assert!(first.fixed_overhead_tokens() > 0, "first build must record a non-zero harness tax");
+        // `first_call` is defined as "composition not yet captured", so the
+        // first build is the only one that can observe it as true.
+        let first_call_flag = ctx.session_stats.first_call_composition().is_none();
+        assert!(!first_call_flag, "composition is already captured after the first build");
+
+        ctx.working_history.push(uni::Message::user("again".to_string()));
+        let snapshot = capture_turn_request_snapshot(&mut ctx, "noop-model", false);
+        build_turn_request(&mut ctx, 2, "noop-model", &snapshot, Some(320), None, false)
+            .await
+            .expect("second request should build");
+        assert_eq!(
+            ctx.session_stats.first_call_composition(),
+            Some(first),
+            "later builds must not overwrite the first-call snapshot"
+        );
     }
 
     #[tokio::test]

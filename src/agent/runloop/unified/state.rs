@@ -186,6 +186,30 @@ pub(crate) struct SessionStats {
     /// other values gate automatic compaction until cleared by success, model
     /// switch, or explicit `/compact`.
     pub auto_compact_suppressed: u8,
+    /// Composition of the session's first assembled LLM request. Captured once
+    /// so the exit summary can surface the per-call harness tax (instructions
+    /// + tool schemas) without re-reading the trajectory log.
+    first_call_composition: Option<FirstCallComposition>,
+}
+
+/// First-request token composition (HarnessTax-style harness-tax breakdown).
+///
+/// `fixed_overhead_tokens` is the per-call harness tax paid before the task
+/// prompt: system instructions plus on-wire tool schemas. On the session's
+/// first request this is the paper's "initial harness context" excluding the
+/// task itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FirstCallComposition {
+    pub system_prompt_tokens: usize,
+    pub tool_schema_tokens: usize,
+    pub message_history_tokens: usize,
+    pub on_wire_tools: usize,
+}
+
+impl FirstCallComposition {
+    pub(crate) fn fixed_overhead_tokens(&self) -> usize {
+        self.system_prompt_tokens.saturating_add(self.tool_schema_tokens)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -426,6 +450,22 @@ impl SessionStats {
 
     pub(crate) fn total_usage(&self) -> HarnessUsage {
         self.total_usage.clone()
+    }
+
+    /// Capture the session's first assembled request composition. Returns
+    /// `true` when this call stored the value (first capture wins; later
+    /// builds leave the original composition untouched).
+    pub(crate) fn record_first_call_composition(&mut self, composition: FirstCallComposition) -> bool {
+        if self.first_call_composition.is_some() {
+            return false;
+        }
+        self.first_call_composition = Some(composition);
+        true
+    }
+
+    /// The captured first-call composition, when a request has been assembled.
+    pub(crate) fn first_call_composition(&self) -> Option<FirstCallComposition> {
+        self.first_call_composition
     }
 
     /// Add one turn's cost to the session total and update the display value.
@@ -1505,6 +1545,31 @@ mod tests {
         // Switching back advises again: each genuine change re-pays.
         assert_eq!(stats.record_prompt_cache_fingerprint("model-a", 1, Some(2)), "model");
         assert!(stats.model_change_advisory().is_some());
+    }
+
+    #[test]
+    fn first_call_composition_captures_once() {
+        use super::FirstCallComposition;
+        let mut stats = SessionStats::default();
+        assert!(stats.first_call_composition().is_none());
+        let first = FirstCallComposition {
+            system_prompt_tokens: 1_100,
+            tool_schema_tokens: 2_100,
+            message_history_tokens: 40,
+            on_wire_tools: 4,
+        };
+        assert!(stats.record_first_call_composition(first));
+        assert_eq!(stats.first_call_composition(), Some(first));
+        // Later assemblies must not overwrite the first-call snapshot.
+        let later = FirstCallComposition {
+            system_prompt_tokens: 9_000,
+            tool_schema_tokens: 9_000,
+            message_history_tokens: 9_000,
+            on_wire_tools: 40,
+        };
+        assert!(!stats.record_first_call_composition(later));
+        assert_eq!(stats.first_call_composition(), Some(first));
+        assert_eq!(first.fixed_overhead_tokens(), 3_200);
     }
 
     #[test]

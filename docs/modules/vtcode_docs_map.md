@@ -893,6 +893,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Harness Stability Cost P1?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/harness-tax-observability.md`
+  - **Content**: Harness Tax Observability
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Harness Tax Observability?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/harness-textual-tool-call-harden.md`
   - **Content**: Harness Textual Tool-Call Harden
   - **Topics**: Report, [S1] Problem, [S2] Design, Tasks
