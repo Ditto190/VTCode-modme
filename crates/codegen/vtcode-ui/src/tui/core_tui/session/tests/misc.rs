@@ -929,3 +929,43 @@ fn escape_still_interrupts_running_activity_with_a_selection() {
     );
     assert!(session.mouse_selection.has_selection, "interrupt must not silently consume the selection");
 }
+
+#[test]
+fn set_fullscreen_interaction_command_updates_all_fields() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    assert!(session.fullscreen.interaction.copy_on_select, "copy_on_select defaults on");
+    assert_eq!(session.fullscreen.interaction.scroll_speed, 3);
+
+    session.handle_command(InlineCommand::SetFullscreenInteraction {
+        interaction: FullscreenInteractionSettings {
+            mouse_capture: false,
+            copy_on_select: false,
+            scroll_speed: 7,
+        },
+    });
+
+    assert!(!session.fullscreen.interaction.copy_on_select);
+    assert!(!session.fullscreen.interaction.mouse_capture);
+    assert_eq!(session.fullscreen.interaction.scroll_speed, 7);
+}
+
+#[test]
+fn app_session_forwards_fullscreen_interaction_to_core() {
+    use crate::tui::core_tui::app::types::InlineCommand as AppInlineCommand;
+
+    let mut session = app_session_with_input("", 0);
+    assert!(session.core.fullscreen.interaction.copy_on_select);
+
+    session.handle_command(AppInlineCommand::SetFullscreenInteraction {
+        interaction: FullscreenInteractionSettings {
+            mouse_capture: true,
+            copy_on_select: false,
+            scroll_speed: 3,
+        },
+    });
+
+    assert!(
+        !session.core.fullscreen.interaction.copy_on_select,
+        "app-layer command must reach the core session's fullscreen interaction"
+    );
+}
