@@ -1,5 +1,5 @@
 # vtcode-ui
-[Root AGENTS.md](../AGENTS.md) | Unified UI: design system, theme registry, TUI framework. Consolidated from `vtcode-design` and `vtcode-theme`.
+[Root AGENTS.md](../../../AGENTS.md) | Unified UI: design system, theme registry, TUI framework. Consolidated from `vtcode-design` and `vtcode-theme`.
 
 ## Modules
 
@@ -8,6 +8,7 @@
 | Design system | `design/` — color conversion, style bridging, layout, diff, panel primitives |
 | Theme registry | `theme/` — ThemeStyles, runtime state, syntax theme resolution |
 | TUI framework | `tui/` — session, widgets, runner, markdown rendering, config |
+| Vim editing | `vim/` — modal prompt-editing engine (crate-internal) |
 
 ## Rules
 

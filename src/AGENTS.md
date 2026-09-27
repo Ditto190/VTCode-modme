@@ -2,7 +2,7 @@
 [Root AGENTS.md](../AGENTS.md) | CLI entrypoint, session bootstrap, and agent runloop wiring. Detailed runloop recovery and allocator notes live in the [vtcode binary gotchas guide](../docs/development/vtcode-binary-gotchas.md).
 
 ## Modules (active bridge: `agent/runloop/unified/webmcp.rs`)
-`main.rs` binary entry | `agent/` runloop + subagent dispatch | `cli/` handlers including opt-in WebMCP serving | `startup/` onboarding | `updater/` downloads and self-replacement | `codex_app_server/` bridge | `main_helpers/` tracing and runtime init | `agent/runloop/unified/planning_workflow/tracker_response.rs` model-facing path boundary | `agent/runloop/unified/turn/session/interaction_loop_runner/status_refresh.rs` status/IDE/title cadence | `agent/runloop/unified/session_setup/hook_approval.rs` workspace lifecycle-hook approval overlay
+`main.rs` binary entry | `agent/` runloop + subagent dispatch | `cli/` handlers including opt-in WebMCP serving | `startup/` onboarding | `updater/` downloads and self-replacement | `codex_app_server/` bridge | `main_helpers/` tracing and runtime init | `allocator.rs` global allocator selection | `process_hardening.rs` early-process lockdown | `agent/runloop/unified/planning_workflow/tracker_response.rs` model-facing path boundary | `agent/runloop/unified/turn/session/interaction_loop_runner/status_refresh.rs` status/IDE/title cadence | `agent/runloop/unified/session_setup/hook_approval.rs` workspace lifecycle-hook approval overlay
 
 ## Rules
 

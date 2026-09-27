@@ -1,6 +1,6 @@
 # vtcode-safety
 
-[Root AGENTS.md](../AGENTS.md) | Command safety detection, execution policies, and sandboxing. Layer 1 crate — depends on vtcode-commons.
+[Root AGENTS.md](../../../AGENTS.md) | Command safety detection, execution policies, and sandboxing. Layer 1 crate — depends on vtcode-commons.
 
 ## Module Groups
 
@@ -9,6 +9,7 @@
 | Command Safety | `command_safety/` — dangerous command detection, shell parsing |
 | Execution Policy | `exec_policy/` — policy management, approval workflows, command validation |
 | Sandboxing | `sandboxing/` — sandbox policy, permissions, execution environments |
+| Audit/Isolation | `audit_log.rs` — durable tool-invocation audit sink | `mcp_sandbox.rs` — per-MCP-server derived sandbox |
 
 ## Rules
 
