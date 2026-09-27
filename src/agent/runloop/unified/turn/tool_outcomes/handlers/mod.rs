@@ -75,16 +75,17 @@ pub(crate) use types::{PreparedToolCall, ToolOutcomeContext, ValidationResult};
 /// rejects always count.
 pub(crate) fn preflight_failure_is_llm_mistake(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    // Security / policy blocks always trip, even when they mention a tool name.
-    // Keep these phrases tight: a bare "sandbox" substring would misclassify
-    // `Unknown tool: sandbox_helper` as a policy block.
-    if lower.contains("command security check failed")
-        || lower.contains("command injection")
-        || lower.contains("sandbox denied")
-        || lower.contains("sandbox policy")
-        || lower.contains("policy violation")
-        || lower.contains("not allowed")
-    {
+    // The name-mistake error embeds the raw model-supplied tool name after
+    // the constant. Classify that error on its static prefix only: the name
+    // is arbitrary model prose, and policy phrases inside it ("not allowed",
+    // "command injection", ...) must not flip a name mistake into a policy
+    // block, which would advance the preflight circuit and skip valid
+    // sibling calls in the same batch.
+    let name_mistake_marker = format!("{}:", TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR).to_ascii_lowercase();
+    if let Some((static_prefix, _)) = lower.split_once(&name_mistake_marker) {
+        return !is_policy_reject_phrase(static_prefix);
+    }
+    if is_policy_reject_phrase(&lower) {
         return false;
     }
     // Name-mistake allow-list. Each phrase names its producer so rewording
@@ -95,6 +96,19 @@ pub(crate) fn preflight_failure_is_llm_mistake(error: &str) -> bool {
     lower.contains(TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR)
         || lower.contains("unknown tool")
         || lower.contains("empty tool name")
+}
+
+/// Security / policy phrases that always count toward the preflight circuit,
+/// even when they mention a tool name. Keep these phrases tight: a bare
+/// "sandbox" substring would misclassify `Unknown tool: sandbox_helper` as a
+/// policy block.
+fn is_policy_reject_phrase(lower: &str) -> bool {
+    lower.contains("command security check failed")
+        || lower.contains("command injection")
+        || lower.contains("sandbox denied")
+        || lower.contains("sandbox policy")
+        || lower.contains("policy violation")
+        || lower.contains("not allowed")
 }
 
 /// Record a malformed or preflight-invalid tool call. When the independent

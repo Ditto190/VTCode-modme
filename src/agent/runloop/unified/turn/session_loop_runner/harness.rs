@@ -140,11 +140,30 @@ pub(super) async fn run_harness_retention(workspace: &Path, vt_cfg: Option<&VTCo
     }
 }
 
+/// Session ids whose stores are retention-pinned against ordinary eviction.
+///
+/// A blocked session is pinned so retention cannot erase its evidence; the
+/// history-envelope prune is ordinary retention too, so pinned sessions'
+/// legacy envelopes must survive its count/age caps.
+fn retention_pinned_session_ids(workspace: &Path) -> Vec<String> {
+    let sessions_root = workspace.join(".vtcode").join("sessions");
+    let Ok(entries) = std::fs::read_dir(&sessions_root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false))
+        .filter(|entry| vtcode_memory::session_retention_pinned(&entry.path()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect()
+}
+
 /// Cap `.vtcode/history/*.memory.json` so legacy envelopes cannot grow without
 /// bound while dual writes still land there.
 ///
-/// Keeps the `HISTORY_ENVELOPE_KEEP` newest files and anything belonging to
-/// `preserve_session_id`; drops envelopes older than `max_age_days`.
+/// Keeps the `HISTORY_ENVELOPE_KEEP` newest files, anything belonging to
+/// `preserve_session_id`, and anything belonging to a retention-pinned
+/// session; drops envelopes older than `max_age_days`.
 fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_days: u64) -> Result<usize> {
     const HISTORY_ENVELOPE_KEEP: usize = 50;
 
@@ -152,6 +171,7 @@ fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_
     let Ok(entries) = std::fs::read_dir(&history_dir) else {
         return Ok(0);
     };
+    let pinned_session_ids = retention_pinned_session_ids(workspace);
     let mut envelopes: Vec<(PathBuf, SystemTime)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -164,6 +184,11 @@ fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_
         // Exact sanitized-id match (same rule as envelope writers). Loose
         // prefix matching would preserve unrelated sessions.
         if vtcode_core::compaction::memory_envelope::memory_envelope_file_matches_session(name, preserve_session_id) {
+            continue;
+        }
+        if pinned_session_ids.iter().any(|session_id| {
+            vtcode_core::compaction::memory_envelope::memory_envelope_file_matches_session(name, session_id)
+        }) {
             continue;
         }
         let modified = entry
@@ -281,5 +306,29 @@ mod tests {
             !history.join("session-keeper.memory.json").exists(),
             "near-miss name must not be preserved by loose prefix matching"
         );
+    }
+
+    #[test]
+    fn prune_history_envelopes_never_drops_pinned_session_envelopes() {
+        // A blocked session is retention-pinned so ordinary retention cannot
+        // erase its evidence; the legacy envelope prune is ordinary retention.
+        let temp = TempDir::new().expect("temp dir");
+        let history = temp.path().join(".vtcode").join("history");
+        let sessions_root = temp.path().join(".vtcode").join("sessions");
+        std::fs::create_dir_all(&history).expect("history dir");
+        let pinned_dir = sessions_root.join("session-pinned");
+        std::fs::create_dir_all(&pinned_dir).expect("pinned session dir");
+        std::fs::write(pinned_dir.join("retention-pin.json"), b"{}").expect("write pin");
+
+        std::fs::write(history.join("session-pinned.memory.json"), b"{}").expect("write pinned envelope");
+        std::fs::write(history.join("session-unpinned.memory.json"), b"{}").expect("write unpinned envelope");
+
+        // max_age_days = 0 ages out everything that is not protected.
+        prune_history_envelopes(temp.path(), "session-finalizing", 0).expect("prune");
+        assert!(
+            history.join("session-pinned.memory.json").exists(),
+            "a retention-pinned session's envelope must survive the prune"
+        );
+        assert!(!history.join("session-unpinned.memory.json").exists(), "unpinned envelopes still age out");
     }
 }

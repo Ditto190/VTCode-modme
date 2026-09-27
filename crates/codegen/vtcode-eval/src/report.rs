@@ -24,7 +24,7 @@ pub struct SuiteReport {
     pub(crate) duration_secs: f64,
     /// Aggregate privacy-preserving trace facts joined by task and attempt.
     pub(crate) trace_summary: Option<HarnessTraceSummary>,
-    /// Mean known cost per attempt. `None` when every attempt is unpriced.
+    /// Mean cost over priced attempts only. `None` when every attempt is unpriced.
     pub(crate) mean_cost_per_attempt: Option<f64>,
     /// Total known cost divided by successful attempts. `None` when any
     /// attempt is unpriced (unknown cost is not free) or nothing passed.
@@ -72,7 +72,7 @@ impl EvalReport {
                     parts.push(format!("cost/solve ${cost_per_solve:.4}"));
                 }
                 if let Some(mean_cost) = s.mean_cost_per_attempt {
-                    parts.push(format!("${mean_cost:.4} per attempt"));
+                    parts.push(format!("${mean_cost:.4} per priced attempt"));
                 }
                 if let Some(mean_tokens) = s.mean_tokens_per_attempt {
                     parts.push(format!("{mean_tokens:.0} tokens"));
@@ -393,7 +393,7 @@ mod tests {
         };
         let md = report.to_markdown();
         assert!(
-            md.contains("- Efficiency: cost/solve $0.0500 · $0.0500 per attempt · 12000 tokens · 8.5 turns"),
+            md.contains("- Efficiency: cost/solve $0.0500 · $0.0500 per priced attempt · 12000 tokens · 8.5 turns"),
             "missing efficiency line: {md}"
         );
     }

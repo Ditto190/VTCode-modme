@@ -137,20 +137,32 @@ pub fn session_artifact_cutoff(workspace_root: &Path, session_id: &str) -> Optio
         let Ok(metadata) = fs::metadata(&dir) else {
             continue;
         };
-        // Prefer true creation time. Falling back to `modified()` would make
-        // the cutoff "now" for a freshly touched dir and over-filter artifacts
-        // legitimately written at session start.
-        if let Ok(created) = metadata.created() {
-            return Some(created);
+        if let Some(cutoff) = artifact_cutoff_from_metadata(&metadata) {
+            return Some(cutoff);
         }
     }
     None
 }
 
+/// Cutoff derived from a session directory's timestamps.
+///
+/// True creation time is preferred. When the filesystem has no birth time
+/// (btime-less Linux filesystems), `modified()` is the best available lower
+/// bound: it sits slightly after the real session start, so stale leftovers
+/// from earlier sessions still compare stale while artifacts written during
+/// the session stay live. Returning `None` here would disable the leftover
+/// filter entirely (fail-open) on those platforms.
+fn artifact_cutoff_from_metadata(metadata: &fs::Metadata) -> Option<SystemTime> {
+    metadata.created().ok().or_else(|| metadata.modified().ok())
+}
+
 /// Archive a fully-checked `current_task.md` so a finished checklist cannot
 /// describe the next session. Incomplete checklists stay in place.
 ///
-/// Returns the archive path when a move happened.
+/// Returns the archive path when a move happened. The archive name carries a
+/// timestamp and uuid (same contract as blocked-handoff archives) because the
+/// live file is gone after the move: a deterministic session-id-only name
+/// would let a resumed session's second completion destroy the only copy.
 pub fn archive_completed_current_task(workspace_root: &Path, session_id: &str) -> Result<Option<PathBuf>> {
     let task_path = current_task_path(workspace_root);
     let Ok(content) = fs::read_to_string(&task_path) else {
@@ -167,7 +179,13 @@ pub fn archive_completed_current_task(workspace_root: &Path, session_id: &str) -
     }
     let archive_dir = workspace_root.join(TASKS_DIR).join("archive");
     fs::create_dir_all(&archive_dir).with_context(|| format!("create task archive dir {}", archive_dir.display()))?;
-    let archive_path = archive_dir.join(format!("current_task-{}.md", filename_safe_id(session_id, 64)));
+    let archive_name = format!(
+        "current_task-{}-{}-{}.md",
+        filename_safe_id(session_id, 64),
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ"),
+        uuid::Uuid::new_v4()
+    );
+    let archive_path = archive_dir.join(archive_name);
     fs::rename(&task_path, &archive_path)
         .with_context(|| format!("archive completed task tracker to {}", archive_path.display()))?;
     Ok(Some(archive_path))
@@ -504,7 +522,53 @@ mod tests {
             .expect("archive")
             .expect("fully-checked tracker is archived");
         assert!(!task_path.exists(), "live path must be clear for the next plan");
-        assert!(archived.ends_with("current_task-session-a.md"));
+        assert!(
+            archived
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| { name.starts_with("current_task-session-a-") && name.ends_with(".md") })
+        );
         assert!(archived.exists());
+    }
+
+    #[test]
+    fn archive_completed_current_task_never_overwrites_a_prior_archive() {
+        // Resume-in-place reuses the session id, so a second completion must
+        // not rename over the first archive: the live file is gone after the
+        // move and the archive is the only copy.
+        let temp = tempdir().expect("tempdir");
+        let task_path = current_task_path(temp.path());
+        fs::create_dir_all(task_path.parent().expect("parent")).expect("tasks dir");
+
+        fs::write(&task_path, "# Work\n\n- [x] first completion\n").expect("write complete");
+        let first = archive_completed_current_task(temp.path(), "session-a")
+            .expect("archive")
+            .expect("first archive");
+        fs::write(&task_path, "# Work\n\n- [x] second completion\n").expect("write complete");
+        let second = archive_completed_current_task(temp.path(), "session-a")
+            .expect("archive")
+            .expect("second archive");
+
+        assert_ne!(first, second, "each completion gets its own archive file");
+        assert!(first.exists(), "first archive must survive the second completion");
+        assert!(second.exists());
+        assert_eq!(fs::read_to_string(&first).expect("first content"), "# Work\n\n- [x] first completion\n");
+    }
+
+    #[test]
+    fn session_artifact_cutoff_is_some_for_existing_dir_and_none_for_missing() {
+        let temp = tempdir().expect("tempdir");
+        assert!(
+            session_artifact_cutoff(temp.path(), "sess-missing").is_none(),
+            "missing session dir keeps the unfiltered-read fallback"
+        );
+
+        let session_dir = temp.path().join(".vtcode").join("sessions").join("sess-live");
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let cutoff = session_artifact_cutoff(temp.path(), "sess-live").expect("cutoff");
+        assert!(
+            cutoff <= SystemTime::now(),
+            "an existing session dir must yield a real cutoff so the leftover filter stays enabled"
+        );
     }
 }

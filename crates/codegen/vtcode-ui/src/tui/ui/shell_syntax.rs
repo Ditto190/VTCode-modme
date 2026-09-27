@@ -368,7 +368,15 @@ pub fn line_to_compact_segments(
                     // First wrapped line uses command-position highlighting;
                     // continuations highlight as args (no leading command word).
                     let expect_command = idx == 0;
-                    let body = line.strip_suffix(" \\").unwrap_or(line);
+                    let is_final_line = idx + 1 == wrapped.len();
+                    // The wrapper appends ` \` to non-final rows only, so on
+                    // the final row a trailing ` \` is the command's own text
+                    // (a real line continuation) and must be kept verbatim.
+                    let body = if is_final_line {
+                        line.as_str()
+                    } else {
+                        line.strip_suffix(" \\").unwrap_or(line)
+                    };
                     segments.extend(shell_syntax_segments(body, styles, expect_command));
                     if idx + 1 < wrapped.len() {
                         segments.push(InlineSegment {
@@ -459,6 +467,49 @@ mod tests {
         for fragment in ["node_modules", "package-lock", "\\.backup"] {
             assert!(text.contains(fragment), "missing {fragment:?} in {text:?}");
         }
+    }
+
+    #[test]
+    fn compact_row_keeps_command_own_trailing_continuation_backslash() {
+        // The wrapper appends ` \` to non-final rows only, so on the final
+        // wrapped row a trailing ` \` belongs to the command itself (a real
+        // line continuation). Stripping it there would make the transcript
+        // diverge from what executed.
+        let styles = ShellLineStyles::new();
+        let with_continuation = "echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \\";
+        assert!(with_continuation.chars().count() > RAN_COMMAND_FIRST_WIDTH);
+        let meta = vtcode_commons::ui_protocol::CompactActivityMetadata {
+            group_id: 1,
+            command_count: 1,
+            command: Some(with_continuation.into()),
+            hidden_line_count: 0,
+            suffix: None,
+            review_anchor: None,
+            review_anchors: vec![],
+        };
+        let text: String = line_to_compact_segments(&meta, &styles)
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(text.ends_with(" \\"), "command's own trailing continuation must survive: {text:?}");
+
+        // Asymmetric check: a command that does not end in ` \` gains no
+        // marker on the final row either.
+        let without_continuation = "echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa target";
+        let meta = vtcode_commons::ui_protocol::CompactActivityMetadata {
+            group_id: 1,
+            command_count: 1,
+            command: Some(without_continuation.into()),
+            hidden_line_count: 0,
+            suffix: None,
+            review_anchor: None,
+            review_anchors: vec![],
+        };
+        let text: String = line_to_compact_segments(&meta, &styles)
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(!text.ends_with(" \\"), "no continuation marker may appear on the final row: {text:?}");
     }
 
     #[test]

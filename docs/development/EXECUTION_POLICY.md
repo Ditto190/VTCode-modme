@@ -224,7 +224,7 @@ tax so it can be measured, not guessed:
   `SessionStats::first_call_composition` and shown on exit as
   `First-call overhead N (system S + tools T)`.
 - Eval reports (`vtcode-eval`) include a `Cost efficiency` line:
-  `cost/solve`, mean cost per attempt, mean tokens per attempt, and mean turns
+  `cost/solve`, mean cost per priced attempt, mean tokens per attempt, and mean turns
   per attempt. `cost_per_solve` is `None` when any attempt is unpriced
   (unknown cost is not free) or nothing passed.
 

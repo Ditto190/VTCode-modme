@@ -1226,7 +1226,7 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 continue;
                             }
                         };
-                        if Some(requested_agent) != Some(resolved_execution_agent.as_str()) {
+                        if requested_agent != resolved_execution_agent.as_str() {
                             tracing::warn!(
                                 requested_agent = ?requested_agent,
                                 resolved_agent = ?resolved_execution_agent,

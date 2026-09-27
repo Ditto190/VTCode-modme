@@ -224,14 +224,12 @@ pub fn mark_abandoned_active_sessions(
         }
         let body = serde_json::to_vec_pretty(&summary)
             .map_err(|error| SessionStoreError::io(manifest_path.clone(), std::io::Error::other(error)))?;
-        // Unique temp + rename so a crash cannot leave a truncated manifest and
-        // concurrent writers cannot collide (same pattern as checkpoint atomic_json).
-        let temp = manifest_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-        std::fs::write(&temp, &body).map_err(|e| SessionStoreError::io(temp.clone(), e))?;
-        if let Err(error) = std::fs::rename(&temp, &manifest_path) {
-            let _ = std::fs::remove_file(&temp);
-            return Err(SessionStoreError::io(manifest_path.clone(), error));
-        }
+        // Same primitive as ManifestStore: 0600 private temp + fsync + rename,
+        // so a crash cannot leave a truncated manifest, the rewritten manifest
+        // keeps session-file permissions, and a planted symlink cannot be
+        // followed to an outside destination.
+        vtcode_commons::VtCodePaths::write_private_file_atomic(&manifest_path, &body)
+            .map_err(|error| SessionStoreError::io(manifest_path.clone(), std::io::Error::other(error)))?;
         marked += 1;
     }
     Ok(marked)

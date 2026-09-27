@@ -245,6 +245,18 @@ fn preflight_name_mistakes_are_llm_mistakes_and_do_not_trip() {
     assert!(preflight_failure_is_llm_mistake("Tool preflight validation failed: Unknown tool: ` — `"));
     // A tool name that merely contains "sandbox" is still a name mistake.
     assert!(preflight_failure_is_llm_mistake("Unknown tool: sandbox_helper"));
+    // Prose inside the embedded name must not flip the classification even
+    // when it contains policy phrases: classification runs on the static
+    // prefix before the name, never on the name itself.
+    assert!(preflight_failure_is_llm_mistake(
+        "tool name is not a clean identifier: write_file is not allowed here, use apply_patch"
+    ));
+    assert!(preflight_failure_is_llm_mistake(
+        "tool name is not a clean identifier: I will not invoke command injection"
+    ));
+    assert!(preflight_failure_is_llm_mistake(
+        "tool name is not a clean identifier: sandbox policy requires approval"
+    ));
 }
 
 #[test]
@@ -261,4 +273,9 @@ fn preflight_policy_and_argument_failures_still_trip() {
     assert!(!preflight_failure_is_llm_mistake("Invalid arguments: expected value"));
     assert!(!preflight_failure_is_llm_mistake("Policy violation: sandbox denied"));
     assert!(!preflight_failure_is_llm_mistake("Command security check failed: sandbox policy denied"));
+    // A policy prefix wrapping the name-mistake constant still counts: the
+    // static prefix carries the policy phrase.
+    assert!(!preflight_failure_is_llm_mistake(
+        "command security check failed: tool name is not a clean identifier: exec_command"
+    ));
 }

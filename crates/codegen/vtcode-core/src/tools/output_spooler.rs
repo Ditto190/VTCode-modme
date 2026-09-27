@@ -121,6 +121,21 @@ pub(crate) fn command_preview_content(
     }
 }
 
+/// Which retention rules a cleanup pass applies.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum SpoolCleanupScope {
+    /// Drop only files older than `max_age_secs`.
+    AgeOnly,
+    /// Age expiry plus the `max_files` count budget.
+    AgeAndCount,
+}
+
+impl SpoolCleanupScope {
+    fn enforces_count_budget(self) -> bool {
+        matches!(self, SpoolCleanupScope::AgeAndCount)
+    }
+}
+
 /// Configuration for the output spooler
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpoolerConfig {
@@ -842,6 +857,23 @@ impl ToolOutputSpooler {
     /// directory (not just this instance's tracking vec) so leftovers from
     /// prior sessions cannot accumulate past the budget.
     pub async fn cleanup_old_files(&self) -> Result<usize> {
+        self.cleanup_files(SpoolCleanupScope::AgeAndCount).await
+    }
+
+    /// Age-based cleanup only, for startup paths.
+    ///
+    /// The count budget relies on [`Self::pinned_files`], which is per-process:
+    /// a second session starting in the same workspace cannot see a concurrent
+    /// session's pinned or active spools, so enforcing the count budget at
+    /// startup can delete young files the other session still reads from its
+    /// conversation history. Age-expired files are safe to drop anywhere: no
+    /// live session produced them within `max_age_secs`. The count budget
+    /// stays on the in-session periodic path ([`Self::cleanup_old_files`]).
+    pub async fn cleanup_expired_files(&self) -> Result<usize> {
+        self.cleanup_files(SpoolCleanupScope::AgeOnly).await
+    }
+
+    async fn cleanup_files(&self, scope: SpoolCleanupScope) -> Result<usize> {
         if !fs::try_exists(&self.output_dir).await.unwrap_or(false) {
             return Ok(0);
         }
@@ -876,7 +908,7 @@ impl ToolOutputSpooler {
 
         // Enforce the file-count budget across sessions: drop the oldest
         // unpinned survivors until at most max_files remain on disk.
-        if survivors.len() > self.config.max_files {
+        if scope.enforces_count_budget() && survivors.len() > self.config.max_files {
             survivors.sort_by_key(|(_, modified)| *modified);
             let overflow = survivors.len() - self.config.max_files;
             for (path, _) in survivors.into_iter().take(overflow) {
@@ -1521,5 +1553,35 @@ mod tests {
         let removed = spooler.cleanup_old_files().await.unwrap();
         assert_eq!(removed, 1);
         assert!(!full_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_expired_files_never_enforces_count_budget() {
+        // Startup pruning runs in a fresh process whose pin set cannot see a
+        // concurrent session's young spools, so it must be age-only: young
+        // files beyond max_files stay on disk until the in-session periodic
+        // cleanup enforces the budget.
+        let temp = tempdir().unwrap();
+        let output_dir = temp.path().join(".vtcode").join("context").join("tool_outputs");
+        std::fs::create_dir_all(&output_dir).unwrap();
+        for i in 0..8 {
+            std::fs::write(output_dir.join(format!("young-{i}.out")), b"young").unwrap();
+        }
+
+        let config = SpoolerConfig {
+            threshold_bytes: 1,
+            max_age_secs: 3600,
+            max_files: 3,
+            ..Default::default()
+        };
+        let spooler = ToolOutputSpooler::with_config(temp.path(), config);
+
+        let removed = spooler.cleanup_expired_files().await.unwrap();
+        assert_eq!(removed, 0, "startup prune must not evict young files past max_files");
+        assert_eq!(std::fs::read_dir(&output_dir).unwrap().count(), 8, "all young spools survive the startup prune");
+
+        let removed = spooler.cleanup_old_files().await.unwrap();
+        assert_eq!(removed, 5, "in-session cleanup still enforces the count budget");
+        assert_eq!(std::fs::read_dir(&output_dir).unwrap().count(), 3);
     }
 }

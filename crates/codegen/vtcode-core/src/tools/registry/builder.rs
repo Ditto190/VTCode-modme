@@ -200,10 +200,13 @@ impl ToolRegistry {
         let hot_cache_size = std::num::NonZeroUsize::new(optimization_config.tool_registry.hot_cache_size)
             .unwrap_or(std::num::NonZeroUsize::MIN);
         let output_spooler = Arc::new(ToolOutputSpooler::with_config(&workspace_root, spooler_config));
-        // Prune leftovers from prior sessions immediately. Periodic cleanup
-        // only fires every N spools inside one session, so short sessions never
-        // reached the threshold and stale spools piled up across runs.
-        if let Err(error) = output_spooler.cleanup_old_files().await {
+        // Age-expired leftovers from prior sessions are pruned immediately;
+        // periodic cleanup only fires every N spools inside one session, so
+        // short sessions never reached the threshold and stale spools piled up
+        // across runs. The count budget stays on the in-session periodic path:
+        // pinning is per-process, so a startup count prune in this session
+        // could delete young spools a concurrent session still reads.
+        if let Err(error) = output_spooler.cleanup_expired_files().await {
             tracing::debug!(%error, "startup spool prune failed");
         }
 

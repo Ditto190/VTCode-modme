@@ -176,6 +176,10 @@ fn contains_command_substitution(script: &str) -> bool {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escaped = false;
+    // Delimiter of a `<<'EOF'`-shaped heredoc whose opener line has not ended
+    // yet. The opener line stays live shell; the body is skipped at the
+    // unquoted opener newline.
+    let mut pending_heredoc: Option<String> = None;
     let mut characters = script.chars().peekable();
     while let Some(character) = characters.next() {
         if escaped {
@@ -195,25 +199,27 @@ fn contains_command_substitution(script: &str) -> bool {
             continue;
         }
         if !in_single_quote {
-            // Quoted heredoc bodies are literal data, not shell. Skipping them
-            // keeps `cat <<'EOF'` with backticks/`$()` in the payload from
-            // looking like command substitution (session-vtcode-20260925).
-            // A heredoc only starts outside quotes: inside a double-quoted
-            // string `<<` is literal text while substitution stays active, so
-            // skipping there would hide an executable `$(...)`/backtick.
+            // A quoted heredoc delimiter arms the literal-body skip, keeping
+            // `cat <<'EOF'` payloads with backticks/`$()` from looking like
+            // command substitution (session-vtcode-20260925). Everything after
+            // the delimiter on the opener line is live shell — a second command
+            // or `$()` placed there executes in bash — so the skip only starts
+            // at the unquoted opener newline. A heredoc never starts inside a
+            // double-quoted string while substitution stays active there.
             if character == '<' && !in_double_quote && characters.peek() == Some(&'<') {
                 // Probe without mutating so an unquoted `<<` keeps both marks.
                 let mut probe = characters.clone();
                 let _ = probe.next(); // second '<'
                 let rest: String = probe.collect();
-                if let Some(skip) = shell_parser::quoted_heredoc_skip_len(&rest) {
+                if let Some((delim, token_len)) = shell_parser::quoted_heredoc_delim(&rest) {
                     let _ = characters.next(); // second '<'
                     let mut consumed = 0usize;
-                    while consumed < skip
+                    while consumed < token_len
                         && let Some(ch) = characters.next()
                     {
                         consumed += ch.len_utf8();
                     }
+                    pending_heredoc = Some(delim);
                     continue;
                 }
             }
@@ -224,6 +230,24 @@ fn contains_command_substitution(script: &str) -> bool {
                 let mut lookahead = characters.clone();
                 if lookahead.next() == Some('(') && lookahead.next() != Some('(') {
                     return true;
+                }
+            }
+        }
+        if character == '\n'
+            && !in_single_quote
+            && !in_double_quote
+            && let Some(delim) = pending_heredoc.take()
+        {
+            // Quoted heredoc body: literal data, skipped through the closing
+            // delimiter line. Without a closing delimiter the body keeps
+            // being scanned, so executable content in it is still detected.
+            let rest: String = characters.clone().collect();
+            if let Some(skip) = shell_parser::heredoc_body_skip_len(&rest, &delim) {
+                let mut consumed = 0usize;
+                while consumed < skip
+                    && let Some(ch) = characters.next()
+                {
+                    consumed += ch.len_utf8();
                 }
             }
         }
@@ -331,10 +355,58 @@ mod tests {
 
     #[test]
     fn heredoc_skip_matches_delimiter_line() {
+        // rest after `<<`: quoted token, empty opener-line suffix, then body.
         let after = "'EOF'\nline1\nEOF\ntrailer";
-        let skip = shell_parser::quoted_heredoc_skip_len(after).expect("skip length");
-        let skipped: String = after.chars().take(skip).collect();
-        assert_eq!(skipped, "'EOF'\nline1\nEOF\n");
+        let (delim, token_len) = shell_parser::quoted_heredoc_delim(after).expect("delimiter");
+        assert_eq!(delim, "EOF");
+        let token: String = after.chars().take(token_len).collect();
+        assert_eq!(token, "'EOF'");
+        // Body starts right after the opener newline; the skip covers every
+        // body line through the closing delimiter line.
+        let (_, body) = after.split_once('\n').expect("opener newline");
+        let skip = shell_parser::heredoc_body_skip_len(body, &delim).expect("skip length");
+        let skipped: String = body.chars().take(skip).collect();
+        assert_eq!(skipped, "line1\nEOF\n");
+    }
+
+    /// Everything after the delimiter on the opener line is live shell: a
+    /// second command or substitution placed there executes in bash, so the
+    /// body skip must never start before the opener newline.
+    #[test]
+    fn substitution_after_heredoc_delimiter_on_opener_line_is_detected() {
+        let script = "cat <<'EOF'; $(touch /tmp/vtcode-scan-probe)\nbody\nEOF\n";
+        assert!(contains_command_substitution(script), "opener-line suffix is live shell: {script:?}");
+        assert!(validate_shell_script(script).is_err(), "opener-line substitution must be rejected: {script:?}");
+    }
+
+    #[test]
+    fn backtick_after_heredoc_delimiter_on_opener_line_is_detected() {
+        let script = "cat <<'EOF' `touch /tmp/vtcode-scan-probe`\nbody\nEOF\n";
+        assert!(contains_command_substitution(script), "opener-line backtick is live shell: {script:?}");
+    }
+
+    #[test]
+    fn chained_command_after_heredoc_delimiter_on_opener_line_is_rejected() {
+        // No substitution involved: `parse_shell_commands` must still see the
+        // `&&`-chained segment instead of swallowing it into the body skip.
+        let script = "cat <<'EOF' && rm -rf /\nbody\nEOF\n";
+        assert!(validate_shell_script(script).is_err(), "opener-line chaining must be rejected: {script:?}");
+    }
+
+    #[test]
+    fn pipeline_suffix_after_heredoc_delimiter_stays_clean() {
+        // Legitimate shape the opener-line scanning must keep working: the
+        // suffix splits into segments and the quoted body stays literal.
+        let script = "cat <<'EOF' | wc -l\nbody line\nEOF\n";
+        assert!(!contains_command_substitution(script), "quoted heredoc with pipeline stays clean: {script:?}");
+        assert!(validate_shell_script(script).is_ok(), "pipeline suffix must validate: {script:?}");
+    }
+
+    #[test]
+    fn segments_after_heredoc_body_are_still_scanned() {
+        // Content after the closing delimiter is live shell again.
+        let script = "cat <<'EOF'\nbody\nEOF\necho $(whoami)\n";
+        assert!(contains_command_substitution(script), "post-heredoc substitution is live shell: {script:?}");
     }
 
     #[test]
