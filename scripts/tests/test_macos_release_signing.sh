@@ -18,10 +18,11 @@ fail_test() {
 uname() { printf '%s\n' "${TEST_UNAME:-Darwin}"; }
 
 unset VTCODE_MACOS_SIGNING_IDENTITY VTCODE_MACOS_NOTARY_PROFILE
-if macos_release_signing_preflight >/dev/null 2>&1; then
-    fail_test 'preflight must reject missing signing credentials'
+if macos_release_signing_preflight >/dev/null 2>&1 \
+    && [[ "$_vtcode_macos_release_signing_mode" == "unsigned" ]]; then
+    pass 'preflight allows unsigned packaging when signing credentials are absent'
 else
-    pass 'preflight rejects missing signing credentials'
+    fail_test 'preflight should select unsigned packaging when signing credentials are absent'
 fi
 
 security() {
@@ -47,6 +48,7 @@ ditto() {
 }
 
 xcrun() {
+    printf '%s\n' "$*" >>"$tmp/xcrun-args"
     if [[ "$1" == "notarytool" && "$2" == "history" ]]; then
         return "${TEST_NOTARY_HISTORY_STATUS:-0}"
     fi
@@ -58,6 +60,7 @@ xcrun() {
 }
 
 spctl() {
+    printf '%s\n' "$*" >>"$tmp/spctl-args"
     local assessed_binary
     for assessed_binary in "$@"; do :; done
     if [[ ! -x "$assessed_binary" ]]; then
@@ -73,6 +76,24 @@ spctl() {
 
 export VTCODE_MACOS_SIGNING_IDENTITY='Developer ID Application: Test Developer (TEAMID)'
 export VTCODE_MACOS_NOTARY_PROFILE='VTCodeTestNotary'
+_vtcode_macos_release_signing_mode="uninitialized"
+
+unset VTCODE_MACOS_NOTARY_PROFILE
+if macos_release_signing_preflight >/dev/null 2>&1; then
+    fail_test 'preflight must reject partial signing credentials'
+else
+    pass 'preflight rejects partial signing credentials'
+fi
+export VTCODE_MACOS_NOTARY_PROFILE='VTCodeTestNotary'
+unset VTCODE_MACOS_SIGNING_IDENTITY
+_vtcode_macos_release_signing_mode="uninitialized"
+if macos_release_signing_preflight >/dev/null 2>&1; then
+    fail_test 'preflight must reject a notary profile without a signing identity'
+else
+    pass 'preflight rejects a notary profile without a signing identity'
+fi
+export VTCODE_MACOS_SIGNING_IDENTITY='Developer ID Application: Test Developer (TEAMID)'
+_vtcode_macos_release_signing_mode="uninitialized"
 
 TEST_UNAME=Linux
 if macos_release_signing_preflight >/dev/null 2>&1; then
@@ -180,6 +201,49 @@ if verify_macos_release_binary "$tmp/vtcode" >/dev/null 2>&1; then
     fail_test 'Gatekeeper rejection must block the release'
 else
     pass 'Gatekeeper rejection blocks the release'
+fi
+
+unset VTCODE_MACOS_SIGNING_IDENTITY VTCODE_MACOS_NOTARY_PROFILE
+_vtcode_macos_release_signing_mode="uninitialized"
+: >"$tmp/codesign-args"
+: >"$tmp/xcrun-args"
+: >"$tmp/spctl-args"
+if macos_release_signing_preflight >"$tmp/unsigned-preflight-output" 2>&1; then
+    pass 'unsigned preflight succeeds without signing credentials'
+else
+    fail_test 'unsigned preflight should succeed without signing credentials'
+fi
+if grep -Fq 'packaging unsigned, unnotarized macOS binaries' "$tmp/unsigned-preflight-output"; then
+    pass 'unsigned preflight emits a Gatekeeper warning'
+else
+    fail_test 'unsigned preflight should explain the Gatekeeper risk'
+fi
+if sign_and_notarize_macos_binary "$tmp/vtcode"; then
+    pass 'unsigned packaging skips signing and notarization'
+else
+    fail_test 'unsigned packaging should not require signing credentials'
+fi
+if verify_macos_release_binary "$tmp/vtcode"; then
+    pass 'unsigned binary verification accepts an executable file'
+else
+    fail_test 'unsigned binary verification should accept an executable file'
+fi
+if verify_macos_release_archive "$tmp/vtcode-release.tar.gz"; then
+    pass 'unsigned archive verification accepts a root executable'
+else
+    fail_test 'unsigned archive verification should accept a root executable'
+fi
+if [[ ! -s "$tmp/codesign-args" && ! -s "$tmp/xcrun-args" && ! -s "$tmp/spctl-args" ]]; then
+    pass 'unsigned verification does not call signing, notarization, or Gatekeeper tools'
+else
+    fail_test 'unsigned verification must not require signing or Gatekeeper tools'
+fi
+
+chmod -x "$tmp/vtcode"
+if verify_macos_release_binary "$tmp/vtcode" >/dev/null 2>&1; then
+    fail_test 'unsigned binary verification must reject a non-executable file'
+else
+    pass 'unsigned binary verification rejects a non-executable file'
 fi
 
 exit "$fail"

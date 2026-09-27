@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 
-# Shared Developer ID signing and notarization for macOS release binaries.
+# Optional Developer ID signing and notarization for macOS release binaries.
+# Without credentials, release scripts keep packaging unsigned binaries.
 # Source this file from release scripts; it intentionally does not change the
 # caller's shell options.
 
 VTCODE_MACOS_RELEASE_IDENTIFIER="com.vinhnx.vtcode"
-_vtcode_macos_release_signing_ready=0
+_vtcode_macos_release_signing_mode="uninitialized"
 
 macos_release_signing_preflight() {
-    if [[ "$_vtcode_macos_release_signing_ready" == "1" ]]; then
+    if [[ "$_vtcode_macos_release_signing_mode" != "uninitialized" ]]; then
         return 0
     fi
 
@@ -17,8 +18,14 @@ macos_release_signing_preflight() {
         return 1
     fi
 
-    if [[ -z "${VTCODE_MACOS_SIGNING_IDENTITY:-}" ]]; then
-        printf 'Error: set VTCODE_MACOS_SIGNING_IDENTITY to an installed Developer ID Application identity.\n' >&2
+    if [[ -z "${VTCODE_MACOS_SIGNING_IDENTITY:-}" && -z "${VTCODE_MACOS_NOTARY_PROFILE:-}" ]]; then
+        _vtcode_macos_release_signing_mode="unsigned"
+        printf 'Warning: packaging unsigned, unnotarized macOS binaries. Gatekeeper may warn, block, or request user approval.\n' >&2
+        printf 'Set VTCODE_MACOS_SIGNING_IDENTITY and VTCODE_MACOS_NOTARY_PROFILE to enable Developer ID signing and notarization.\n' >&2
+        return 0
+    fi
+    if [[ -z "${VTCODE_MACOS_SIGNING_IDENTITY:-}" || -z "${VTCODE_MACOS_NOTARY_PROFILE:-}" ]]; then
+        printf 'Error: set both VTCODE_MACOS_SIGNING_IDENTITY and VTCODE_MACOS_NOTARY_PROFILE, or leave both unset for unsigned packaging.\n' >&2
         return 1
     fi
     case "$VTCODE_MACOS_SIGNING_IDENTITY" in
@@ -58,11 +65,22 @@ macos_release_signing_preflight() {
         return 1
     fi
 
-    _vtcode_macos_release_signing_ready=1
+    _vtcode_macos_release_signing_mode="notarized"
 }
 
 verify_macos_release_binary() {
     local binary=$1
+    if ! macos_release_signing_preflight; then
+        return 1
+    fi
+
+    if [[ ! -f "$binary" || ! -x "$binary" ]]; then
+        printf 'Error: macOS release binary is missing or not executable: %s\n' "$binary" >&2
+        return 1
+    fi
+    if [[ "$_vtcode_macos_release_signing_mode" == "unsigned" ]]; then
+        return 0
+    fi
 
     if ! codesign --verify --strict --verbose=2 "$binary"; then
         printf 'Error: macOS release binary has an invalid code signature: %s\n' "$binary" >&2
@@ -137,6 +155,9 @@ sign_and_notarize_macos_binary() {
     if [[ ! -f "$binary" ]]; then
         printf 'Error: macOS release binary is missing: %s\n' "$binary" >&2
         return 1
+    fi
+    if [[ "$_vtcode_macos_release_signing_mode" == "unsigned" ]]; then
+        return 0
     fi
 
     if ! codesign --force --options runtime --timestamp \

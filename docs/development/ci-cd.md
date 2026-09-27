@@ -71,25 +71,32 @@ emergency macOS/Linux rescue when Windows CI is flaky.
 
 **macOS signing and Gatekeeper**
 
-Both macOS release executables are signed with a Developer ID Application
-identity, hardened runtime, secure timestamp, and the stable code identifier
-`com.vinhnx.vtcode`. The release scripts submit each executable to Apple's
-notary service and verify both the signature and Gatekeeper assessment before
-publishing the archive or compatibility executable. The raw executable archive
-layout stays compatible with Homebrew, `install.sh`, and the updater. Apple
-publishes notarization tickets for standalone command-line binaries online but
-does not allow stapling tickets to those binaries, so Gatekeeper needs network
-access when it first checks a new release. See Apple's guides for
+When Developer ID signing and notarization credentials are configured, both
+macOS release executables are signed with a hardened runtime, secure timestamp,
+and the stable code identifier `com.vinhnx.vtcode`. The release scripts submit
+each executable to Apple's notary service and verify its signature and
+Gatekeeper assessment before publishing the archive or compatibility
+executable. The raw executable archive layout stays compatible with Homebrew,
+`install.sh`, and the updater. Apple publishes notarization tickets for
+standalone command-line binaries online but does not allow stapling tickets to
+those binaries, so Gatekeeper needs network access when it first checks a new
+release. See Apple's guides for
 [notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 and [customizing the notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
-Apple can still show its informational first-launch notice for a newly installed
-version; signing and notarization let Gatekeeper identify and trust the release
-consistently so the unsigned-binary verification is not repeated on every run.
+Gatekeeper may still show an informational first-launch dialog for a newly
+installed version, including a notarized one.
 
-The Mac that runs `scripts/release.sh` needs the Developer ID Application
-certificate in its keychain and a `notarytool` keychain profile. Create the
-profile with `xcrun notarytool store-credentials`, then set the profile name and
-full signing identity before releasing:
+On a Mac with no signing credentials, the release scripts continue to package
+and publish unsigned, unnotarized macOS binaries and print a warning. Gatekeeper
+may warn, block, or ask users to approve a downloaded binary; VT Code cannot
+hide or dismiss those macOS security dialogs. This keeps macOS releases
+available without a paid developer account, with the tradeoff that first-run
+security friction remains.
+
+To enable signing and notarization, the Mac running the release needs a
+Developer ID Application certificate in its keychain and a `notarytool`
+keychain profile. Create the profile with `xcrun notarytool store-credentials`,
+then set the profile name and full signing identity before releasing:
 
 ```bash
 export VTCODE_MACOS_SIGNING_IDENTITY='Developer ID Application: Name (TEAMID)'
@@ -97,10 +104,10 @@ export VTCODE_MACOS_NOTARY_PROFILE='VTCodeNotary'
 ./scripts/release.sh --patch
 ```
 
-The release fails before building if either credential is unavailable, and it
-blocks upload if Apple rejects notarization or Gatekeeper does not recognize a
-notarized Developer ID signature. Linux and Windows artifacts do not use this
-macOS-only signing path.
+Leave both variables unset to publish unsigned macOS binaries. If either
+variable is set, both must be configured correctly; a partial or invalid
+configuration fails rather than silently falling back to unsigned artifacts.
+Linux and Windows artifacts do not use this macOS-only signing path.
 
 **Binary size & cold-start optimization:**
 
