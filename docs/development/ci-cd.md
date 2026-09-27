@@ -69,6 +69,39 @@ cannot extract. The release fails if any required target archive (including
 Windows by default) is missing. Set `RELEASE_REQUIRE_WINDOWS=false` only for an
 emergency macOS/Linux rescue when Windows CI is flaky.
 
+**macOS signing and Gatekeeper**
+
+Both macOS release executables are signed with a Developer ID Application
+identity, hardened runtime, secure timestamp, and the stable code identifier
+`com.vinhnx.vtcode`. The release scripts submit each executable to Apple's
+notary service and verify both the signature and Gatekeeper assessment before
+publishing the archive or compatibility executable. The raw executable archive
+layout stays compatible with Homebrew, `install.sh`, and the updater. Apple
+publishes notarization tickets for standalone command-line binaries online but
+does not allow stapling tickets to those binaries, so Gatekeeper needs network
+access when it first checks a new release. See Apple's guides for
+[notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+and [customizing the notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
+Apple can still show its informational first-launch notice for a newly installed
+version; signing and notarization let Gatekeeper identify and trust the release
+consistently so the unsigned-binary verification is not repeated on every run.
+
+The Mac that runs `scripts/release.sh` needs the Developer ID Application
+certificate in its keychain and a `notarytool` keychain profile. Create the
+profile with `xcrun notarytool store-credentials`, then set the profile name and
+full signing identity before releasing:
+
+```bash
+export VTCODE_MACOS_SIGNING_IDENTITY='Developer ID Application: Name (TEAMID)'
+export VTCODE_MACOS_NOTARY_PROFILE='VTCodeNotary'
+./scripts/release.sh --patch
+```
+
+The release fails before building if either credential is unavailable, and it
+blocks upload if Apple rejects notarization or Gatekeeper does not recognize a
+notarized Developer ID signature. Linux and Windows artifacts do not use this
+macOS-only signing path.
+
 **Binary size & cold-start optimization:**
 
 All release profiles inherit `[profile.release]` which uses `opt-level = "z"` (size
