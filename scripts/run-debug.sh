@@ -136,7 +136,8 @@ EOF
 	mv -f "${VTCODE_DEBUG_INFO_TEMP}" "${VTCODE_DEBUG_INFO_PLIST}"
 	/usr/bin/codesign --force --sign - --identifier com.vinhnx.vtcode.debug "${VTCODE_DEBUG_APP}"
 	if ! /usr/bin/gktool scan "${VTCODE_DEBUG_APP}"; then
-		printf 'Warning: Gatekeeper pre-scan failed; launching the debug app bundle anyway.\n' >&2
+		printf 'Error: Gatekeeper could not pre-scan the VT Code debug app; refusing to launch it to avoid the macOS verification sheet.\n' >&2
+		exit 1
 	fi
 	export PATH="${VTCODE_DEBUG_BUILD_DIR}:${PATH}"
 	"${VTCODE_DEBUG_APP_EXECUTABLE}" "${EXTRA_ARGS[@]}" --show-file-diffs --debug
