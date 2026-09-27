@@ -73,12 +73,12 @@ Semantics (mirror Anthropic `clear_tool_uses_20250919`):
    (oldest-first). `clear_at_least_tokens` is a floor on reclaimed tokens,
    not a stop ceiling — stopping early would leave a permanently growing
    tail when the function re-shapes full durable history each request.
-4. Preserve `role`, `tool_call_id`, `origin_tool`, and message order so
+3. Preserve `role`, `tool_call_id`, `origin_tool`, and message order so
    provider tool-pairing validation still passes.
-5. When `clear_tool_inputs`, also replace `tool_calls[].function.arguments`
-   on Assistant messages whose paired results were cleared, with the JSON
-   placeholder `{"cleared":"tool_input"}` (never prose — providers send
-   `arguments` verbatim).
+4. When `clear_tool_inputs`, also replace `tool_calls[].function.arguments`
+   and freeform `text` on Assistant messages whose paired results were
+   cleared, with the JSON placeholder `{"cleared":"tool_input"}` (never
+   prose — providers send `arguments` verbatim).
 
 **Stub shape** (stable, compact, actionable):
 
@@ -92,7 +92,8 @@ Semantics (mirror Anthropic `clear_tool_uses_20250919`):
 }
 ```
 
-**Call site** (`request_builder.rs`, after `normalize_history_for_request`):
+**Call site** (interactive `request_builder.rs` and headless `runner/execute.rs`,
+after `normalize_history_for_request`):
 
 Apply local clearing when `tool_result_clearing.enabled` AND the request will
 NOT carry Anthropic `clear_tool_uses` (i.e. not

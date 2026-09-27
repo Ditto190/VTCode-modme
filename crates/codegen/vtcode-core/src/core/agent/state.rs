@@ -466,6 +466,12 @@ pub fn clear_old_tool_results(
                         // verbatim; prose would break OpenAI tool-call parsing.
                         function.arguments = CLEARED_TOOL_INPUT_PLACEHOLDER.to_string();
                     }
+                    // Freeform custom tool payloads ride in `text`, not
+                    // `function.arguments` (see ToolCall::custom).
+                    if call.text.is_some() {
+                        call.text = Some(CLEARED_TOOL_INPUT_PLACEHOLDER.to_string());
+                    }
+                    call.thought_signature = None;
                 }
             }
         }
@@ -492,15 +498,15 @@ pub fn should_apply_local_tool_result_clearing(
 
 fn build_cleared_tool_result_stub(original: &Message) -> Message {
     let mut stub = original.clone();
-    let tool_name = original.origin_tool.as_deref().unwrap_or("tool");
-    let call_id = original.tool_call_id.as_deref().unwrap_or("");
-    // Compact JSON keeps the stub machine-readable without carrying the body.
-    let body = format!(
-        "{{\"cleared\":\"tool_result\",\"reason\":\"tool_result_clearing\",\"note\":{note:?},\"tool\":{tool:?},\"tool_call_id\":{call_id:?}}}",
-        note = CLEARED_TOOL_RESULT_NOTE,
-        tool = tool_name,
-        call_id = call_id,
-    );
+    // serde_json (not `{:?}`) so non-ASCII tool names / call ids stay valid JSON.
+    let body = serde_json::json!({
+        "cleared": "tool_result",
+        "reason": "tool_result_clearing",
+        "note": CLEARED_TOOL_RESULT_NOTE,
+        "tool": original.origin_tool.as_deref().unwrap_or("tool"),
+        "tool_call_id": original.tool_call_id.as_deref().unwrap_or(""),
+    })
+    .to_string();
     stub.content = crate::llm::provider::MessageContent::Text(body);
     stub
 }
@@ -1121,5 +1127,45 @@ mod tests {
         assert!(gate("anthropic", false, true), "Anthropic without edits falls back to local");
         assert!(!gate("anthropic", true, true), "Anthropic with context_edits uses native clear_tool_uses only");
         assert!(!gate("zai", false, false), "disabled config never clears");
+    }
+
+    #[test]
+    fn clear_old_tool_results_stub_is_valid_json_for_non_ascii_tool_names() {
+        let mut messages = bulky_tool_history(3, 2_500);
+        // Index 2 is the first tool response (call_0).
+        messages[2].origin_tool = Some("读取文件".to_string());
+        messages[2].tool_call_id = Some("call_ünïcode".to_string());
+        let cleared = clear_old_tool_results(&messages, 1, 1, 1, false);
+        let stub = cleared
+            .iter()
+            .filter(|m| is_cleared_stub(m))
+            .find(|m| m.content.as_text().contains("call_ünïcode"))
+            .expect("stub for the renamed call");
+        let parsed: serde_json::Value =
+            serde_json::from_str(stub.content.as_text().as_ref()).expect("stub must be valid JSON");
+        assert_eq!(parsed["tool"], "读取文件");
+        assert_eq!(parsed["tool_call_id"], "call_ünïcode");
+    }
+
+    #[test]
+    fn clear_old_tool_results_clear_tool_inputs_covers_freeform_text() {
+        let mut messages = bulky_tool_history(3, 2_500);
+        // Freeform custom tool payload lives in `text`, not function.arguments.
+        if let Some(call) = messages
+            .get_mut(1)
+            .and_then(|m| m.tool_calls.as_mut())
+            .and_then(|calls| calls.first_mut())
+        {
+            call.text = Some("raw freeform payload".to_string());
+            call.thought_signature = Some("sig".to_string());
+        }
+        let cleared = clear_old_tool_results(&messages, 1, 1, 1, true);
+        let call = cleared
+            .get(1)
+            .and_then(|m| m.tool_calls.as_ref())
+            .and_then(|calls| calls.first())
+            .expect("call preserved");
+        assert_eq!(call.text.as_deref(), Some(CLEARED_TOOL_INPUT_PLACEHOLDER));
+        assert!(call.thought_signature.is_none());
     }
 }
