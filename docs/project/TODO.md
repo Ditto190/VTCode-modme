@@ -62,3 +62,9 @@ diff of `README.md` for accidental content loss, especially around the contribut
 details>` block and the Product Hunt badge markup."
 
 session: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/session-vtcode-20260927T032144Z_505933-08881
+
+===
+
+read and apply to improve VT Code system, use relavant skills
+
+https://harnesstax.github.io/
