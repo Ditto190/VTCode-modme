@@ -62,8 +62,9 @@ pub(crate) struct PlanningWorkflowSessionState {
     pending_approval: Option<PendingPlanApproval>,
     /// Deferred full switch to the plan primary agent after a mid-turn
     /// `start_planning` entry. Must not end the current turn: research is
-    /// supposed to continue in the entry turn. Applied only when the turn
-    /// finishes naturally (see `take_plan_entry_agent_switch`).
+    /// supposed to continue in the entry turn. Always consumed at turn end
+    /// (`take_plan_entry_agent_switch`); applied only when the turn is a
+    /// normal completion with no stronger handoff.
     plan_entry_agent_switch_pending: bool,
 }
 
@@ -571,6 +572,18 @@ mod tests {
         state.queue_plan_entry_agent_switch();
         state.exit();
         assert!(!state.take_plan_entry_agent_switch(), "exit must clear the deferred plan-agent switch");
+    }
+
+    #[test]
+    fn take_plan_entry_agent_switch_always_consumes_even_when_not_applied() {
+        // Stronger handoffs discard the deferred switch at the turn boundary,
+        // but the take itself must still clear the flag so a later turn cannot
+        // fire a stale plan-agent switch mid-implementation.
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::AgentSuggestion);
+        state.queue_plan_entry_agent_switch();
+        assert!(state.take_plan_entry_agent_switch());
+        assert!(!state.take_plan_entry_agent_switch());
     }
 
     #[test]

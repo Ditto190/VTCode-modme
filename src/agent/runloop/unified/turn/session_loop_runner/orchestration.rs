@@ -1758,15 +1758,34 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .as_ref()
                             .map(|cfg| cfg.default_primary_agent.as_str())
                             .filter(|name| !name.trim().is_empty());
-                        let execution_agent = select_approved_plan_execution_agent(
+                        // Selection failure must stay recoverable: the plan is
+                        // already approved, so aborting the session here would
+                        // leave a half-switched state with no retry path.
+                        let execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,
                             &config.workspace,
                             Some(requested_agent.as_str()),
                             configured_default,
                         )
-                        .await;
-                        let execution_agent = harness_try!(execution_agent);
+                        .await
+                        {
+                            Ok(agent) => agent,
+                            Err(err) => {
+                                tracing::error!(
+                                    target: "vtcode.planning_workflow",
+                                    switch_path = "plan_approval",
+                                    requested_agent = %requested_agent,
+                                    error = %err,
+                                    "Could not select write-capable agent after plan approval; plan remains approved and can be retried"
+                                );
+                                harness_try!(renderer.line(
+                                    MessageStyle::Error,
+                                    &format!("Could not switch to an implementation agent after plan approval: {err}"),
+                                ));
+                                continue;
+                            }
+                        };
                         if execution_agent != requested_agent {
                             tracing::warn!(
                                 target: "vtcode.planning_workflow",
@@ -1818,9 +1837,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 &format!("Approved plan is ready, but mode switch failed: {err}"),
                             ));
                         }
-                        let display = active_primary_agent.active().display_name.clone();
+                        let agent_display = active_primary_agent.active().display_name.clone();
                         let color = active_primary_agent.active().color.clone().filter(|c| !c.trim().is_empty());
-                        handle.set_primary_agent(Some(display), color);
+                        handle.set_primary_agent(Some(agent_display), color);
                         tracing::info!(
                             target: "vtcode.planning_workflow",
                             switch_path = "plan_approval",

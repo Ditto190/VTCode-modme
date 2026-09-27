@@ -1,6 +1,6 @@
 ---
 feature: plan-mode-entry-handoff
-status: designed
+status: in-progress
 updated: 2026-09-27
 branch: fix/plan-mode-entry-handoff
 commits: # leave empty while in progress; fill at delivery
