@@ -65,6 +65,10 @@ fn main() {
     // cf. rust-lang/rust#156812). Release builds use `panic = "abort"` and
     // strip symbols, so unwind tables are unaffected there.
     //
+    // Instead, the warning is silenced at the lint level:
+    // `#![cfg_attr(target_os = "macos", allow(linker_messages, ...))]` in
+    // `src/main.rs` (the lint can only be controlled at a linked crate root).
+    //
     // (A `-no_compact_unwind` workaround lived here until 2026-09-25, when it
     // was found to be the root cause of the SIGABRT failures in
     // `from_validated_debug_asserts_on_non_ready_report` and
