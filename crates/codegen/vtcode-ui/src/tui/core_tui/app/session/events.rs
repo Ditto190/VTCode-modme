@@ -992,6 +992,19 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 }
                 session.mark_dirty();
                 Some(InlineEvent::EditQueue)
+            } else if !has_control
+                && !has_alt
+                && !has_command
+                && !has_shift
+                && !session.core.input_manager.is_single_line()
+            {
+                // Multiline input consumes Up as an intra-buffer cursor move
+                // (no-op at the first logical line) and never traverses
+                // history. Single-line history follows below; Ctrl+P remains
+                // the unconditional history shortcut.
+                let _ = session.move_cursor_up_for_history();
+                session.mark_dirty();
+                None
             } else if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_up_for_history() {
                 session.mark_dirty();
                 None
@@ -1008,7 +1021,15 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
-            if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_down_for_history() {
+            if !has_control && !has_alt && !has_command && !has_shift && !session.core.input_manager.is_single_line() {
+                // Multiline input consumes Down as an intra-buffer cursor move
+                // (no-op at the last logical line) and never traverses
+                // history. Single-line history follows below; Ctrl+N remains
+                // the unconditional history shortcut.
+                let _ = session.move_cursor_down_for_history();
+                session.mark_dirty();
+                None
+            } else if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_down_for_history() {
                 session.mark_dirty();
                 None
             } else if session.navigate_history_next() {

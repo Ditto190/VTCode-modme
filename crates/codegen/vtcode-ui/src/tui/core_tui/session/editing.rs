@@ -510,11 +510,13 @@ impl Session {
         }
     }
 
-    /// Arrow-Up handling: move within multiline input first, history second.
+    /// Arrow-Up handling for single-line history gating.
     ///
     /// Returns `true` when the key was consumed by an intra-line cursor move
     /// (caller should `mark_dirty()` and emit no history event). Movement is
-    /// by logical lines; wrapped visual rows still fall through to history.
+    /// by logical lines; wrapped visual rows do not count as separate lines.
+    /// The events layer consumes the key for all multiline input, so a
+    /// `false` return only reaches history traversal for single-line input.
     pub(crate) fn move_cursor_up_for_history(&mut self) -> bool {
         if !self.input_enabled {
             return false;
@@ -523,7 +525,13 @@ impl Session {
         self.input_manager.move_cursor_up()
     }
 
-    /// Arrow-Down handling: move within multiline input first, history second.
+    /// Arrow-Down handling for single-line history gating.
+    ///
+    /// Returns `true` when the key was consumed by an intra-line cursor move
+    /// (caller should `mark_dirty()` and emit no history event). Movement is
+    /// by logical lines; wrapped visual rows do not count as separate lines.
+    /// The events layer consumes the key for all multiline input, so a
+    /// `false` return only reaches history traversal for single-line input.
     pub(crate) fn move_cursor_down_for_history(&mut self) -> bool {
         if !self.input_enabled {
             return false;
