@@ -502,6 +502,11 @@ pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
     // Production recovery constants (including PLANNING_COMPLETED_TURN_FALLBACK_REASON)
     // are recoverable. Deny tokens like "planning turn ended" / "approval-ready
     // plan" must not shadow "recovery fallback".
+    //
+    // Entry-turn Blocked shapes common after mid-turn `start_planning`: the
+    // model hits the read-only gate (blocked-tool fuse) or ends tools without a
+    // published final. Both must auto-continue planning research instead of
+    // parking at the user `Continue…` prompt.
     if lower.contains("recovery fallback")
         || lower.contains("recovery could not confirm")
         || lower.contains("recovery exhausted")
@@ -516,6 +521,11 @@ pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
         || lower.contains("tool-free recovery")
         || lower.contains("tool follow-up")
         || lower.contains("budget exhausted")
+        || lower.contains("without a harness-visible final assistant response")
+        || lower.contains("blocked tool-call limit")
+        || lower.contains("recovery tool-call limit")
+        || lower.contains("consecutive blocked calls")
+        || lower.contains("tool-call safety limit")
     {
         return true;
     }
@@ -701,6 +711,45 @@ mod tracker_continue_tests {
         assert!(!should_queue_plan_mode_auto_continue(false, true, false, false, Some("turn budget"), false, 8, 0));
         assert!(!should_queue_plan_mode_auto_continue(true, true, false, false, Some("turn budget"), false, 0, 0));
         assert!(!should_queue_plan_mode_auto_continue(true, false, false, false, Some("turn budget"), false, 8, 0));
+    }
+
+    #[test]
+    fn plan_mode_auto_continue_recovers_entry_turn_blocked_shapes() {
+        // Mid-turn start_planning + mutating attempts trip the blocked-tool fuse;
+        // the entry turn must not park at the user Continue prompt.
+        let fuse = Some(
+            "Blocked tool-call limit reached after 3 consecutive blocked calls (streak 3, total 3). Last blocked call: 'apply_patch'. Rebase the patch on current file contents and confirm edit approval before retrying. A bounded recovery response will run without more tool calls. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.",
+        );
+        assert!(plan_mode_recoverable_block(fuse.expect("fuse")));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, fuse, false, 8, 0));
+
+        let recovery_fuse = Some(
+            "Recovery tool-call limit reached after 3 blocked calls (streak 3, total 3) (last blocked call: 'exec_command'). Check sandbox/approval policy, narrow the command, or request approval instead of retrying verbatim. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.",
+        );
+        assert!(plan_mode_recoverable_block(recovery_fuse.expect("recovery fuse")));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, recovery_fuse, false, 8, 0));
+
+        // Tools ended without a published final after planning entry.
+        let no_final = Some(
+            "Turn ended without a harness-visible final assistant response, so successful completion could not be confirmed.",
+        );
+        assert!(plan_mode_recoverable_block(no_final.expect("no final")));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, no_final, false, 8, 0));
+
+        // True permission handoffs still never auto-continue.
+        assert!(!plan_mode_recoverable_block(
+            "Blocked tool-call limit reached; permission denied for apply_patch; user input required."
+        ));
+        assert!(!should_queue_plan_mode_auto_continue(
+            true,
+            true,
+            false,
+            false,
+            Some("permission denied for apply_patch"),
+            false,
+            8,
+            0
+        ));
     }
 
     #[test]

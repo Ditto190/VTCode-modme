@@ -108,6 +108,22 @@ Every plan-entry / plan-exit / approval handoff path must:
 5. Emit `tracing::info!(target: "vtcode.planning_workflow", ...)` on successful
    switches (entry deferred-switch, approval, `/plan off` restore, startup).
 
+### C2. Entry-turn `Blocked` recovery (plan mode)
+
+A plan-entry or planning research turn that ends `Blocked` must not park at the
+user `Continue…` prompt when the block is recoverable. `plan_mode_recoverable_block`
+must treat these production shapes as recoverable so plan-mode auto-continue
+queues the next research turn:
+
+- blocked-tool fuse trips (`blocked tool-call limit`, `recovery tool-call limit`,
+  `consecutive blocked calls`, `tool-call safety limit`) — common after mid-turn
+  `start_planning` when a leftover mutating intent hits the read-only gate
+- no published final (`without a harness-visible final assistant response`)
+
+True handoffs stay denied (permission / user-input / interview / verification).
+The `start_planning` success message must steer the remainder of the entry turn
+to read-only research so mutations do not burn the fuse.
+
 ### D. Out of scope
 
 - Plan validation, tracker distill, or approval policy changes.
@@ -142,3 +158,7 @@ changes beyond existing plan-approval / planning lifecycle events.
 - [x] T5: Update planning-workflow docs for deferred-switch + error contract —
   acceptance: docs state research continues in the entry turn and the plan
   agent is selected after the turn (covers: S2 A–C)
+- [x] T6: Plan-mode auto-continue recovers entry-turn Blocked shapes (fuse
+  trips, no-final) and `start_planning` steers read-only research —
+  acceptance: `plan_mode_auto_continue_recovers_entry_turn_blocked_shapes`
+  passes and permission handoffs still never auto-queue (covers: S2 C2)
