@@ -1,14 +1,36 @@
 ---
 feature: local-tool-result-clearing
-status: designed
-updated: 2026-09-26
+status: delivered
+updated: 2026-09-27
 branch: feat/local-tool-result-clearing
-commits: 
+commits: ace5ba394..fd05baef2
 ---
 
 # Local Tool-Result Clearing (non-Anthropic)
 
 ## Report
+
+**What was built** — Request-only local tool-result clearing for providers
+without Anthropic `context_management.edits`. When estimated history tokens
+exceed `trigger_tokens`, `clear_old_tool_results` stubs every tool-result body
+except the newest `keep_tool_uses`, preserving `tool_call_id` pairing and never
+mutating durable history or `ThreadEvent`s. `clear_tool_inputs` replaces paired
+call arguments with a JSON placeholder. The request builder applies this only
+when the wire will not carry native `clear_tool_uses`.
+
+**Verification** — `./scripts/check-dev.sh` PASS; `cargo nextest run -p vtcode-core
+-E 'test(clear_old_tool) or test(local_tool_result)'` PASS 7/7;
+`RUSTFLAGS="-D warnings" cargo check --locked -p vtcode-core -p vtcode` PASS;
+request-path filter 18/18 PASS. PRE-EXISTING:
+`cli_harness_failures::print_mode_requires_prompt_or_stdin` (env noise).
+
+**Journey log**
+- First cut used `clear_at_least_tokens` as a stop ceiling; review correctly
+  flagged that re-shaping full durable history then leaves a permanently
+  growing tail. Floor semantics (stub all non-kept) is required.
+- `clear_tool_inputs` must write valid JSON (`{"cleared":"tool_input"}`), not
+  prose — OpenAI sends `function.arguments` verbatim.
+- Clear order is oldest-first (Anthropic), not newest-of-old.
 
 ## [S1] Problem
 
@@ -91,6 +113,6 @@ NOT carry Anthropic `clear_tool_uses` (i.e. not
 
 ## Tasks
 
-- [ ] T1: Pure `clear_old_tool_results` in `vtcode-core` with unit tests — acceptance: keeps newest N results, stubs older ones past trigger, preserves `tool_call_id`, respects `clear_at_least_tokens`, no-op below trigger (covers: S2)
-- [ ] T2: Wire request_builder local path when native clear_tool_uses is absent — acceptance: unit/integration test shows non-Anthropic request messages carry stubs while working_history is unchanged (covers: S2; depends: T1)
-- [ ] T3: Docs — EXECUTION_POLICY + CONFIG_FIELD_REFERENCE note provider split — acceptance: docs state local clearing for non-Anthropic and native edits for Anthropic (covers: S1, S2; depends: T2)
+- [x] T1: Pure `clear_old_tool_results` in `vtcode-core` with unit tests — acceptance: keeps newest N results, stubs all older ones past trigger, preserves `tool_call_id`, floor on `clear_at_least_tokens`, no-op below trigger (covers: S2)
+- [x] T2: Wire request_builder local path when native clear_tool_uses is absent — acceptance: gate helper tests + durable-history immutability test show request messages carry stubs while working_history is unchanged (covers: S2; depends: T1)
+- [x] T3: Docs — EXECUTION_POLICY + CONFIG_FIELD_REFERENCE note provider split — acceptance: docs state local clearing for non-Anthropic and native edits for Anthropic (covers: S1, S2; depends: T2)
