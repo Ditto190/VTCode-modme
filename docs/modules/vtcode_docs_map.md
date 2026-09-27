@@ -928,6 +928,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Semantic Understanding, Tree-sitter Security Parsing (Bash), Syntax Highlighting
   - **User Questions**: "What can you tell me about Language Support in VT Code?", "How does Semantic Understanding work?", "How does Tree-sitter Security Parsing (Bash) work?"
 
+- **File**: `docs/compose/spec/local-tool-result-clearing.md`
+  - **Content**: Local Tool-Result Clearing (non-Anthropic)
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Local Tool-Result Clearing (non-Anthropic)?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/build-with-claude/migrating-to-claude-opus-5.md`
   - **Content**: Migrating Claude models in VT Code
   - **Topics**: Quick navigation, Model comparison, Where to make changes in VT Code, Migrating to Claude Fable 5 / Claude Mythos 5, Migrating to Claude Opus 5

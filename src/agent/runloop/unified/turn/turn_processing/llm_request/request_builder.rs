@@ -334,11 +334,29 @@ pub(super) async fn build_turn_request(
     // request of the turn, and every later turn, replays the same prefix.
     persist_turn_few_shot_context(ctx.working_history, few_shot_context);
     persist_turn_editor_context(ctx.working_history, ctx.context_manager.request_editor_context_block());
-    let continuation_messages = Arc::new(
-        ctx.context_manager
-            .normalize_history_for_request(ctx.working_history)
-            .into_owned(),
-    );
+    let mut normalized_history = ctx
+        .context_manager
+        .normalize_history_for_request(ctx.working_history)
+        .into_owned();
+    // Local stand-in for Anthropic `clear_tool_uses` when the wire will not
+    // carry native context edits. Request-only: durable history is untouched.
+    if let Some(vt_cfg) = ctx.vt_cfg
+        && vtcode_core::core::agent::state::should_apply_local_tool_result_clearing(
+            &turn_snapshot.provider_name,
+            turn_snapshot.capabilities.context_edits,
+            vt_cfg.agent.harness.tool_result_clearing.enabled,
+        )
+    {
+        let clearing = &vt_cfg.agent.harness.tool_result_clearing;
+        normalized_history = vtcode_core::core::agent::state::clear_old_tool_results(
+            &normalized_history,
+            clearing.trigger_tokens,
+            clearing.keep_tool_uses,
+            clearing.clear_at_least_tokens,
+            clearing.clear_tool_inputs,
+        );
+    }
+    let continuation_messages = Arc::new(normalized_history);
     let (prepared_request_messages, previous_response_id) = prepare_responses_request_history(
         ctx.session_stats,
         &turn_snapshot.provider_name,

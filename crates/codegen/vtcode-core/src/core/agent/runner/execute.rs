@@ -24,7 +24,9 @@ use crate::core::agent::hash_utils::stable_system_prefix_hash;
 use crate::core::agent::refusal;
 use crate::core::agent::runtime::{AgentRuntime, RuntimeControl};
 use crate::core::agent::session::AgentSessionState;
-use crate::core::agent::state::normalize_history_for_request_shared;
+use crate::core::agent::state::{
+    clear_old_tool_results, normalize_history_for_request_shared, should_apply_local_tool_result_clearing,
+};
 use crate::core::agent::task::{ContextItem, Task, TaskOutcome, TaskResults};
 use crate::exec::events::HarnessEventKind;
 use crate::llm::provider::{Message, ToolCall, ToolChoice, ToolDefinition, supports_responses_chaining};
@@ -816,6 +818,27 @@ impl AgentRunner {
                 }
 
                 let normalized_messages = normalize_history_for_request_shared(Arc::clone(&runtime.state.messages));
+                // Local stand-in for Anthropic `clear_tool_uses` on routes
+                // without context edits (same gate as the interactive
+                // runloop). Request-only: durable history is untouched.
+                let normalized_messages = {
+                    let clearing = &self.config().agent.harness.tool_result_clearing;
+                    if should_apply_local_tool_result_clearing(
+                        &provider_name,
+                        self.provider_client.as_ref().supports_context_edits(&turn_model),
+                        clearing.enabled,
+                    ) {
+                        Arc::new(clear_old_tool_results(
+                            normalized_messages.as_slice(),
+                            clearing.trigger_tokens,
+                            clearing.keep_tool_uses,
+                            clearing.clear_at_least_tokens,
+                            clearing.clear_tool_inputs,
+                        ))
+                    } else {
+                        normalized_messages
+                    }
+                };
                 let (request_messages, previous_response_id) = prepare_responses_request_messages(
                     &mut runtime.state.previous_response_chains,
                     &provider_name,

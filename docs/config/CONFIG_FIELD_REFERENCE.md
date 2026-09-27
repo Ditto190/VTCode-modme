@@ -75,7 +75,7 @@ python3 scripts/generate_config_field_reference.py
 | `agent.harness.skeptic_panel.enabled` | `boolean` | no | `false` | Master switch. Default: false (opt-in). |
 | `agent.harness.skeptic_panel.models` | `array` | no | `[]` | Model identifiers to run as skeptic evaluators (in addition to the primary evaluator). Empty when `enabled = false`. |
 | `agent.harness.skeptic_panel.models[]` | `string` | no | `-` | - |
-| `agent.harness.tool_result_clearing.clear_at_least_tokens` | `integer` | no | `30000` | - |
+| `agent.harness.tool_result_clearing.clear_at_least_tokens` | `integer` | no | `30000` | Anthropic uses native `clear_tool_uses`; other providers get a local request-only stub rewrite with the same bounds. |
 | `agent.harness.tool_result_clearing.clear_tool_inputs` | `boolean` | no | `false` | - |
 | `agent.harness.tool_result_clearing.enabled` | `boolean` | no | `true` | - |
 | `agent.harness.tool_result_clearing.keep_tool_uses` | `integer` | no | `3` | - |
