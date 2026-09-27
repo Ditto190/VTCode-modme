@@ -2,6 +2,97 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.169.5 - 2026-09-27
+
+### Highlights
+#### Bug Fixes
+
+- Keep heredoc skip out of double-quoted strings (e2b7fdad) 
+- Restore constraint continuity for fresh task artifacts (29ccc8c0) 
+- Apply local tool-result clearing for non-Anthropic providers (d0d3ad55) 
+- Bound tool-result clearing to all non-kept results (fd05baef) 
+- Harden tool-result clearing stubs and cover headless runner (09b29db3) 
+- Admit bounded slice reads in read-after-write guard (d8f5ad7c) 
+- Arm read-after-write guard from parsed patch targets (e32acf5d) 
+- Keep output tail in exec inline preview window (0ef02e90) 
+- Widen plan-mode read-only classification for common probes (0540f811) 
+- Attach denial diagnostic to model-facing policy errors (75e9ef3d) 
+- Keep plan-entry turn alive and defer plan-agent switch (396924fa) 
+- Make approval switch recoverable and log plan_exit (3f17d0e2) 
+- Recover from approved-plan selection failures on all paths (7883691f) 
+- Apply deferred plan switch on Blocked turns; DRY approval failures (8c205e33) 
+- Auto-continue recoverable entry-turn Blocked ends in plan mode (83f87256) 
+- Keep default fuse remedy free of deny token 'permission' (10fbfa9b) 
+- Auto-continue recoverable blocked ends in every mode (c5792d79) 
+- Name empty-tracker blocked-end resume in budget messages (55267a05) 
+- Close plan-mode read-only holes found in adversarial review (ac328cea) 
+- Avoid macOS Apple Events prompt (4afa83be) 
+- Dismiss history picker on Ctrl+C (cca60e63) 
+- Gate Up/Down history on single-line input (a6e39b1f) 
+- Prewarm Gatekeeper before macOS debug runs (2666928d) 
+- Stop when Gatekeeper pre-scan fails (765e55c6) 
+- Up/Down traverses wrapped input rows instead of history (19dffc33) 
+- Missing-config prompt fallback uses enum default (08d4682d) 
+- Show full shell command in HITL modal without per-line truncation (696437cb) 
+- Notarize macOS binaries (6691cfe5) 
+- Model HITL modal on reference UX — question title, env row, $ marker (a044be4d) 
+- Preserve compatibility executable mode (4b49f6f4) 
+- Exclude Table of Contents from docs-map topics (190e6f6a) 
+- Allow unsigned macOS packaging (955bf11c) 
+- Close review findings across heredoc, clearing, spools (cf82d6df) 
+- Exempt deferred plan entry from final-response guard (1b6d8e0b) 
+- Change default primary agent from duck to build (df8c6be1) 
+- Silence macOS __eh_frame compact-unwind linker warning (d3edab4e) 
+- Close deferred risk-audit items (934a7966) 
+- Address review — mutex deadlock and fourth tail site (0e9155b0) 
+- Strip env prefixes in policy matching and refresh stale tests (1b228478) 
+#### Documentation
+
+- Deliver local-tool-result-clearing after review (21300f2a) 
+- Note freeform tool-input clearing in clear_old_tool_results (7861d0ae) 
+- Add update/logout to command roundup and normalize repo URL casing (c31a9b62) 
+- Deliver plan-mode-entry-handoff after review (a43e7c0e) 
+- Update project TODO (866aff69) 
+- Deliver harness-tax-observability after review (3b83723a) 
+- Update project TODO (a576b493) 
+- Deliver lean-harness-defaults after review (9a790928) 
+- Sync documentation with recent behavior changes (fa0b7e66) 
+- Deliver budget-retune-dead-tools after review (02204400) 
+- Audit and refresh module guides against current sources (276992cc) 
+- Consolidate agent guidance on AGENTS.md, remove CLAUDE.md (114cd139) 
+- Record post-audit action plan status (f10535ad) 
+- Trim jump-to-last-change wording (dc9ea131) 
+- Deliver risk-audit-deferred-items after review (c7000914) 
+#### Features
+
+- Surface first-call harness tax and eval cost-per-solve (4b41962e) 
+- Lean defaults for prompt, budgets, and eager tools (e746ce68) 
+- Add numbered shortcuts to search-less list modals (80db625a) 
+- Add back Jump to last change navigation (9632287e) 
+- Add fuzzy modal search and fullscreen interaction settings (62dc6618) 
+### Other Changes
+#### Other
+
+- Update TODO (6b97eb86) 
+- Update project (8b6691e1) 
+- Reapply "Merge branch 'fix/plan-mode-header-handoff'" (a34d5bfc) 
+- Update TODO (6430cb5d) 
+- Drop unnecessary qualification in wrap tests (15e9b067) 
+- Update TODO (3555a93e) 
+- Update TODO (7cc23653) 
+#### Performance
+
+- Stop sending tool-spec guidance three times per request (b7ca489c) 
+- Avoid serde_json Value IR on tool-arg and probe paths (12a631c1) 
+#### Refactors
+
+- Single-source preflight name-mistake phrase (c1d751dc) 
+- Share recoverable-block allow-list; deliver plan-mode-entry-handoff (d238d115) 
+- Share priced-cost helper and cover first-call latch (58030951) 
+#### Tests
+
+- Align stale expectations with current contracts (c632756d) 
+- Harden copy-on-select coverage and document manual copy (24a86d3d) 
 ## 0.169.4 - 2026-09-26
 
 ### Highlights
