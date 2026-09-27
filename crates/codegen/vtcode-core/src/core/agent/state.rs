@@ -367,6 +367,115 @@ pub fn normalize_history_for_request(messages: &[Message]) -> Vec<Message> {
     Arc::unwrap_or_clone(normalize_history_for_request_shared(Arc::new(messages.to_vec())))
 }
 
+/// Placeholder body for a cleared tool result. Mirrors Anthropic
+/// `clear_tool_uses` semantics as request-only shaping: the durable history
+/// and `ThreadEvent` log keep the original payload.
+const CLEARED_TOOL_RESULT_NOTE: &str = "Older tool result cleared to bound context growth. Full output remains in session logs; re-run the tool if raw bytes are needed.";
+
+/// Request-only local stand-in for Anthropic `clear_tool_uses_20250919`.
+///
+/// Providers without `context_management.edits` never get native tool-result
+/// clearing, so long histories keep paying full price for every old tool body
+/// on each request. This rewrites older tool-result *request* messages to a
+/// bounded stub once estimated history tokens exceed `trigger_tokens`, keeping
+/// the newest `keep_tool_uses` results intact and stopping after at least
+/// `clear_at_least_tokens` have been reclaimed.
+///
+/// Contract (same as [`normalize_history_for_request`]):
+/// - never mutates durable session history or `ThreadEvent`s;
+/// - preserves `role`, `tool_call_id`, `origin_tool`, and message order so
+///   provider tool-pairing validation still passes;
+/// - idempotent: re-running on already-stubbed output is a no-op below the
+///   trigger and cannot re-clear stubs usefully.
+///
+/// When `clear_tool_inputs` is set, assistant `tool_calls[].function.arguments`
+/// for cleared results are replaced with a short placeholder as well.
+pub fn clear_old_tool_results(
+    messages: &[Message],
+    trigger_tokens: u64,
+    keep_tool_uses: u32,
+    clear_at_least_tokens: u64,
+    clear_tool_inputs: bool,
+) -> Vec<Message> {
+    if trigger_tokens == 0 || messages.is_empty() {
+        return messages.to_vec();
+    }
+
+    let estimated_tokens: u64 = messages
+        .iter()
+        .map(|message| message.estimate_tokens() as u64)
+        .fold(0u64, u64::saturating_add);
+    if estimated_tokens < trigger_tokens {
+        return messages.to_vec();
+    }
+
+    let tool_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.role == crate::llm::provider::MessageRole::Tool)
+        .map(|(index, _)| index)
+        .collect();
+    let keep = keep_tool_uses as usize;
+    if tool_indices.len() <= keep {
+        return messages.to_vec();
+    }
+
+    let mut cleared_tokens = 0u64;
+    let mut cleared_call_ids: HashSet<String> = HashSet::new();
+    // Clear oldest tool results first (Anthropic `clear_tool_uses` order):
+    // reclaim the farthest bodies and stop once `clear_at_least_tokens` is met.
+    let mut out = messages.to_vec();
+    for &tool_index in &tool_indices[..tool_indices.len() - keep] {
+        if cleared_tokens >= clear_at_least_tokens {
+            break;
+        }
+        let original = &messages[tool_index];
+        let original_tokens = original.estimate_tokens() as u64;
+        let stub = build_cleared_tool_result_stub(original);
+        let stub_tokens = stub.estimate_tokens() as u64;
+        if let Some(call_id) = original.tool_call_id.clone() {
+            cleared_call_ids.insert(call_id);
+        }
+        out[tool_index] = stub;
+        cleared_tokens = cleared_tokens.saturating_add(original_tokens.saturating_sub(stub_tokens));
+    }
+
+    if clear_tool_inputs && !cleared_call_ids.is_empty() {
+        for message in &mut out {
+            if message.role != crate::llm::provider::MessageRole::Assistant {
+                continue;
+            }
+            let Some(tool_calls) = message.tool_calls.as_mut() else {
+                continue;
+            };
+            for call in tool_calls.iter_mut() {
+                if cleared_call_ids.contains(&call.id) {
+                    if let Some(function) = call.function.as_mut() {
+                        function.arguments = CLEARED_TOOL_RESULT_NOTE.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn build_cleared_tool_result_stub(original: &Message) -> Message {
+    let mut stub = original.clone();
+    let tool_name = original.origin_tool.as_deref().unwrap_or("tool");
+    let call_id = original.tool_call_id.as_deref().unwrap_or("");
+    // Compact JSON keeps the stub machine-readable without carrying the body.
+    let body = format!(
+        "{{\"cleared\":\"tool_result\",\"reason\":\"tool_result_clearing\",\"note\":{note:?},\"tool\":{tool:?},\"tool_call_id\":{call_id:?}}}",
+        note = CLEARED_TOOL_RESULT_NOTE,
+        tool = tool_name,
+        call_id = call_id,
+    );
+    stub.content = crate::llm::provider::MessageContent::Text(body);
+    stub
+}
+
 /// Find a split point that keeps tool-call outputs paired with their calls.
 pub fn safe_history_split_point(messages: &[Message], conversation_len: usize, preferred_split_at: usize) -> usize {
     if preferred_split_at == 0 || preferred_split_at >= conversation_len {
@@ -848,5 +957,108 @@ mod tests {
         let result = summarize_list(&many);
         assert!(result.contains("item1, item2, item3, item4, item5"));
         assert!(result.contains("[+2 more]"));
+    }
+
+    fn bulky_tool_history(count: usize, body_chars: usize) -> Vec<Message> {
+        let mut messages = vec![Message::user("start".to_string())];
+        for i in 0..count {
+            let call_id = format!("call_{i}");
+            messages.push(make_tool_call(&call_id, "read_file"));
+            messages.push(make_tool_response(&call_id, &"x".repeat(body_chars)));
+        }
+        messages.push(Message::assistant("done".to_string()));
+        messages
+    }
+
+    fn is_cleared_stub(message: &Message) -> bool {
+        message.content.as_text().contains("\"cleared\":\"tool_result\"")
+    }
+
+    #[test]
+    fn clear_old_tool_results_noop_below_trigger() {
+        let messages = bulky_tool_history(3, 200);
+        let cleared = clear_old_tool_results(&messages, u64::MAX, 1, 1, false);
+        assert_eq!(cleared.len(), messages.len());
+        assert!(
+            cleared
+                .iter()
+                .filter(|m| m.role == MessageRole::Tool)
+                .all(|m| !is_cleared_stub(m))
+        );
+    }
+
+    #[test]
+    fn clear_old_tool_results_keeps_newest_and_stubs_older() {
+        // Four large tool results; keep 1, clear only the oldest (budget 1).
+        let messages = bulky_tool_history(4, 4_000);
+        let cleared = clear_old_tool_results(&messages, 1, 1, 1, false);
+        let tool_msgs: Vec<&Message> = cleared.iter().filter(|m| m.role == MessageRole::Tool).collect();
+        assert_eq!(tool_msgs.len(), 4);
+        assert!(is_cleared_stub(tool_msgs[0]), "oldest result is cleared first");
+        assert!(!is_cleared_stub(tool_msgs[3]), "newest result stays intact");
+        assert!(
+            !is_cleared_stub(tool_msgs[1]) && !is_cleared_stub(tool_msgs[2]),
+            "clear_at_least_tokens stops after the first reclaim"
+        );
+        // Protocol pairing survives.
+        for (original, rewritten) in messages.iter().zip(cleared.iter()) {
+            assert_eq!(original.role, rewritten.role);
+            assert_eq!(original.tool_call_id, rewritten.tool_call_id);
+        }
+    }
+
+    #[test]
+    fn clear_old_tool_results_respects_keep_tool_uses() {
+        let messages = bulky_tool_history(5, 3_000);
+        let cleared = clear_old_tool_results(&messages, 1, 3, 1, false);
+        let tool_msgs: Vec<&Message> = cleared.iter().filter(|m| m.role == MessageRole::Tool).collect();
+        assert_eq!(tool_msgs.len(), 5);
+        assert!(!is_cleared_stub(tool_msgs[2]));
+        assert!(!is_cleared_stub(tool_msgs[3]));
+        assert!(!is_cleared_stub(tool_msgs[4]));
+    }
+
+    #[test]
+    fn clear_old_tool_results_optional_clear_tool_inputs() {
+        let mut messages = bulky_tool_history(3, 3_000);
+        // Attach a recognizable argument payload on the first call.
+        if let Some(call) = messages
+            .get_mut(1)
+            .and_then(|m| m.tool_calls.as_mut())
+            .and_then(|calls| calls.first_mut())
+            .and_then(|call| call.function.as_mut())
+        {
+            call.arguments = "{\"path\":\"secret-path\"}".to_string();
+        }
+
+        // Reclaim budget large enough to clear both older results and their inputs.
+        let cleared = clear_old_tool_results(&messages, 1, 1, 10_000, true);
+        let first_call_args = cleared
+            .get(1)
+            .and_then(|m| m.tool_calls.as_ref())
+            .and_then(|calls| calls.first())
+            .and_then(|call| call.function.as_ref())
+            .map(|function| function.arguments.as_str())
+            .unwrap_or_default();
+        assert!(!first_call_args.contains("secret-path"), "cleared call arguments must drop the original payload");
+        // Newest retained call keeps its arguments.
+        let last_call_args = cleared
+            .get(5)
+            .and_then(|m| m.tool_calls.as_ref())
+            .and_then(|calls| calls.first())
+            .and_then(|call| call.function.as_ref())
+            .map(|function| function.arguments.as_str())
+            .unwrap_or_default();
+        assert_eq!(last_call_args, "{}");
+    }
+
+    #[test]
+    fn clear_old_tool_results_is_idempotent_on_stubs() {
+        let messages = bulky_tool_history(4, 3_000);
+        let once = clear_old_tool_results(&messages, 1, 1, 1_000, false);
+        let twice = clear_old_tool_results(&once, 1, 1, 1_000, false);
+        let stubs_once = once.iter().filter(|m| is_cleared_stub(m)).count();
+        let stubs_twice = twice.iter().filter(|m| is_cleared_stub(m)).count();
+        assert_eq!(stubs_once, stubs_twice);
     }
 }
