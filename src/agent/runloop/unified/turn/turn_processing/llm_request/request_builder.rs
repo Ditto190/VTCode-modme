@@ -444,8 +444,18 @@ pub(super) async fn build_turn_request(
             on_wire_tools,
             client_local_deferral: turn_snapshot.client_local_tool_deferral,
             tool_free_recovery: turn_snapshot.tool_free_recovery,
+            first_call: ctx.session_stats.first_call_composition().is_none(),
         },
     );
+    // Capture the first assembled request so the exit summary can surface the
+    // per-call harness tax (HarnessTax-style initial-context breakdown).
+    ctx.session_stats
+        .record_first_call_composition(crate::agent::runloop::unified::state::FirstCallComposition {
+            system_prompt_tokens,
+            tool_schema_tokens,
+            message_history_tokens,
+            on_wire_tools,
+        });
 
     Ok(TurnRequestBuildResult {
         request: request_plan.request,

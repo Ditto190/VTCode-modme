@@ -5,6 +5,8 @@ use vtcode_commons::color256_theme::rgb_to_ansi256_for_theme;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::ui::theme;
 
+use crate::agent::runloop::unified::state::FirstCallComposition;
+
 /// Zero-allocation exit data — all borrowed, no clones.
 /// All token fields (`prompt_tokens`, `completion_tokens`, `cached_tokens`,
 /// `cache_creation_tokens`, `cache_hit_rate_percent`) are sourced from the
@@ -31,6 +33,9 @@ pub(crate) struct ExitData<'a> {
     pub final_response: Option<&'a str>,
     pub resume_identifier: Option<&'a str>,
     pub budget_limit: Option<(f64, f64)>,
+    /// First assembled request composition (harness-tax breakdown). When
+    /// present, the stats line surfaces the per-call fixed overhead.
+    pub first_call_composition: Option<FirstCallComposition>,
 }
 
 pub(crate) fn print_exit_summary(data: ExitData<'_>) {
@@ -123,6 +128,18 @@ fn build_stats_line(data: &ExitData<'_>) -> String {
 
     if data.code_additions > 0 || data.code_deletions > 0 {
         stats.push(format!("Code +{} / -{}", data.code_additions, data.code_deletions));
+    }
+
+    if let Some(overhead) = data.first_call_composition {
+        let fixed = overhead.fixed_overhead_tokens();
+        if fixed > 0 {
+            stats.push(format!(
+                "First-call overhead {} (system {} + tools {})",
+                format_number(fixed as u64),
+                format_number(overhead.system_prompt_tokens as u64),
+                format_number(overhead.tool_schema_tokens as u64),
+            ));
+        }
     }
 
     stats.join(" | ")
@@ -267,12 +284,46 @@ mod tests {
             final_response: None,
             resume_identifier: None,
             budget_limit: None,
+            first_call_composition: None,
         }
     }
 
     #[test]
     fn stats_line_with_zero_input_omits_token_and_cache_segments() {
         let data = stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0);
+        let line = build_stats_line(&data);
+        assert_eq!(line, "Session 30s");
+    }
+
+    #[test]
+    fn stats_line_includes_first_call_overhead_when_present() {
+        let data = ExitData {
+            first_call_composition: Some(FirstCallComposition {
+                system_prompt_tokens: 1_100,
+                tool_schema_tokens: 2_100,
+                message_history_tokens: 40,
+                on_wire_tools: 4,
+            }),
+            ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
+        };
+        let line = build_stats_line(&data);
+        assert!(
+            line.contains("First-call overhead 3.2k (system 1.1k + tools 2.1k)"),
+            "stats line missing first-call overhead: {line}"
+        );
+    }
+
+    #[test]
+    fn stats_line_omits_zero_first_call_overhead() {
+        let data = ExitData {
+            first_call_composition: Some(FirstCallComposition {
+                system_prompt_tokens: 0,
+                tool_schema_tokens: 0,
+                message_history_tokens: 0,
+                on_wire_tools: 0,
+            }),
+            ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
+        };
         let line = build_stats_line(&data);
         assert_eq!(line, "Session 30s");
     }

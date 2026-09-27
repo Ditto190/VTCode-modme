@@ -152,6 +152,9 @@ pub async fn run_suite_with_options(
         .map(|r| r.metric.clone())
         .collect();
 
+    let flat_results: Vec<EvalRunResult> = results.iter().map(|(_, _, result)| result.clone()).collect();
+    let efficiency = crate::report::CostEfficiency::from_runs(&flat_results);
+
     Ok(EvalReport {
         generated_at: chrono::Utc::now().to_rfc3339(),
         suites: vec![SuiteReport {
@@ -165,6 +168,10 @@ pub async fn run_suite_with_options(
             unpriced_runs,
             duration_secs,
             trace_summary,
+            mean_cost_per_attempt: efficiency.mean_cost_per_attempt,
+            cost_per_solve: efficiency.cost_per_solve,
+            mean_tokens_per_attempt: efficiency.mean_tokens_per_attempt,
+            mean_turns_per_attempt: efficiency.mean_turns_per_attempt,
         }],
     })
 }

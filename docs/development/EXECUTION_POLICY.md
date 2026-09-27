@@ -190,6 +190,29 @@ cargo nextest run -p vtcode-core emitted_model_tool_schema_fits_within_first_req
 cargo nextest run -p vtcode-core -E 'test(session_tool_catalog)'
 ```
 
+### Harness tax (first-call fixed overhead)
+
+HarnessTax (Pan et al., 2026 — https://harnesstax.github.io/) shows the same
+model can cost up to 5x more under a different coding-agent harness at
+essentially the same success rate; the gap is mostly **first-call fixed
+overhead** (instructions + tool schemas), not more turns. VT Code surfaces that
+tax so it can be measured, not guessed:
+
+- Every assembled request logs `token_budget_breakdown` with
+  `system_prompt_tokens`, `tool_schema_tokens`, `message_history_tokens`,
+  `on_wire_tools`, `first_call`, and `fixed_overhead_tokens`
+  (`system + tool schemas` — the per-call harness tax before the task prompt).
+- The session's first assembled request is captured once into interactive
+  `SessionStats::first_call_composition` and shown on exit as
+  `First-call overhead N (system S + tools T)`.
+- Eval reports (`vtcode-eval`) include a `Cost efficiency` line:
+  `cost/solve`, mean cost per attempt, mean tokens per attempt, and mean turns
+  per attempt. `cost_per_solve` is `None` when any attempt is unpriced
+  (unknown cost is not free) or nothing passed.
+
+Keep new tools and instruction files lean: Progressive schemas and the
+first-request budgets above are the enforcement side of the same trade-off.
+
 ### Model pricing and fallback policy
 
 `vtcode-llm::usage_cost` owns normalized provider usage and the shared cost calculation.
