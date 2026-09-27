@@ -139,6 +139,14 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
 }
 
 fn copy_selected_input_if_requested(session: &mut Session, key: &KeyEvent, has_command: bool) -> bool {
+    // Composer selection must not pre-empt modal/picker Ctrl+C handling.
+    // While the history picker (or any modal surface) owns input, the
+    // composer selection is stale — let the overlay dismiss path run so
+    // Ctrl+C closes the popup instead of being swallowed as a copy.
+    // Mirrors the `!input_enabled()` gate in core `session/events.rs`.
+    if !session.core.input_enabled() {
+        return false;
+    }
     if has_command && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C')) {
         if session.core.copy_input_selection_to_clipboard() {
             session.mark_dirty();

@@ -94,6 +94,23 @@ fn history_picker_restores_base_input_and_draft_on_cancel() {
 }
 
 #[test]
+fn history_picker_ctrl_c_dismisses_and_restores_draft() {
+    let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.core.set_input("draft command".to_string());
+
+    let _ = session.process_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert!(session.history_picker_state.active);
+
+    let event = session.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert!(event.is_none(), "Ctrl+C should dismiss without interrupting");
+    assert!(!session.history_picker_state.active);
+    assert!(session.history_picker_state.search_query.is_empty());
+    assert_eq!(session.core.input_manager.content(), "draft command");
+    assert!(session.core.input_enabled());
+}
+
+#[test]
 fn history_picker_renders_search_field_above_results() {
     let mut session = AppSession::new(InlineTheme::default(), None, VIEW_ROWS);
     session.core.set_input("cargo test".to_string());
