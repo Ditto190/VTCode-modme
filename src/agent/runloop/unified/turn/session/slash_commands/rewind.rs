@@ -196,6 +196,7 @@ fn show_rewind_checkpoint_modal(handle: &InlineHandle, snapshots: &[SnapshotMeta
         Some(InlineListSearchConfig {
             label: "Checkpoint filter".to_string(),
             placeholder: Some("Search by prompt text or turn".to_string()),
+            fuzzy: false,
         }),
     );
 }

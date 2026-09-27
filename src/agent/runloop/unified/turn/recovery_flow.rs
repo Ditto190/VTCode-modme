@@ -230,6 +230,7 @@ pub(crate) async fn execute_recovery_prompt(
     let search = Some(InlineListSearchConfig {
         label: String::new(),
         placeholder: Some("title, subtitle, or badge".to_string()),
+        fuzzy: false,
     });
 
     let outcome = show_overlay_and_wait(

@@ -25,6 +25,7 @@ use crate::tui::core_tui::types::{
     InlineListSelection, InlineMessageKind, InlineSegment, InlineTextStyle, InlineTheme, LocalAgentEntry,
     SecurePromptConfig,
 };
+use crate::tui::options::FullscreenInteractionSettings;
 
 const MAX_DEFERRED_EVENTS: usize = 32;
 
@@ -154,6 +155,9 @@ pub enum InlineCommand {
     },
     SetAppearance {
         appearance: AppearanceConfig,
+    },
+    SetFullscreenInteraction {
+        interaction: FullscreenInteractionSettings,
     },
     /// Replace the live action bindings after a valid configuration reload.
     SetKeyBindings {
@@ -528,6 +532,10 @@ impl InlineHandle {
 
     pub fn set_appearance(&self, appearance: AppearanceConfig) {
         self.send_command(InlineCommand::SetAppearance { appearance });
+    }
+
+    pub fn set_fullscreen_interaction(&self, interaction: FullscreenInteractionSettings) {
+        self.send_command(InlineCommand::SetFullscreenInteraction { interaction });
     }
 
     pub fn set_key_bindings(&self, bindings: HashMap<String, Vec<String>>) {

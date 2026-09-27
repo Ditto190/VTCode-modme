@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize};
 use anyhow::{Context, Result};
 use tokio::sync::Notify;
 use vtcode_config::root::ColorSchemeMode;
+use vtcode_core::config::constants::app as app_constants;
 use vtcode_core::config::constants::ui as ui_constants;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
@@ -82,7 +83,12 @@ pub(crate) async fn initialize_session_shell(
 
     let active_styles = theme::active_styles();
     let theme_spec = inline_theme_from_core_styles(&active_styles);
-    let default_placeholder = Some(ui_constants::CHAT_INPUT_PLACEHOLDER_BOOTSTRAP.to_string());
+    // Paint the final placeholder on the shell frame: the configured
+    // onboarding placeholder (in-memory derivation, no I/O) or the shared
+    // bootstrap hint. `initialize_session_ui` re-derives the same value, so
+    // the ready re-drive never visibly swaps the placeholder.
+    let default_placeholder = crate::agent::runloop::welcome::configured_chat_placeholder(vt_cfg)
+        .or_else(|| Some(ui_constants::CHAT_INPUT_PLACEHOLDER_BOOTSTRAP.to_string()));
     let inline_rows = vt_cfg
         .as_ref()
         .map(|cfg| cfg.ui.inline_viewport_rows)
@@ -170,7 +176,7 @@ pub(crate) async fn initialize_session_shell(
             workspace_root: Some(config.workspace.clone()),
             slash_commands: slash_command_items,
             appearance: vt_cfg.map(to_tui_appearance),
-            app_name: "VT Code".to_string(),
+            app_name: app_constants::DISPLAY_NAME.to_string(),
             non_interactive_hint: Some("Use `vtcode ask \"your prompt\"` for non-interactive input.".to_string()),
             key_bindings: user_key_bindings,
             preview_callback: Some(preview_callback),

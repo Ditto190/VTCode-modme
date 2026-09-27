@@ -1098,6 +1098,11 @@ impl AppSession {
                 self.handle_core_command(crate::tui::core_tui::types::InlineCommand::SetAppearance { appearance });
                 self.refresh_compact_activity_presentations();
             }
+            InlineCommand::SetFullscreenInteraction { interaction } => {
+                self.handle_core_command(crate::tui::core_tui::types::InlineCommand::SetFullscreenInteraction {
+                    interaction,
+                });
+            }
             InlineCommand::ReplaceLast { count, kind, lines, link_ranges } => {
                 let remove_count = count.min(self.core.lines.len());
                 let first_removed = self.core.lines.len().saturating_sub(remove_count);
@@ -1239,6 +1244,9 @@ fn to_core_command(command: &InlineCommand) -> Option<crate::tui::core_tui::type
         InlineCommand::SetTheme { theme } => CoreCommand::SetTheme { theme: theme.clone() },
         InlineCommand::SetColorSchemeAuto { enabled } => CoreCommand::SetColorSchemeAuto { enabled: *enabled },
         InlineCommand::SetAppearance { appearance } => CoreCommand::SetAppearance { appearance: appearance.clone() },
+        InlineCommand::SetFullscreenInteraction { interaction } => {
+            CoreCommand::SetFullscreenInteraction { interaction: *interaction }
+        }
         InlineCommand::SetVimModeEnabled(enabled) => CoreCommand::SetVimModeEnabled(*enabled),
         InlineCommand::SetQueuedInputs { entries } => CoreCommand::SetQueuedInputs { entries: entries.clone() },
         InlineCommand::SetSubprocessEntries { entries } => {

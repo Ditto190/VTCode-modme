@@ -844,7 +844,7 @@ python3 scripts/generate_config_field_reference.py
 | `ui.dim_completed_todos` | `boolean` | no | `true` | Dim completed todo items (- \[x\]) in agent output |
 | `ui.diff_preview_mode` | `string` | no | `"inline"` | Diff preview layout for file-edit approval overlays and tool-output diffs. Options: "inline" (unified diff, default; legacy value retained for compatibility) or "side-by-side" (old/new panes). Falls back to unified when the terminal is too narrow; large previews use bounded head/tail rows. |
 | `ui.display_mode` | `string` | no | `"minimal"` | UI display mode preset (full, minimal, focused) |
-| `ui.fullscreen.copy_on_select` | `boolean` | no | `true` | Copy selected transcript text immediately when the mouse selection ends. Can also be controlled via VTCODE_FULLSCREEN_COPY_ON_SELECT=0/1. |
+| `ui.fullscreen.copy_on_select` | `boolean` | no | `true` | Copy selected transcript text immediately when the mouse selection ends (click-drag or double-click word select). When disabled, copy manually with Ctrl+C (transcript/input selection) or Ctrl+O (last agent response). Can also be controlled via VTCODE_FULLSCREEN_COPY_ON_SELECT=0/1. |
 | `ui.fullscreen.mouse_capture` | `boolean` | no | `true` | Capture mouse events inside the fullscreen UI. Can also be controlled via VTCODE_FULLSCREEN_MOUSE_CAPTURE=0/1. |
 | `ui.fullscreen.scroll_speed` | `integer` | no | `3` | Multiplier applied to mouse wheel transcript scrolling in fullscreen mode. Values are clamped to the range 1..=20. Can also be controlled via VTCODE_FULLSCREEN_SCROLL_SPEED. |
 | `ui.hide_header` | `boolean` | no | `true` | Hide the full TUI header, showing only version info in a compact line. |

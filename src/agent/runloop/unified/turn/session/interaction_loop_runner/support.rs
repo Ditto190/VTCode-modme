@@ -20,7 +20,7 @@ use vtcode_core::tools::continuation::{PtyContinuationArgs, ReadChunkContinuatio
 use vtcode_core::tools::terminal_app::{EditorLaunchConfig, TerminalAppLauncher};
 use vtcode_core::tools::tool_intent::{VERIFIER_SHELL_FORM_NOTE, verifier_reference};
 use vtcode_core::ui::theme;
-use vtcode_core::ui::{inline_theme_from_core_styles, to_tui_appearance};
+use vtcode_core::ui::{inline_theme_from_core_styles, to_tui_appearance, to_tui_fullscreen};
 use vtcode_core::utils::ansi::MessageStyle;
 use vtcode_ui::tui::app::{ContentPart as UiContentPart, SubmittedInput};
 
@@ -692,6 +692,7 @@ pub(super) fn apply_live_theme_and_appearance(
     let styles = theme::active_styles();
     handle.set_theme(inline_theme_from_core_styles(&styles));
     handle.set_appearance(to_tui_appearance(cfg));
+    handle.set_fullscreen_interaction(to_tui_fullscreen(cfg));
     handle.set_key_bindings(session_bootstrap.effective_key_bindings(cfg));
     crate::agent::runloop::unified::palettes::apply_prompt_style(handle);
     handle.force_redraw();

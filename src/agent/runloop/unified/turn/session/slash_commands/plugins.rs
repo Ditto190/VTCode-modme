@@ -268,6 +268,7 @@ async fn pick_installed_plugin(
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("plugin name".to_string()),
+            fuzzy: false,
         }),
     );
 

@@ -59,7 +59,9 @@ const RESET_CONFIRMATION_VIEW: &str = "__settings_reset_confirmation";
 pub(crate) struct SettingsPaletteState {
     pub(crate) workspace: PathBuf,
     pub(crate) source_path: PathBuf,
-    pub(crate) source_label: String,
+    /// Header notice shown only when the config source needs explanation
+    /// (e.g. no `vtcode.toml` on disk yet); `None` keeps the header minimal.
+    pub(crate) source_label: Option<String>,
     pub(crate) draft: VTCodeConfig,
     pub(crate) view_path: Option<String>,
     /// Last submitted selection in the current settings view.
@@ -108,11 +110,7 @@ pub(crate) fn create_settings_palette_state(
         vt_snapshot.clone().unwrap_or_else(|| manager.config().clone())
     };
 
-    let source_label = if has_config_file {
-        format!("Configuration source: {}", source_path.display())
-    } else {
-        no_config_source_label(workspace)
-    };
+    let source_label = (!has_config_file).then(no_config_source_label);
 
     Ok(SettingsPaletteState {
         workspace: workspace.to_path_buf(),
@@ -164,31 +162,32 @@ pub(crate) fn show_settings_palette(
     }
 
     let selected = preferred_settings_selection(state, &items, selected);
-    renderer.show_list_modal(
-        SETTINGS_TITLE,
-        lines,
-        items,
-        selected,
-        Some(InlineListSearchConfig {
-            label: String::new(),
-            placeholder: Some(
-                if state.view_path.as_deref() == Some(SETTINGS_ADVANCED_VIEW_PATH)
-                    || state.view_path.as_deref().is_some_and(|path| path.starts_with("advanced."))
-                    || state
-                        .view_path
-                        .as_deref()
-                        .is_some_and(|path| path.starts_with(SETTINGS_ADVANCED_NESTED_PREFIX))
-                {
-                    ADVANCED_SEARCH_PLACEHOLDER
-                } else {
-                    SETTINGS_SEARCH_PLACEHOLDER
-                }
-                .to_string(),
-            ),
-        }),
-    );
+    renderer.show_list_modal(SETTINGS_TITLE, lines, items, selected, Some(settings_search_config(state)));
 
     Ok(true)
+}
+
+/// Build the search box for the settings modal. Fuzzy matching is enabled so
+/// group titles and child settings surface on partial or out-of-order input.
+fn settings_search_config(state: &SettingsPaletteState) -> InlineListSearchConfig {
+    let advanced_view = state.view_path.as_deref() == Some(SETTINGS_ADVANCED_VIEW_PATH)
+        || state.view_path.as_deref().is_some_and(|path| path.starts_with("advanced."))
+        || state
+            .view_path
+            .as_deref()
+            .is_some_and(|path| path.starts_with(SETTINGS_ADVANCED_NESTED_PREFIX));
+    InlineListSearchConfig {
+        label: String::new(),
+        placeholder: Some(
+            if advanced_view {
+                ADVANCED_SEARCH_PLACEHOLDER
+            } else {
+                SETTINGS_SEARCH_PLACEHOLDER
+            }
+            .to_string(),
+        ),
+        fuzzy: true,
+    }
 }
 
 fn preferred_settings_selection(
@@ -240,11 +239,33 @@ fn format_permission_summary(config: &VTCodeConfig) -> String {
     )
 }
 
+/// Render `path` compactly for the settings header: relative to the workspace
+/// when inside it, else tilde-abbreviated under the home directory, else as-is.
+fn short_display_path(path: &Path, workspace: &Path) -> String {
+    if let Ok(relative) = path.strip_prefix(workspace) {
+        if !relative.as_os_str().is_empty() {
+            return relative.display().to_string();
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(relative) = path.strip_prefix(&home) {
+            if relative.as_os_str().is_empty() {
+                return "~".to_string();
+            }
+            return format!("~/{}", relative.display());
+        }
+    }
+    path.display().to_string()
+}
+
 fn settings_header_lines(state: &SettingsPaletteState) -> Vec<String> {
-    let mut lines = vec![
-        format!("Write target: {}.", state.source_path.display()),
-        state.source_label.clone(),
-    ];
+    let mut lines = vec![format!(
+        "Write target: {}.",
+        short_display_path(&state.source_path, &state.workspace)
+    )];
+    if let Some(label) = state.source_label.as_deref() {
+        lines.push(label.to_string());
+    }
 
     if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
         lines.push("Settings > Reset.".to_string());
@@ -344,9 +365,10 @@ pub(crate) fn apply_settings_action(state: &mut SettingsPaletteState, action: &s
             state.draft = serde_json::from_value(response.effective_config)
                 .context("Reset configuration could not be converted to the effective settings")?;
             state.view_path = None;
-            state.source_label = format!("Configuration source: {}", response.path.display());
+            state.source_label = None;
             outcome.saved = true;
-            outcome.message = Some(format!("Reset configuration at {}.", response.path.display()));
+            outcome.message =
+                Some(format!("Reset configuration at {}.", short_display_path(&response.path, &state.workspace)));
             return Ok(outcome);
         }
         ACTION_OPEN_ROOT => {
@@ -520,7 +542,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: None,
             last_selection: None,
@@ -570,7 +592,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(RESET_CONFIRMATION_VIEW.to_string()),
             last_selection: None,
@@ -602,7 +624,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("ui".to_string()),
             last_selection: None,
@@ -632,7 +654,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: temp.path().to_path_buf(),
             source_path: source_path.clone(),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("ui".to_string()),
             last_selection: None,
@@ -648,6 +670,58 @@ mod tests {
         assert_eq!(state.draft.ui.tool_display_mode, vtcode_core::config::ToolDisplayMode::Expanded);
         let persisted = std::fs::read_to_string(&source_path).expect("persisted config");
         assert!(persisted.contains("tool_display_mode = \"expanded\""));
+    }
+
+    #[test]
+    fn interface_terminal_group_exposes_copy_on_select_toggle() {
+        let state = SettingsPaletteState {
+            workspace: PathBuf::from("."),
+            source_path: PathBuf::from("vtcode.toml"),
+            source_label: None,
+            draft: VTCodeConfig::default(),
+            view_path: Some(format!("{SETTINGS_GROUP_PREFIX}interface_terminal")),
+            last_selection: None,
+            selection_by_view: BTreeMap::new(),
+            pending_edit_path: None,
+        };
+        let draft = TomlValue::try_from(state.draft.clone()).expect("default config should serialize");
+
+        let items = build_settings_items(&state, &draft).expect("settings items");
+        let item = items
+            .iter()
+            .find(|item| {
+                item.selection.as_ref().is_some_and(|selection| {
+                    matches!(selection, InlineListSelection::ConfigAction(action)
+                        if action == "settings:set:ui.fullscreen.copy_on_select:toggle")
+                })
+            })
+            .expect("copy on select entry in Interface & Terminal");
+        assert_eq!(item.badge.as_deref(), Some("On/Off"));
+    }
+
+    #[test]
+    fn copy_on_select_toggle_persists_manual_mode_to_disk() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let source_path = temp.path().join("vtcode.toml");
+        let mut state = SettingsPaletteState {
+            workspace: temp.path().to_path_buf(),
+            source_path: source_path.clone(),
+            source_label: None,
+            draft: VTCodeConfig::default(),
+            view_path: Some(format!("{SETTINGS_GROUP_PREFIX}interface_terminal")),
+            last_selection: None,
+            selection_by_view: BTreeMap::new(),
+            pending_edit_path: None,
+        };
+        assert!(state.draft.ui.fullscreen.copy_on_select);
+
+        let outcome = apply_settings_action(&mut state, "settings:set:ui.fullscreen.copy_on_select:toggle")
+            .expect("toggle copy on select");
+
+        assert!(outcome.saved);
+        assert!(!state.draft.ui.fullscreen.copy_on_select);
+        let persisted = std::fs::read_to_string(&source_path).expect("persisted config");
+        assert!(persisted.contains("copy_on_select = false"));
     }
 
     #[test]
@@ -695,7 +769,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: None,
             last_selection: None,
@@ -735,7 +809,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: None,
             last_selection: None,
@@ -779,7 +853,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: None,
             last_selection: None,
@@ -797,7 +871,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("agent".to_string()),
             last_selection: None,
@@ -824,7 +898,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("agent".to_string()),
             last_selection: None,
@@ -842,7 +916,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("provider.openai".to_string()),
             last_selection: None,
@@ -888,7 +962,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("provider.openai".to_string()),
             last_selection: None,
@@ -909,7 +983,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("provider.openai".to_string()),
             last_selection: None,
@@ -931,7 +1005,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: None,
             last_selection: None,
@@ -979,7 +1053,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(SETTINGS_ADVANCED_VIEW_PATH.to_string()),
             last_selection: None,
@@ -1027,7 +1101,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(SETTINGS_ADVANCED_VIEW_PATH.to_string()),
             last_selection: None,
@@ -1054,7 +1128,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("advanced.agent.harness.max_tool_calls_per_turn".to_string()),
             last_selection: None,
@@ -1081,7 +1155,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(format!("{SETTINGS_GROUP_PREFIX}model_provider")),
             last_selection: None,
@@ -1115,7 +1189,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(SETTINGS_ADVANCED_VIEW_PATH.to_string()),
             last_selection: None,
@@ -1152,7 +1226,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(SETTINGS_ADVANCED_VIEW_PATH.to_string()),
             last_selection: None,
@@ -1185,7 +1259,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(format!("{SETTINGS_GROUP_PREFIX}tools_integrations")),
             last_selection: None,
@@ -1212,7 +1286,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("agent.codex_app_server".to_string()),
             last_selection: None,
@@ -1243,7 +1317,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(SETTINGS_MODEL_CONFIG_PATH.to_string()),
             last_selection: None,
@@ -1262,7 +1336,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some(SETTINGS_MODEL_CONFIG_MAIN_PATH.to_string()),
             last_selection: None,
@@ -1288,7 +1362,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("ide_context.providers".to_string()),
             last_selection: None,
@@ -1308,7 +1382,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("tools".to_string()),
             last_selection: None,
@@ -1330,7 +1404,7 @@ mod tests {
         let state = SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("agent".to_string()),
             last_selection: None,
@@ -1357,7 +1431,7 @@ mod tests {
         let mut state = SettingsPaletteState {
             workspace: temp.path().to_path_buf(),
             source_path: source_path.clone(),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("ide_context".to_string()),
             last_selection: None,
@@ -1388,7 +1462,7 @@ mod tests {
             let mut state = SettingsPaletteState {
                 workspace: temp.path().to_path_buf(),
                 source_path: temp.path().join("vtcode.toml"),
-                source_label: "test".to_string(),
+                source_label: None,
                 draft: VTCodeConfig::default(),
                 view_path: Some("custom_providers".to_string()),
                 last_selection: None,
@@ -1498,7 +1572,7 @@ api_key_env = "TRUSTED_API_KEY"
         let mut state = SettingsPaletteState {
             workspace: temp.path().to_path_buf(),
             source_path: source_path.clone(),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("ide_context".to_string()),
             last_selection: None,
@@ -1584,7 +1658,7 @@ api_key_env = "TRUSTED_API_KEY"
         SettingsPaletteState {
             workspace: PathBuf::from("."),
             source_path: PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: Some("test".to_string()),
             draft: VTCodeConfig::default(),
             view_path: view_path.map(ToString::to_string),
             last_selection: None,
@@ -1613,5 +1687,42 @@ api_key_env = "TRUSTED_API_KEY"
         assert_eq!(root.last().map(String::as_str), Some("Choose a settings group to edit."));
         let advanced = settings_header_lines(&header_test_state(Some(SETTINGS_ADVANCED_VIEW_PATH)));
         assert!(advanced.iter().any(|line| line.contains("Advanced settings")));
+    }
+
+    #[test]
+    fn settings_header_omits_source_notice_when_config_file_exists() {
+        let mut state = header_test_state(None);
+        state.source_label = None;
+        let lines = settings_header_lines(&state);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("Write target: "));
+        assert!(lines.iter().all(|line| !line.contains("Configuration source")));
+    }
+
+    #[test]
+    fn settings_search_config_enables_fuzzy_with_view_specific_placeholder() {
+        let state = header_test_state(None);
+        let config = settings_search_config(&state);
+        assert!(config.fuzzy);
+        assert_eq!(config.placeholder.as_deref(), Some(SETTINGS_SEARCH_PLACEHOLDER));
+
+        let advanced = header_test_state(Some(SETTINGS_ADVANCED_VIEW_PATH));
+        let config = settings_search_config(&advanced);
+        assert!(config.fuzzy);
+        assert_eq!(config.placeholder.as_deref(), Some(ADVANCED_SEARCH_PLACEHOLDER));
+    }
+
+    #[test]
+    fn short_display_path_prefers_workspace_relative_then_home() {
+        let workspace = Path::new("/repo");
+        assert_eq!(short_display_path(Path::new("/repo/vtcode.toml"), workspace), "vtcode.toml");
+        assert_eq!(short_display_path(Path::new("/repo/sub/dir/vtcode.toml"), workspace), "sub/dir/vtcode.toml");
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(short_display_path(&home.join("vtcode.toml"), Path::new("/elsewhere")), "~/vtcode.toml");
+        }
+        assert_eq!(
+            short_display_path(Path::new("/opt/other/vtcode.toml"), Path::new("/elsewhere")),
+            "/opt/other/vtcode.toml"
+        );
     }
 }

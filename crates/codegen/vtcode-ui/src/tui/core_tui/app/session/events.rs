@@ -101,14 +101,14 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) -> Option<Inlin
         && let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut())
     {
         search.insert(content);
-        list.apply_search(&search.query);
+        list.apply_search(&search.query, search.fuzzy);
         session.mark_dirty();
     } else if let Some(wizard) = session.wizard_overlay_mut()
         && let Some(search) = wizard.search.as_mut()
     {
         search.insert(content);
         if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
-            step.list.apply_search(&search.query);
+            step.list.apply_search(&search.query, search.fuzzy);
         }
         session.mark_dirty();
     } else if let Some(wizard) = session.wizard_overlay_mut()
@@ -2073,7 +2073,11 @@ mod tests {
                     })
                     .collect(),
                 selected: None,
-                search: searchable.then(|| InlineListSearchConfig { label: "Filter".to_string(), placeholder: None }),
+                search: searchable.then(|| InlineListSearchConfig {
+                    label: "Filter".to_string(),
+                    placeholder: None,
+                    fuzzy: false,
+                }),
                 hotkeys: Vec::new(),
             }));
             session.core.set_input_enabled(true);

@@ -116,7 +116,11 @@ fn wizard_search_paste_updates_filter_in_session_handle_event() {
                 freeform_default: None,
             }],
             current_step: 0,
-            search: Some(InlineListSearchConfig { label: "Filter".to_string(), placeholder: None }),
+            search: Some(InlineListSearchConfig {
+                label: "Filter".to_string(),
+                placeholder: None,
+                fuzzy: false,
+            }),
             mode: WizardModalMode::MultiStep,
         })),
     });

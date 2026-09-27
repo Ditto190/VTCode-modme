@@ -245,6 +245,7 @@ async fn show_agents_manager(mut ctx: SlashCommandContext<'_>) -> Result<SlashCo
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("browse, create, edit, thread".to_string()),
+            fuzzy: false,
         }),
     );
 
@@ -327,6 +328,7 @@ async fn show_agent_catalog(mut ctx: SlashCommandContext<'_>) -> Result<SlashCom
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("name, source, description".to_string()),
+            fuzzy: false,
         }),
     );
 
@@ -485,6 +487,7 @@ async fn select_custom_agent_name(ctx: &mut SlashCommandContext<'_>, title: &str
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("name, description, source".to_string()),
+            fuzzy: false,
         }),
     );
 

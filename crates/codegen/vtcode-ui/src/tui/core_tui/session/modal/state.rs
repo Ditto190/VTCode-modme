@@ -1,5 +1,5 @@
 use crate::tui::config::constants::ui;
-use crate::tui::ui::search::{exact_terms_match, normalize_query};
+use crate::tui::ui::search::{FuzzyQuery, exact_terms_match, normalize_query};
 use crate::tui::ui::tui::types::{
     InlineEvent, InlineListItem, InlineListSearchConfig, InlineListSelection, OverlayEvent, OverlayHotkey,
     OverlayHotkeyAction, OverlayHotkeyKey, OverlaySelectionChange, OverlaySubmission, SecurePromptConfig,
@@ -111,6 +111,7 @@ pub struct ModalSearchState {
     pub(crate) label: String,
     pub(crate) placeholder: Option<String>,
     pub(crate) query: String,
+    pub(crate) fuzzy: bool,
 }
 
 impl From<InlineListSearchConfig> for ModalSearchState {
@@ -119,6 +120,7 @@ impl From<InlineListSearchConfig> for ModalSearchState {
             label: config.label,
             placeholder: config.placeholder,
             query: String::new(),
+            fuzzy: config.fuzzy,
         }
     }
 }
@@ -186,7 +188,7 @@ impl ModalState {
                 KeyCode::Char(ch) if !modifiers.control && !modifiers.alt && !modifiers.command => {
                     let previous = list.current_selection();
                     search.push_char(ch);
-                    list.apply_search(&search.query);
+                    list.apply_search(&search.query, search.fuzzy);
                     if let Some(event) = selection_change_event(list, previous) {
                         return ModalListKeyResult::Emit(event);
                     }
@@ -195,7 +197,7 @@ impl ModalState {
                 KeyCode::Backspace => {
                     if search.backspace() {
                         let previous = list.current_selection();
-                        list.apply_search(&search.query);
+                        list.apply_search(&search.query, search.fuzzy);
                         if let Some(event) = selection_change_event(list, previous) {
                             return ModalListKeyResult::Emit(event);
                         }
@@ -206,7 +208,7 @@ impl ModalState {
                 KeyCode::Delete => {
                     if search.clear() {
                         let previous = list.current_selection();
-                        list.apply_search(&search.query);
+                        list.apply_search(&search.query, search.fuzzy);
                         if let Some(event) = selection_change_event(list, previous) {
                             return ModalListKeyResult::Emit(event);
                         }
@@ -216,7 +218,7 @@ impl ModalState {
                 }
                 KeyCode::Esc if search.clear() => {
                     let previous = list.current_selection();
-                    list.apply_search(&search.query);
+                    list.apply_search(&search.query, search.fuzzy);
                     if let Some(event) = selection_change_event(list, previous) {
                         return ModalListKeyResult::Emit(event);
                     }
@@ -834,12 +836,17 @@ impl ModalListState {
         };
     }
 
-    pub(crate) fn apply_search(&mut self, query: &str) {
+    pub(crate) fn apply_search(&mut self, query: &str, fuzzy: bool) {
         let preferred = self.current_selection();
-        self.apply_search_with_preference(query, preferred);
+        self.apply_search_with_preference(query, preferred, fuzzy);
     }
 
-    pub(crate) fn apply_search_with_preference(&mut self, query: &str, preferred: Option<InlineListSelection>) {
+    pub(crate) fn apply_search_with_preference(
+        &mut self,
+        query: &str,
+        preferred: Option<InlineListSelection>,
+        fuzzy: bool,
+    ) {
         let trimmed = query.trim();
         if trimmed.is_empty() {
             if self.filter_query.is_none() {
@@ -868,6 +875,16 @@ impl ModalListState {
             .filter(|term| !term.is_empty())
             .map(|term| term.to_owned())
             .collect::<Vec<_>>();
+
+        if fuzzy {
+            let mut fuzzy_query = FuzzyQuery::new(&normalized_query);
+            self.visible_indices = self.fuzzy_visible_indices(&mut fuzzy_query);
+            self.filter_terms = terms;
+            self.filter_query = Some(trimmed.to_owned());
+            self.select_initial(preferred);
+            return;
+        }
+
         let mut indices = Vec::new();
         let mut pending_divider: Option<usize> = None;
         let mut current_header: Option<usize> = None;
@@ -916,6 +933,108 @@ impl ModalListState {
         self.filter_terms = terms;
         self.filter_query = Some(trimmed.to_owned());
         self.select_initial(preferred);
+    }
+
+    /// Fuzzy filter with relevance ranking. Items are grouped into
+    /// divider/header/children blocks (selectables without a preceding header
+    /// rank individually); blocks are ordered by their best fuzzy score while
+    /// a matching header keeps its whole group, preserving curated order
+    /// within blocks.
+    fn fuzzy_visible_indices(&self, query: &mut FuzzyQuery) -> Vec<usize> {
+        /// One child item of a header block: list index plus its fuzzy score
+        /// (`None` when the item does not match the query).
+        struct ScoredIndex {
+            index: usize,
+            score: Option<u32>,
+        }
+
+        /// A divider/header/children run ranked as one unit; a matching header
+        /// keeps all of its children, otherwise only matching children show.
+        struct FuzzySearchBlock {
+            divider_index: Option<usize>,
+            header_index: Option<usize>,
+            header_score: Option<u32>,
+            child_scores: Vec<ScoredIndex>,
+        }
+
+        impl FuzzySearchBlock {
+            fn best_score(&self) -> Option<u32> {
+                self.header_score
+                    .into_iter()
+                    .chain(self.child_scores.iter().filter_map(|child| child.score))
+                    .max()
+            }
+        }
+
+        let mut blocks: Vec<FuzzySearchBlock> = Vec::new();
+        let mut open_block: Option<FuzzySearchBlock> = None;
+        let mut pending_divider: Option<usize> = None;
+
+        for (index, item) in self.items.iter().enumerate() {
+            if item.is_divider {
+                if let Some(block) = open_block.take() {
+                    blocks.push(block);
+                }
+                pending_divider = Some(index);
+                continue;
+            }
+
+            let score = item.search_value.as_deref().and_then(|value| query.score(value));
+
+            if item.is_header() {
+                if let Some(block) = open_block.take() {
+                    blocks.push(block);
+                }
+                open_block = Some(FuzzySearchBlock {
+                    divider_index: pending_divider.take(),
+                    header_index: Some(index),
+                    header_score: score,
+                    child_scores: Vec::new(),
+                });
+                continue;
+            }
+
+            match open_block.as_mut() {
+                // Selectables directly after a header belong to its block.
+                Some(block) if block.header_index.is_some() => {
+                    block.child_scores.push(ScoredIndex { index, score });
+                }
+                _ => {
+                    if let Some(block) = open_block.take() {
+                        blocks.push(block);
+                    }
+                    open_block = Some(FuzzySearchBlock {
+                        divider_index: pending_divider.take(),
+                        header_index: None,
+                        header_score: None,
+                        child_scores: vec![ScoredIndex { index, score }],
+                    });
+                }
+            }
+        }
+        if let Some(block) = open_block.take() {
+            blocks.push(block);
+        }
+
+        blocks.retain(|block| block.best_score().is_some());
+        blocks.sort_by_key(|block| std::cmp::Reverse(block.best_score()));
+
+        let mut indices = Vec::new();
+        for block in blocks {
+            if let Some(divider_index) = block.divider_index {
+                indices.push(divider_index);
+            }
+            if let Some(header_index) = block.header_index {
+                indices.push(header_index);
+            }
+            let header_matched = block.header_score.is_some();
+            for child in block.child_scores {
+                if header_matched || child.score.is_some() {
+                    indices.push(child.index);
+                }
+            }
+        }
+        indices
     }
 
     fn select_initial(&mut self, preferred: Option<InlineListSelection>) {
@@ -1137,19 +1256,19 @@ impl WizardModalState {
             match key.code {
                 KeyCode::Char(ch) if !modifiers.control && !modifiers.alt && !modifiers.command => {
                     search.push_char(ch);
-                    step.list.apply_search(&search.query);
+                    step.list.apply_search(&search.query, search.fuzzy);
                     return ModalListKeyResult::Redraw;
                 }
                 KeyCode::Backspace => {
                     if search.backspace() {
-                        step.list.apply_search(&search.query);
+                        step.list.apply_search(&search.query, search.fuzzy);
                         return ModalListKeyResult::Redraw;
                     }
                     return ModalListKeyResult::HandledNoRedraw;
                 }
                 KeyCode::Delete => {
                     if search.clear() {
-                        step.list.apply_search(&search.query);
+                        step.list.apply_search(&search.query, search.fuzzy);
                         return ModalListKeyResult::Redraw;
                     }
                     return ModalListKeyResult::HandledNoRedraw;
@@ -1157,13 +1276,13 @@ impl WizardModalState {
                 KeyCode::Tab => {
                     if let Some(best_match) = step.list.get_best_matching_item(&search.query) {
                         search.query = best_match;
-                        step.list.apply_search(&search.query);
+                        step.list.apply_search(&search.query, search.fuzzy);
                         return ModalListKeyResult::Redraw;
                     }
                     return ModalListKeyResult::HandledNoRedraw;
                 }
                 KeyCode::Esc if search.clear() => {
-                    step.list.apply_search(&search.query);
+                    step.list.apply_search(&search.query, search.fuzzy);
                     return ModalListKeyResult::Redraw;
                 }
                 _ => {}

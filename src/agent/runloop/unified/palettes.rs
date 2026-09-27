@@ -5,7 +5,7 @@ use chrono::Local;
 
 use vtcode_core::config::loader::{ConfigManager, VTCodeConfig};
 use vtcode_core::ui::theme;
-use vtcode_core::ui::{inline_theme_from_core_styles, to_tui_appearance};
+use vtcode_core::ui::{inline_theme_from_core_styles, to_tui_appearance, to_tui_fullscreen};
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_core::utils::session_archive::SessionListing;
 use vtcode_ui::tui::app::{InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection};
@@ -104,6 +104,7 @@ pub(crate) fn show_theme_palette(renderer: &mut AnsiRenderer, mode: ThemePalette
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some(THEME_SEARCH_PLACEHOLDER.to_string()),
+            fuzzy: false,
         }),
     );
 
@@ -157,6 +158,7 @@ pub(crate) fn show_mode_palette(
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some(MODE_SEARCH_PLACEHOLDER.to_string()),
+            fuzzy: false,
         }),
     );
 
@@ -255,6 +257,7 @@ pub(crate) fn show_sessions_palette(
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some(SESSIONS_SEARCH_PLACEHOLDER.to_string()),
+            fuzzy: false,
         }),
     );
     Ok(true)
@@ -339,6 +342,7 @@ pub(crate) async fn refresh_runtime_config_from_manager(
     let styles = theme::active_styles();
     handle.set_theme(inline_theme_from_core_styles(&styles));
     handle.set_appearance(to_tui_appearance(&runtime_config));
+    handle.set_fullscreen_interaction(to_tui_fullscreen(&runtime_config));
     handle.set_key_bindings(session_bootstrap.effective_key_bindings(&runtime_config));
 
     let provider_label = {

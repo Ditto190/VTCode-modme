@@ -165,6 +165,10 @@ impl Session {
                 self.invalidate_transcript_cache();
                 self.invalidate_scroll_metrics();
             }
+            InlineCommand::SetFullscreenInteraction { interaction } => {
+                self.fullscreen.interaction = interaction;
+                self.mark_visual_dirty();
+            }
             InlineCommand::SetVimModeEnabled(enabled) => {
                 self.vim_state.set_enabled(enabled);
                 self.mark_visual_dirty();

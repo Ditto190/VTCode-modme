@@ -188,7 +188,12 @@ impl Default for InlineHeaderContext {
     fn default() -> Self {
         let version = env!("CARGO_PKG_VERSION").to_string();
         Self {
-            app_name: "App".to_string(),
+            // Keep in sync with `vtcode-config::constants::app::DISPLAY_NAME`.
+            // `vtcode-commons` cannot depend on `vtcode-config` (config depends
+            // on commons), so the product name is duplicated here. Covered by
+            // the `header_placeholder_app_name_matches_product` ratchet in
+            // `vtcode-ui`.
+            app_name: "VT Code".to_string(),
             provider: "Provider: unavailable".to_string(),
             model: "Model: unavailable".to_string(),
             context_window_size: None,

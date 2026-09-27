@@ -209,6 +209,7 @@ fn show_local_providers_modal(ctx: &mut SlashCommandContext<'_>, statuses: &[Loc
         Some(InlineListSearchConfig {
             label: "Search providers".to_string(),
             placeholder: Some("ollama, lmstudio, llamacpp".to_string()),
+            fuzzy: false,
         }),
     );
 }

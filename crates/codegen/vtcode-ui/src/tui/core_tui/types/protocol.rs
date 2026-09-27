@@ -8,6 +8,7 @@ use super::overlay::{ListOverlayRequest, ModalOverlayRequest, OverlayEvent, Over
 use super::selection::{InlineListItem, InlineListSearchConfig, InlineListSelection, SecurePromptConfig};
 use super::style::{InlineHeaderContext, InlineLinkRange, InlineSegment, InlineTextStyle, InlineTheme};
 use crate::tui::core_tui::session::config::AppearanceConfig;
+use crate::tui::options::FullscreenInteractionSettings;
 
 pub use vtcode_commons::ui_protocol::ActivityState;
 pub use vtcode_commons::ui_protocol::InlineMessageKind;
@@ -156,6 +157,9 @@ pub enum InlineCommand {
     },
     SetAppearance {
         appearance: AppearanceConfig,
+    },
+    SetFullscreenInteraction {
+        interaction: FullscreenInteractionSettings,
     },
     SetVimModeEnabled(bool),
     SetQueuedInputs {
@@ -359,6 +363,10 @@ impl InlineHandle {
 
     pub fn set_appearance(&self, appearance: AppearanceConfig) {
         self.send_command(InlineCommand::SetAppearance { appearance });
+    }
+
+    pub fn set_fullscreen_interaction(&self, interaction: FullscreenInteractionSettings) {
+        self.send_command(InlineCommand::SetFullscreenInteraction { interaction });
     }
 
     pub fn set_vim_mode_enabled(&self, enabled: bool) {

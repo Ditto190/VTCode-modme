@@ -1241,10 +1241,7 @@ fn liveness_probe_held_lock_reports_live_consistently() {
     let log = open(dir.path(), "sess-probe", DEFAULT_MAX_EVENTS).expect("open");
     let target = sessions_root(dir.path()).join("sess-probe");
     for _ in 0..200 {
-        assert!(
-            crate::retention::session_dir_is_live(&target),
-            "held liveness lock must report live"
-        );
+        assert!(crate::retention::session_dir_is_live(&target), "held liveness lock must report live");
     }
     log.complete().expect("complete");
     // complete() must not release the liveness lock: the session handle is

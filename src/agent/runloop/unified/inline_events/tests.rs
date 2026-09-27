@@ -714,7 +714,7 @@ async fn settings_editor_selection_submits_editor_config_command() {
         state: Box::new(SettingsPaletteState {
             workspace: std::path::PathBuf::from("."),
             source_path: std::path::PathBuf::from("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("tools".to_string()),
             last_selection: None,
@@ -787,7 +787,7 @@ async fn settings_string_selection_opens_value_editor() {
         state: Box::new(SettingsPaletteState {
             workspace: temp.path().to_path_buf(),
             source_path: temp.path().join("vtcode.toml"),
-            source_label: "test".to_string(),
+            source_label: None,
             draft: VTCodeConfig::default(),
             view_path: Some("tools.editor".to_string()),
             last_selection: None,
@@ -1443,5 +1443,6 @@ fn other_name(command: &InlineCommand) -> &'static str {
         InlineCommand::StartEventStream => "StartEventStream",
         InlineCommand::UpdateFilePaletteSearch { .. } => "UpdateFilePaletteSearch",
         InlineCommand::SetSlashCommands { .. } => "SetSlashCommands",
+        InlineCommand::SetFullscreenInteraction { .. } => "SetFullscreenInteraction",
     }
 }

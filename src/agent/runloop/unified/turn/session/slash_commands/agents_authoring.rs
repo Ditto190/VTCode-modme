@@ -537,6 +537,7 @@ fn show_authoring_menu(ctx: &mut SlashCommandContext<'_>, draft: &NativeAgentDra
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("name, tools, model, memory".to_string()),
+            fuzzy: false,
         }),
     );
     Ok(())
@@ -859,6 +860,7 @@ async fn edit_tools_checklist(
     let mut search_config = Some(InlineListSearchConfig {
         label: String::new(),
         placeholder: Some("tool id or capability".to_string()),
+        fuzzy: false,
     });
 
     loop {
@@ -948,6 +950,7 @@ async fn edit_tools_checklist(
         search_config = Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("tool id or capability".to_string()),
+            fuzzy: false,
         });
     }
 }
@@ -1009,6 +1012,7 @@ async fn select_native_agent_name(ctx: &mut SlashCommandContext<'_>) -> Result<O
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("name, description, source".to_string()),
+            fuzzy: false,
         }),
     );
 

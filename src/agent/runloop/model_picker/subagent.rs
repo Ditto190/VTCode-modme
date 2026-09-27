@@ -242,6 +242,7 @@ async fn select_subagent_model_target(
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("shortcut, provider, model id".to_string()),
+            fuzzy: false,
         }),
     );
 
@@ -333,6 +334,7 @@ async fn select_subagent_reasoning(
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("keep, unset, high".to_string()),
+            fuzzy: false,
         }),
     );
 

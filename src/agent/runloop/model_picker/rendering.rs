@@ -438,6 +438,7 @@ pub(super) fn render_step_one_inline(
     let search = InlineListSearchConfig {
         label: String::new(),
         placeholder: Some("provider, name, id, or capability".to_string()),
+        fuzzy: false,
     };
     renderer.show_list_modal(STEP_ONE_TITLE, lines, items, selected, Some(search));
 

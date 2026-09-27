@@ -34,7 +34,7 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) {
     if let Some(modal) = session.modal_state_mut() {
         if let (Some(list), Some(search)) = (modal.list.as_mut(), modal.search.as_mut()) {
             search.insert(content);
-            list.apply_search(&search.query);
+            list.apply_search(&search.query, search.fuzzy);
             session.mark_dirty();
             return;
         }
@@ -45,7 +45,7 @@ pub(super) fn handle_paste(session: &mut Session, content: &str) {
         if let Some(search) = wizard.search.as_mut() {
             search.insert(content);
             if let Some(step) = wizard.steps.get_mut(wizard.current_step) {
-                step.list.apply_search(&search.query);
+                step.list.apply_search(&search.query, search.fuzzy);
             }
             session.mark_dirty();
             return;

@@ -36,7 +36,11 @@ fn sample_list_modal() -> ModalState {
     ];
 
     let list_state = ModalListState::new(items, None);
-    let search_state = ModalSearchState::from(InlineListSearchConfig { label: "Search".to_owned(), placeholder: None });
+    let search_state = ModalSearchState::from(InlineListSearchConfig {
+        label: "Search".to_owned(),
+        placeholder: None,
+        fuzzy: false,
+    });
 
     let mut modal = ModalState {
         title: "Test".to_owned(),
@@ -51,9 +55,10 @@ fn sample_list_modal() -> ModalState {
         is_help_modal: false,
     };
 
-    if let Some(list) = modal.list.as_mut() {
-        let query = modal.search.as_ref().map(|state| state.query.clone()).unwrap_or_default();
-        list.apply_search(&query);
+    if let Some(list) = modal.list.as_mut()
+        && let Some(search) = modal.search.as_ref()
+    {
+        list.apply_search(&search.query, search.fuzzy);
     }
 
     modal
@@ -614,7 +619,7 @@ fn apply_search_retains_related_structure() {
 
     let mut state = ModalListState::new(vec![divider, header, matching, non_matching], None);
 
-    state.apply_search("general");
+    state.apply_search("general", false);
 
     let visible_titles: Vec<String> = state
         .visible_indices
@@ -635,9 +640,239 @@ fn apply_search_retains_related_structure() {
     assert_eq!(state.visible_selectable_count(), 2);
     assert_eq!(state.filter_query(), Some("general"));
 
-    state.apply_search("");
+    state.apply_search("", false);
     assert_eq!(state.visible_indices.len(), state.items.len());
     assert!(state.filter_query().is_none());
+}
+
+#[test]
+fn fuzzy_search_matches_subsequences_and_ranks_by_relevance() {
+    let subsequence_match = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:model_provider".to_owned())),
+        search_value: Some("model & provider choose the active provider".to_owned()),
+        ..base_item("Model & Provider")
+    };
+    let contiguous_match = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:mp_grid".to_owned())),
+        search_value: Some("mp grid".to_owned()),
+        ..base_item("MP Grid")
+    };
+    let non_matching = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:editor".to_owned())),
+        search_value: Some("editor".to_owned()),
+        ..base_item("Editor")
+    };
+
+    let mut state = ModalListState::new(vec![subsequence_match, contiguous_match, non_matching], None);
+
+    state.apply_search("mp", true);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    // "mp" is a contiguous match in "MP Grid" but only a gapped subsequence in
+    // "Model & Provider", so the stronger match ranks first.
+    assert_eq!(visible_titles, vec!["MP Grid".to_owned(), "Model & Provider".to_owned()]);
+}
+
+#[test]
+fn fuzzy_search_matching_header_includes_whole_group() {
+    let divider = InlineListItem {
+        title: ui::INLINE_USER_MESSAGE_DIVIDER_SYMBOL.repeat(3),
+        ..base_item("")
+    };
+    let header = InlineListItem {
+        search_value: Some("model & provider".to_owned()),
+        ..base_item("Model & Provider")
+    };
+    let provider_child = InlineListItem {
+        indent: 1,
+        selection: Some(InlineListSelection::ConfigAction("settings:set:provider".to_owned())),
+        search_value: Some("active provider".to_owned()),
+        ..base_item("Provider")
+    };
+    let response_child = InlineListItem {
+        indent: 1,
+        selection: Some(InlineListSelection::ConfigAction("settings:set:response".to_owned())),
+        search_value: Some("response behavior".to_owned()),
+        ..base_item("Response Behavior")
+    };
+    let other_header = InlineListItem {
+        selection: None,
+        search_value: Some("tools & integrations".to_owned()),
+        ..base_item("Tools & Integrations")
+    };
+
+    let mut state = ModalListState::new(vec![divider, header, provider_child, response_child, other_header], None);
+
+    // "mdl" only fuzzy-matches the "Model & Provider" header.
+    state.apply_search("mdl", true);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    let expected_divider = ui::INLINE_USER_MESSAGE_DIVIDER_SYMBOL.repeat(3);
+    assert_eq!(
+        visible_titles,
+        vec![
+            expected_divider,
+            "Model & Provider".to_owned(),
+            "Provider".to_owned(),
+            "Response Behavior".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn fuzzy_search_matching_child_shows_header_but_not_unmatched_siblings() {
+    let header = InlineListItem {
+        search_value: Some("model & provider".to_owned()),
+        ..base_item("Model & Provider")
+    };
+    let matching_child = InlineListItem {
+        indent: 1,
+        selection: Some(InlineListSelection::ConfigAction("settings:set:provider".to_owned())),
+        search_value: Some("active provider".to_owned()),
+        ..base_item("Provider")
+    };
+    let other_child = InlineListItem {
+        indent: 1,
+        selection: Some(InlineListSelection::ConfigAction("settings:set:response".to_owned())),
+        search_value: Some("response behavior".to_owned()),
+        ..base_item("Response Behavior")
+    };
+
+    let mut state = ModalListState::new(vec![header, matching_child, other_child], None);
+
+    state.apply_search("active", true);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    assert_eq!(visible_titles, vec!["Model & Provider".to_owned(), "Provider".to_owned()]);
+}
+
+#[test]
+fn exact_mode_unchanged_when_fuzzy_disabled() {
+    let subsequence_match = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:model_provider".to_owned())),
+        search_value: Some("model & provider".to_owned()),
+        ..base_item("Model & Provider")
+    };
+    let substring_match = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:mp_grid".to_owned())),
+        search_value: Some("mp grid".to_owned()),
+        ..base_item("MP Grid")
+    };
+
+    let mut state = ModalListState::new(vec![subsequence_match, substring_match], None);
+    state.apply_search("mdl", false);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    // Subsequence queries do not match without the fuzzy flag.
+    assert!(visible_titles.is_empty());
+
+    state.apply_search("grid", false);
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    assert_eq!(visible_titles, vec!["MP Grid".to_owned()]);
+}
+
+#[test]
+fn fuzzy_search_multi_term_requires_every_term_to_match() {
+    let active_provider = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:set:provider".to_owned())),
+        search_value: Some("active provider".to_owned()),
+        ..base_item("Provider")
+    };
+    let response_behavior = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:set:response".to_owned())),
+        search_value: Some("response behavior".to_owned()),
+        ..base_item("Response Behavior")
+    };
+
+    let mut state = ModalListState::new(vec![active_provider, response_behavior], None);
+    state.apply_search("act prv", true);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    // Every term must fuzzy-match: "act prv" covers only "active provider";
+    // "response behavior" fails the "act" term and is excluded.
+    assert_eq!(visible_titles, vec!["Provider".to_owned()]);
+}
+
+#[test]
+fn fuzzy_search_preserves_original_order_for_equal_scores() {
+    let first = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:first".to_owned())),
+        search_value: Some("group settings".to_owned()),
+        ..base_item("First")
+    };
+    let second = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:second".to_owned())),
+        search_value: Some("group settings".to_owned()),
+        ..base_item("Second")
+    };
+
+    let mut state = ModalListState::new(vec![first, second], None);
+    state.apply_search("grp", true);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    // Identical search values score identically; the stable sort must keep
+    // the curated order instead of shuffling equally relevant items.
+    assert_eq!(visible_titles, vec!["First".to_owned(), "Second".to_owned()]);
+
+    // Clearing the query in fuzzy mode restores every item.
+    state.apply_search("", true);
+    assert_eq!(state.visible_indices.len(), state.items.len());
+}
+
+#[test]
+fn fuzzy_search_attaches_divider_to_matching_singleton() {
+    let unmatched = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:alpha".to_owned())),
+        search_value: Some("alpha".to_owned()),
+        ..base_item("Alpha")
+    };
+    let divider = InlineListItem {
+        title: ui::INLINE_USER_MESSAGE_DIVIDER_SYMBOL.repeat(3),
+        ..base_item("")
+    };
+    let matched = InlineListItem {
+        selection: Some(InlineListSelection::ConfigAction("settings:open:beta".to_owned())),
+        search_value: Some("beta".to_owned()),
+        ..base_item("Beta")
+    };
+
+    let mut state = ModalListState::new(vec![unmatched, divider, matched], None);
+    state.apply_search("beta", true);
+
+    let visible_titles: Vec<String> = state
+        .visible_indices
+        .iter()
+        .map(|&idx| state.items[idx].title.clone())
+        .collect();
+    assert_eq!(visible_titles, vec![ui::INLINE_USER_MESSAGE_DIVIDER_SYMBOL.repeat(3), "Beta".to_owned()]);
 }
 
 #[test]
@@ -1096,7 +1331,11 @@ fn wizard_numbered_shortcuts_require_multistep_searchless_capped_step() {
         "Pick".to_owned(),
         vec![wizard_step_with_options(2)],
         0,
-        Some(InlineListSearchConfig { label: "Search".to_owned(), placeholder: None }),
+        Some(InlineListSearchConfig {
+            label: "Search".to_owned(),
+            placeholder: None,
+            fuzzy: false,
+        }),
         WizardModalMode::MultiStep,
     );
     assert!(!searching.numbered_shortcuts(), "digits filter while search is open");
@@ -1156,7 +1395,7 @@ fn list_search_preserves_selection_when_item_matches() {
     list.select_next();
 
     let previous = list.current_selection();
-    list.apply_search("other");
+    list.apply_search("other", false);
 
     assert_eq!(list.current_selection(), previous);
 }
@@ -1167,7 +1406,7 @@ fn list_search_resets_selection_when_item_removed() {
     let list = modal.list.as_mut().expect("list state");
     list.select_next();
 
-    list.apply_search("general");
+    list.apply_search("general", false);
 
     assert_eq!(list.current_selection(), Some(InlineListSelection::Model(0)));
 }

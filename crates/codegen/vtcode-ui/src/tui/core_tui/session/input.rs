@@ -280,7 +280,9 @@ impl Session {
             .wrap(Wrap { trim: false });
         frame.render_widget(paragraph.block(block), input_area);
         self.apply_input_selection_highlight(frame.buffer_mut(), inner);
-        if self.input_manager.selection_needs_copy() {
+        // Auto-copy on select only when enabled; otherwise the selection stays
+        // until the user copies manually with Ctrl+C (or Cmd+C).
+        if self.fullscreen.interaction.copy_on_select && self.input_manager.selection_needs_copy() {
             let _ = self.copy_input_selection_to_clipboard();
         }
 

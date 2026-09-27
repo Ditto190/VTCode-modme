@@ -853,7 +853,7 @@ impl Session {
         let mut list_state = ModalListState::new(request.items, request.selected.clone());
         let search_state = request.search.map(ModalSearchState::from);
         if let Some(search) = &search_state {
-            list_state.apply_search_with_preference(&search.query, request.selected);
+            list_state.apply_search_with_preference(&search.query, request.selected, search.fuzzy);
         }
         if anchor_to_bottom {
             list_state.select_last();

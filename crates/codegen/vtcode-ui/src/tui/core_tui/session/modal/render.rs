@@ -1852,6 +1852,7 @@ mod tests {
             label: "Search models".to_string(),
             placeholder: Some("provider, name, id".to_string()),
             query: String::new(),
+            fuzzy: false,
         });
 
         let has_title = lines.iter().any(|line| line.contains("Search models"));
@@ -1866,6 +1867,7 @@ mod tests {
             label: "Search models".to_string(),
             placeholder: Some("provider, name, id".to_string()),
             query: "openrouter".to_string(),
+            fuzzy: false,
         });
 
         let search_index = lines
@@ -1889,6 +1891,7 @@ mod tests {
             label: String::new(),
             placeholder: Some("provider, name, id".to_string()),
             query: String::new(),
+            fuzzy: false,
         });
 
         let placeholder_row = lines
@@ -1914,7 +1917,7 @@ mod tests {
         );
         let styles = modal_render_styles();
         let mut list = list;
-        list.apply_search("gpt");
+        list.apply_search("gpt", false);
 
         let summary = modal_list_summary_line(&list, &styles, None).expect("summary should exist");
         let text = line_text(&summary);

@@ -833,6 +833,7 @@ fn show_skills_list_modal(ctx: &mut SlashCommandContext<'_>, entries: &[Interact
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("skill name or description".to_string()),
+            fuzzy: false,
         }),
     );
 }
@@ -876,6 +877,7 @@ fn show_skill_picker_modal(
         Some(InlineListSearchConfig {
             label: String::new(),
             placeholder: Some("skill name or description".to_string()),
+            fuzzy: false,
         }),
     );
 }

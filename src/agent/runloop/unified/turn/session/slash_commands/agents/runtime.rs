@@ -105,6 +105,7 @@ pub(super) async fn show_threads_modal(mut ctx: SlashCommandContext<'_>) -> Resu
             search: Some(InlineListSearchConfig {
                 label: String::new(),
                 placeholder: Some("id, agent, source, status".to_string()),
+                fuzzy: false,
             }),
             hotkeys: vec![
                 TransientHotkey {

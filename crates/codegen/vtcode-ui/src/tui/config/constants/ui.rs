@@ -107,7 +107,7 @@ pub const MODAL_LIST_SUMMARY_NO_MATCHES: &str = "No matches";
 pub const MODAL_LIST_SUMMARY_RESET_HINT: &str = "Press Esc to reset";
 pub const MODAL_LIST_NO_RESULTS_MESSAGE: &str = "No matching options";
 pub const HEADER_VERSION_PROMPT: &str = "> ";
-pub const HEADER_VERSION_PREFIX: &str = "App";
+pub const HEADER_VERSION_PREFIX: &str = vtcode_config::constants::ui::HEADER_VERSION_PREFIX;
 pub const HEADER_VERSION_LEFT_DELIMITER: &str = "(";
 pub const HEADER_VERSION_RIGHT_DELIMITER: &str = ")";
 pub const HEADER_PRIMARY_SEPARATOR: &str = " | ";
@@ -305,5 +305,17 @@ mod tests {
         assert_eq!(effective_transcript_bottom_padding(1), 0);
         assert_eq!(effective_transcript_bottom_padding(2), 1);
         assert_eq!(effective_transcript_bottom_padding(100), usize::from(INLINE_TRANSCRIPT_BOTTOM_PADDING));
+    }
+
+    /// Ratchet for the instant-launch placeholder: the header fallback and the
+    /// shell default must match the canonical product name. `vtcode-commons`
+    /// cannot depend on `vtcode-config`, so this test (in a crate that sees
+    /// both) guards against future divergence.
+    #[test]
+    fn header_placeholder_app_name_matches_product() {
+        let display_name = vtcode_config::constants::app::DISPLAY_NAME;
+        assert_eq!(HEADER_VERSION_PREFIX, display_name);
+        assert_eq!(HEADER_VERSION_PREFIX, vtcode_config::constants::ui::HEADER_VERSION_PREFIX);
+        assert_eq!(crate::tui::core_tui::types::InlineHeaderContext::default().app_name, display_name);
     }
 }

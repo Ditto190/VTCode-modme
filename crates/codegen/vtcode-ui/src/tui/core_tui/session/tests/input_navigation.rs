@@ -55,7 +55,11 @@ fn overlay_owns_paste_after_input_is_reenabled() {
                     })
                     .collect(),
                 selected: None,
-                search: searchable.then(|| InlineListSearchConfig { label: "Filter".to_string(), placeholder: None }),
+                search: searchable.then(|| InlineListSearchConfig {
+                    label: "Filter".to_string(),
+                    placeholder: None,
+                    fuzzy: false,
+                }),
                 hotkeys: Vec::new(),
             })),
         });
