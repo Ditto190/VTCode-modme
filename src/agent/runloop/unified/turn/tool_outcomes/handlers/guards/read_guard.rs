@@ -1,7 +1,9 @@
 //! Guards for file read operations.
 //!
 //! Contains two guards:
-//! 1. **Read-after-write guard**: Prevents reading a file that was just written
+//! 1. **Read-after-write guard**: Blocks bare full reads of a file written
+//!    this turn (the write response carries a diff preview); bounded slice
+//!    reads (explicit offset/limit/page) are admitted
 //! 2. **Repeated read-only call guard**: Prevents excessive reads of the same file
 //!
 //! The repeated read guard uses a two-tier approach:
@@ -18,6 +20,7 @@ use super::common::{extract_read_path, is_read_action, push_guard_failure_messag
 use crate::agent::runloop::unified::tool_reads::spool_page_source_path;
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{find_duplicate_in_history, signature_key_for};
+use crate::agent::runloop::unified::turn::tool_outcomes::read_extent;
 use crate::agent::runloop::unified::turn::tool_outcomes::response_content::maybe_inline_spooled;
 
 /// Maximum consecutive reads of the same file with the same slice (offset/limit/raw).
@@ -411,6 +414,15 @@ fn build_read_after_write_error(path: &str) -> String {
 
 /// Enforce the read-after-write guard.
 ///
+/// Blocks bare full reads of a path written this turn: the write response
+/// already carries a diff preview, so a full re-read only duplicates context.
+/// A bounded slice read (explicit offset/limit/page under the shared
+/// alias vocabulary) is admitted — it is the deliberate targeted inspection
+/// the block message directs the model toward, and repeated slice reads stay
+/// bounded by the family/per-path caps enforced right after this guard.
+/// A `raw` flag alone does not admit: an uncondensed full re-read is the most
+/// wasteful variant the guard exists to stop.
+///
 /// Returns `Some(ValidationResult::Blocked)` when the guard trips,
 /// or `None` when the guard passes.
 pub(crate) fn enforce_read_after_write_guard(
@@ -426,6 +438,10 @@ pub(crate) fn enforce_read_after_write_guard(
     let path = extract_read_path(effective_args)?;
 
     if !ctx.harness_state.was_recently_written(&path) {
+        return None;
+    }
+
+    if read_extent::args_have_bounded_extent(effective_args) {
         return None;
     }
 

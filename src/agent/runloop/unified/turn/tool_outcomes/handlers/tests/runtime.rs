@@ -2335,3 +2335,68 @@ async fn single_tool_call_dispatch_records_requested_tool_calls() {
     assert_eq!(diagnostics.requested_tool_calls, 1, "single-call dispatch must record requested tool calls");
     assert_eq!(diagnostics.admitted_tool_calls, 1);
 }
+
+#[tokio::test]
+async fn read_after_write_guard_blocks_bare_full_read_of_written_file() {
+    let mut backing = TestContextBacking::new(4).await;
+    let sample_path = backing.sample_file.to_string_lossy().to_string();
+    let mut ctx = backing.turn_processing_context();
+    ctx.harness_state.record_written_file(&sample_path);
+
+    let args = json!({ "path": sample_path });
+    let outcome = enforce_read_after_write_guard(&mut ctx, "bare_read_after_write", tool_names::READ_FILE, &args);
+    assert!(
+        matches!(outcome, Some(ValidationResult::Blocked)),
+        "a bare full read of a just-written file must stay blocked"
+    );
+    assert!(
+        ctx.working_history
+            .iter()
+            .any(|message| message.content.as_text().contains("was just written")),
+        "the block must carry the diff-preview guidance"
+    );
+}
+
+#[tokio::test]
+async fn read_after_write_guard_admits_bounded_slice_read_of_written_file() {
+    let mut backing = TestContextBacking::new(4).await;
+    let sample_path = backing.sample_file.to_string_lossy().to_string();
+    let mut ctx = backing.turn_processing_context();
+    ctx.harness_state.record_written_file(&sample_path);
+
+    // The block message directs the model to "specify offset/limit for a
+    // specific range" — that advice must be truthful, so a bounded slice
+    // read passes. Repeated slice reads stay bounded by the family and
+    // per-file-path caps enforced after this guard.
+    let args = json!({ "path": sample_path, "offset": 1, "limit": 10 });
+    let outcome = enforce_read_after_write_guard(&mut ctx, "slice_read_after_write", tool_names::READ_FILE, &args);
+    assert!(outcome.is_none(), "a read with an explicit offset/limit slice must be admitted");
+
+    let raw_flagged_args = json!({ "path": sample_path, "raw": true });
+    let raw_outcome =
+        enforce_read_after_write_guard(&mut ctx, "raw_only_read_after_write", tool_names::READ_FILE, &raw_flagged_args);
+    assert!(
+        matches!(raw_outcome, Some(ValidationResult::Blocked)),
+        "a raw flag without a slice is an uncondensed full re-read and must stay blocked"
+    );
+}
+
+#[tokio::test]
+async fn read_after_write_guard_ignores_unwritten_paths_and_non_read_tools() {
+    let mut backing = TestContextBacking::new(4).await;
+    let sample_path = backing.sample_file.to_string_lossy().to_string();
+    let mut ctx = backing.turn_processing_context();
+
+    // No write recorded yet: even a bare read passes.
+    let unwritten_args = json!({ "path": sample_path });
+    let outcome = enforce_read_after_write_guard(&mut ctx, "read_unwritten", tool_names::READ_FILE, &unwritten_args);
+    assert!(outcome.is_none(), "reads of paths not written this turn must pass");
+
+    // Written path but a non-read action on the unified file tool: not the
+    // guard's concern.
+    ctx.harness_state.record_written_file(&sample_path);
+    let mutating_args = json!({ "action": "write", "path": sample_path, "content": "x" });
+    let non_read_outcome =
+        enforce_read_after_write_guard(&mut ctx, "write_after_write", tool_names::UNIFIED_FILE, &mutating_args);
+    assert!(non_read_outcome.is_none(), "non-read actions must not trip the read-after-write guard");
+}
