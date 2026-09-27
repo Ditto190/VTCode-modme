@@ -78,7 +78,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | `/`, `Enter`, `Esc`, `n`/`N` | Search start/commit/cancel, next/previous match. |
 | `j`/`k`, `Up`/`Down`, `Ctrl+U`/`D`, `Ctrl+B`/`F`, `g`/`G`, `Home`/`End` | Scroll line, half-page, full-page, top/bottom. |
 | `v`, `[`, `q` | Open in editor, hand to native scrollback, close. |
-| `PgUp`/`PgDn`, wheel, `Ctrl+Home`/`End` | Fullscreen transcript scroll (`Ctrl+End` jumps to the last change while scrolled up, otherwise to the latest content). |
+| `PgUp`/`PgDn`, wheel, `Ctrl+Home`/`End` | Fullscreen transcript scroll. |
 
 ## Multiline input methods
 
