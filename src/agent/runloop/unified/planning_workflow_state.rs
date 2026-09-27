@@ -63,8 +63,10 @@ pub(crate) struct PlanningWorkflowSessionState {
     /// Deferred full switch to the plan primary agent after a mid-turn
     /// `start_planning` entry. Must not end the current turn: research is
     /// supposed to continue in the entry turn. Always consumed at turn end
-    /// (`take_plan_entry_agent_switch`); applied only when the turn is a
-    /// normal completion with no stronger handoff.
+    /// (`take_plan_entry_agent_switch`); applied at the turn boundary unless
+    /// a stronger handoff owns it. Applies on Blocked turns too — plan mode
+    /// often blocks tools in the entry turn, and discarding would leave the
+    /// execution agent selected while planning stays active.
     plan_entry_agent_switch_pending: bool,
 }
 

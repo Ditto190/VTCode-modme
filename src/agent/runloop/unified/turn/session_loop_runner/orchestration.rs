@@ -29,7 +29,7 @@ use super::blocked_handoff::{
 };
 use super::handoff::{
     append_approved_plan_execution_input, apply_primary_agent_tool_policy_overrides,
-    build_approved_plan_execution_prompt, select_approved_plan_execution_agent,
+    build_approved_plan_execution_prompt, report_plan_approval_selection_failure, select_approved_plan_execution_agent,
 };
 use super::metrics::{
     TurnExecutionMetrics, capture_code_change_snapshot, emit_turn_execution_metrics, estimate_history_bytes,
@@ -863,17 +863,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                     {
                         Ok(agent) => agent,
                         Err(err) => {
-                            tracing::error!(
-                                target: "vtcode.planning_workflow",
-                                switch_path = "plan_approval",
-                                requested_agent = %current_agent,
-                                error = %err,
-                                "Could not select write-capable agent for approved-plan execution; plan remains approved"
-                            );
-                            harness_try!(renderer.line(
-                                MessageStyle::Error,
-                                &format!("Could not switch to an implementation agent after plan approval: {err}"),
-                            ));
+                            let msg = report_plan_approval_selection_failure(&current_agent, &err);
+                            harness_try!(renderer.line(MessageStyle::Error, &msg));
                             pending_approved_plan_execution_input = false;
                             continue;
                         }
@@ -1230,16 +1221,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 continue;
                             }
                             Err(err) => {
-                                tracing::error!(
-                                    target: "vtcode.planning_workflow",
-                                    switch_path = "plan_approval",
-                                    error = %err,
-                                    "Approved-plan execution agent selection failed; plan remains approved and can be retried"
-                                );
-                                harness_try!(renderer.line(
-                                    MessageStyle::Error,
-                                    &format!("Could not switch to an implementation agent after plan approval: {err}"),
-                                ));
+                                let msg =
+                                    report_plan_approval_selection_failure(requested_agent.unwrap_or("(none)"), &err);
+                                harness_try!(renderer.line(MessageStyle::Error, &msg));
                                 continue;
                             }
                         };
@@ -1799,17 +1783,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         {
                             Ok(agent) => agent,
                             Err(err) => {
-                                tracing::error!(
-                                    target: "vtcode.planning_workflow",
-                                    switch_path = "plan_approval",
-                                    requested_agent = %requested_agent,
-                                    error = %err,
-                                    "Could not select write-capable agent after plan approval; plan remains approved and can be retried"
-                                );
-                                harness_try!(renderer.line(
-                                    MessageStyle::Error,
-                                    &format!("Could not switch to an implementation agent after plan approval: {err}"),
-                                ));
+                                let msg = report_plan_approval_selection_failure(&requested_agent, &err);
+                                harness_try!(renderer.line(MessageStyle::Error, &msg));
                                 continue;
                             }
                         };

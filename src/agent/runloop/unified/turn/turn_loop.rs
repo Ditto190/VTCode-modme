@@ -1977,28 +1977,29 @@ pub(crate) async fn run_turn_loop(
 
     // Deferred plan-entry agent switch: mid-turn `start_planning` must not
     // break the turn (research continues in the entry turn). Always consume
-    // the flag so it cannot fire later; apply it only when this turn is a
-    // normal completion with no stronger handoff (approved-plan policy target).
+    // the flag so it cannot fire later; apply it at this turn boundary unless
+    // a stronger handoff (approved-plan policy target / explicit switch) owns
+    // the boundary. Apply on Blocked too: plan mode often blocks tools in the
+    // entry turn, and discarding here would leave the build agent selected
+    // forever while planning stays active.
     let deferred_plan_entry_switch = ctx.plan_session.take_plan_entry_agent_switch();
     if deferred_plan_entry_switch {
-        let turn_completed = matches!(result, TurnLoopResult::Completed { .. });
-        if turn_completed && pending_primary_agent.is_none() && pending_plan_execution_target.is_none() {
+        if pending_primary_agent.is_none() && pending_plan_execution_target.is_none() {
             pending_primary_agent =
                 Some(crate::agent::runloop::unified::planning_workflow_state::PLAN_PRIMARY_AGENT_NAME.to_string());
             tracing::info!(
                 target: "vtcode.planning_workflow",
                 switch_path = "plan_entry",
                 agent = %crate::agent::runloop::unified::planning_workflow_state::PLAN_PRIMARY_AGENT_NAME,
-                "Applying deferred plan primary-agent switch after turn completion"
+                "Applying deferred plan primary-agent switch after turn boundary"
             );
         } else {
             tracing::info!(
                 target: "vtcode.planning_workflow",
                 switch_path = "plan_entry",
-                turn_completed,
                 has_primary_agent = pending_primary_agent.is_some(),
                 has_plan_execution_target = pending_plan_execution_target.is_some(),
-                "Discarding deferred plan primary-agent switch; stronger handoff or non-completed turn owns the boundary"
+                "Discarding deferred plan primary-agent switch; stronger handoff owns the boundary"
             );
         }
     }
