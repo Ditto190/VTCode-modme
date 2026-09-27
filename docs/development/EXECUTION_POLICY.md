@@ -150,7 +150,11 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   session history and `ThreadEvent`s keep the full payload.
 - **Builtin tool count is capped.** The number of LLM-exposed builtin tools stays
   within a small cap; new tools must consolidate, defer, or deliberately raise the
-  cap. Builtin tool schemas in `progressive` mode fit in a ~3k-token envelope.
+  cap. Builtin tool schemas in `progressive` mode fit in a **1,800-token** envelope.
+  The always-eager set is the Codex baseline (`exec_command`, `write_stdin`,
+  `apply_patch` when supported, `search_tools`); planner, skills, and agent tools
+  defer until `search_tools` surfaces them (planner tools stay eager while
+  planning is active).
 - **Startup token-overhead warnings.** At session start (unless `--quiet`),
   VT Code logs non-fatal `tracing::warn!` messages when the config is likely to
   inflate per-request cost: more than 8 configured MCP servers,
@@ -179,10 +183,18 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
 
 ### Auditing token cost
 
-A first-request budget guard rail is enforced by tests:
+A first-request budget guard rail is enforced by tests (lean harness defaults):
+
+| Budget | Cap |
+|---|---|
+| Progressive builtin tool-schema tokens | ≤ 1,800 |
+| First request (no MCP) | ≤ 6,000 |
+| First request (MCP growth ceiling) | ≤ 8,000 |
 
 - `crates/codegen/vtcode-core/src/tools/registry/builtins.rs::emitted_model_tool_schema_fits_within_first_request_budget`
   asserts builtin tool schemas stay within the budget in `progressive` mode.
+- `first_request_total_token_budget_within_limit` asserts the effective-default
+  system prompt (Minimal) plus schemas/appendix/addendum fit the 6k/8k ceilings.
 - `crates/codegen/vtcode-core/src/tools/handlers/session_tool_catalog.rs` tests assert MCP tools
   defer (small or large catalog) and that the client-local policy defers small MCP
   catalogs.
@@ -214,8 +226,9 @@ tax so it can be measured, not guessed:
   per attempt. `cost_per_solve` is `None` when any attempt is unpriced
   (unknown cost is not free) or nothing passed.
 
-Keep new tools and instruction files lean: Progressive schemas and the
-first-request budgets above are the enforcement side of the same trade-off.
+`agent.system_prompt_mode` defaults to **minimal** (~500 tokens). Keep new tools
+and instruction files lean: Progressive schemas and the first-request budgets
+above are the enforcement side of the same trade-off.
 
 ### Model pricing and fallback policy
 

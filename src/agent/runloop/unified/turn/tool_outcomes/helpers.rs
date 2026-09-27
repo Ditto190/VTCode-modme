@@ -739,33 +739,34 @@ mod tracker_continue_tests {
     fn plan_mode_auto_continue_recovers_entry_turn_blocked_shapes() {
         // Mid-turn start_planning + mutating attempts trip the blocked-tool fuse;
         // the entry turn must not park at the user Continue prompt.
-        let fuse = Some(
-            "Blocked tool-call limit reached after 3 consecutive blocked calls (streak 3, total 3). Last blocked call: 'apply_patch'. Rebase the patch on current file contents and confirm edit approval before retrying. A bounded recovery response will run without more tool calls. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.",
-        );
-        assert!(plan_mode_recoverable_block(fuse.expect("fuse")));
-        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, fuse, false, 8, 0));
+        let fuse = "Blocked tool-call limit reached after 3 consecutive blocked calls (streak 3, total 3). Last blocked call: 'apply_patch'. Rebase the patch on current file contents and confirm edit approval before retrying. A bounded recovery response will run without more tool calls. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.";
+        assert!(plan_mode_recoverable_block(fuse));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, Some(fuse), false, 8, 0));
 
-        let recovery_fuse = Some(
-            "Recovery tool-call limit reached after 3 blocked calls (streak 3, total 3) (last blocked call: 'exec_command'). Check sandbox/approval policy, narrow the command, or request approval instead of retrying verbatim. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.",
-        );
-        assert!(plan_mode_recoverable_block(recovery_fuse.expect("recovery fuse")));
-        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, recovery_fuse, false, 8, 0));
+        let recovery_fuse = "Recovery tool-call limit reached after 3 blocked calls (streak 3, total 3) (last blocked call: 'exec_command'). Check sandbox/approval policy, narrow the command, or request approval instead of retrying verbatim. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.";
+        assert!(plan_mode_recoverable_block(recovery_fuse));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, Some(recovery_fuse), false, 8, 0));
 
         // Tools ended without a published final after planning entry.
-        let no_final = Some(
-            "Turn ended without a harness-visible final assistant response, so successful completion could not be confirmed.",
-        );
-        assert!(plan_mode_recoverable_block(no_final.expect("no final")));
-        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, no_final, false, 8, 0));
+        let no_final = "Turn ended without a harness-visible final assistant response, so successful completion could not be confirmed.";
+        assert!(plan_mode_recoverable_block(no_final));
+        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, Some(no_final), false, 8, 0));
 
         // Tools outside the named remedy set use the default remedy. Keep that
         // prose free of the deny token `permission` so a fuse trip on e.g.
         // `write_file` still auto-continues plan-mode research.
-        let default_remedy_fuse = Some(
-            "Blocked tool-call limit reached after 3 consecutive blocked calls (streak 3, total 3). Last blocked call: 'write_file'. Adjust arguments, policy, or approvals instead of retrying the identical call. A bounded recovery response will run without more tool calls. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.",
-        );
-        assert!(plan_mode_recoverable_block(default_remedy_fuse.expect("default remedy fuse")));
-        assert!(should_queue_plan_mode_auto_continue(true, true, false, false, default_remedy_fuse, false, 8, 0));
+        let default_remedy_fuse = "Blocked tool-call limit reached after 3 consecutive blocked calls (streak 3, total 3). Last blocked call: 'write_file'. Adjust arguments, policy, or approvals instead of retrying the identical call. A bounded recovery response will run without more tool calls. History and outputs are retained. Type 'continue' with new guidance, or run `vtcode --resume <session>`; details: .vtcode/tasks/current_blocked.md.";
+        assert!(plan_mode_recoverable_block(default_remedy_fuse));
+        assert!(should_queue_plan_mode_auto_continue(
+            true,
+            true,
+            false,
+            false,
+            Some(default_remedy_fuse),
+            false,
+            8,
+            0
+        ));
 
         // True permission handoffs still never auto-continue.
         assert!(!plan_mode_recoverable_block(

@@ -933,6 +933,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Semantic Understanding, Tree-sitter Security Parsing (Bash), Syntax Highlighting
   - **User Questions**: "What can you tell me about Language Support in VT Code?", "How does Semantic Understanding work?", "How does Tree-sitter Security Parsing (Bash) work?"
 
+- **File**: `docs/compose/spec/lean-harness-defaults.md`
+  - **Content**: Lean Harness Defaults
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Lean Harness Defaults?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/local-tool-result-clearing.md`
   - **Content**: Local Tool-Result Clearing (non-Anthropic)
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks

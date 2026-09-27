@@ -1189,12 +1189,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .as_ref()
                             .map(|cfg| cfg.default_primary_agent.as_str())
                             .filter(|name| !name.trim().is_empty());
-                        let requested_agent = Some(target.agent_name());
+                        let requested_agent = target.agent_name();
                         let resolved_execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,
                             &config.workspace,
-                            requested_agent,
+                            Some(requested_agent),
                             configured_default,
                         )
                         .await
@@ -1221,13 +1221,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 continue;
                             }
                             Err(err) => {
-                                let msg =
-                                    report_plan_approval_selection_failure(requested_agent.unwrap_or("(none)"), &err);
+                                let msg = report_plan_approval_selection_failure(requested_agent, &err);
                                 harness_try!(renderer.line(MessageStyle::Error, &msg));
                                 continue;
                             }
                         };
-                        if requested_agent != Some(resolved_execution_agent.as_str()) {
+                        if Some(requested_agent) != Some(resolved_execution_agent.as_str()) {
                             tracing::warn!(
                                 requested_agent = ?requested_agent,
                                 resolved_agent = ?resolved_execution_agent,
