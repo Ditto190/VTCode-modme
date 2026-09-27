@@ -2400,3 +2400,116 @@ async fn read_after_write_guard_ignores_unwritten_paths_and_non_read_tools() {
         enforce_read_after_write_guard(&mut ctx, "write_after_write", tool_names::UNIFIED_FILE, &mutating_args);
     assert!(non_read_outcome.is_none(), "non-read actions must not trip the read-after-write guard");
 }
+
+#[tokio::test]
+async fn successful_apply_patch_arms_read_after_write_guard_for_patch_targets() {
+    // The model-facing write surface is apply_patch with `input`-only args
+    // (the schema has no `path` field), so arming must come from the parsed
+    // patch targets, and the workspace-relative target must match an
+    // absolute-path read of the same file.
+    let mut backing = TestContextBacking::new(4).await;
+    backing.select_build_primary_agent();
+    let sample_file = backing.sample_file.clone();
+    std::fs::write(&sample_file, (1..=4).map(|idx| format!("line {idx}\n")).collect::<String>())
+        .expect("rewrite sample file");
+    let sample_path = sample_file.to_string_lossy().to_string();
+    let patch_args = json!({
+        "input": "*** Begin Patch\n*** Update File: sample.txt\n@@\n-line 1\n+edited line 1\n*** End Patch\n"
+    });
+    cache_tool_permission(&mut backing, tool_names::APPLY_PATCH, &patch_args, PermissionGrant::Permanent).await;
+    let read_args = json!({ "path": sample_path });
+    cache_tool_permission(&mut backing, tool_names::READ_FILE, &read_args, PermissionGrant::Permanent).await;
+    let slice_args = json!({ "path": sample_path, "offset": 2, "limit": 2 });
+    cache_tool_permission(&mut backing, tool_names::READ_FILE, &slice_args, PermissionGrant::Permanent).await;
+
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut ctx = backing.turn_processing_context();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+
+    handle_single_tool_call(&mut outcome_ctx, "patch_arm", tool_names::APPLY_PATCH, patch_args)
+        .await
+        .expect("patch should execute");
+    assert_eq!(
+        std::fs::read_to_string(&sample_file)
+            .expect("read patched fixture")
+            .lines()
+            .next(),
+        Some("edited line 1"),
+        "patch must succeed for the arming path to be exercised"
+    );
+
+    let history_len = outcome_ctx.ctx.tool_registry.execution_history_len();
+    handle_single_tool_call(&mut outcome_ctx, "bare_read_after_patch", tool_names::READ_FILE, read_args)
+        .await
+        .expect("a blocked read still produces a tool response");
+    assert_eq!(
+        outcome_ctx.ctx.tool_registry.execution_history_len(),
+        history_len,
+        "a bare full read of the patched file must not execute"
+    );
+    assert!(
+        outcome_ctx
+            .ctx
+            .working_history
+            .iter()
+            .any(|message| message.content.as_text().contains("was just written")),
+        "the block must carry the diff-preview guidance"
+    );
+
+    handle_single_tool_call(&mut outcome_ctx, "slice_read_after_patch", tool_names::READ_FILE, slice_args)
+        .await
+        .expect("a bounded slice read of the patched file should execute");
+    assert!(
+        outcome_ctx.ctx.tool_registry.execution_history_len() > history_len,
+        "the slice-read exemption must apply to patch-armed targets too"
+    );
+}
+
+#[tokio::test]
+async fn failed_apply_patch_does_not_arm_read_after_write_guard() {
+    // A failed patch wrote nothing, so there is no diff preview to reuse and
+    // plain reads must stay available for inspecting the failure.
+    let mut backing = TestContextBacking::new(4).await;
+    backing.select_build_primary_agent();
+    let sample_file = backing.sample_file.clone();
+    let sample_path = sample_file.to_string_lossy().to_string();
+    let patch_args = json!({ "input": "not a patch at all" });
+    cache_tool_permission(&mut backing, tool_names::APPLY_PATCH, &patch_args, PermissionGrant::Permanent).await;
+    let read_args = json!({ "path": sample_path });
+    cache_tool_permission(&mut backing, tool_names::READ_FILE, &read_args, PermissionGrant::Permanent).await;
+
+    let mut repeated_tool_attempts = LoopTracker::new();
+    let mut turn_modified_files = BTreeSet::new();
+    let mut ctx = backing.turn_processing_context();
+    let mut outcome_ctx = ToolOutcomeContext {
+        ctx: &mut ctx,
+        repeated_tool_attempts: &mut repeated_tool_attempts,
+        turn_modified_files: &mut turn_modified_files,
+    };
+
+    handle_single_tool_call(&mut outcome_ctx, "failed_patch", tool_names::APPLY_PATCH, patch_args)
+        .await
+        .expect("a malformed patch returns an error response");
+    assert!(
+        !outcome_ctx
+            .ctx
+            .working_history
+            .iter()
+            .any(|message| message.content.as_text().contains("was just written")),
+        "a failed patch must not produce a read-after-write block"
+    );
+
+    let history_len = outcome_ctx.ctx.tool_registry.execution_history_len();
+    handle_single_tool_call(&mut outcome_ctx, "read_after_failed_patch", tool_names::READ_FILE, read_args)
+        .await
+        .expect("read after failed patch should execute");
+    assert!(
+        outcome_ctx.ctx.tool_registry.execution_history_len() > history_len,
+        "reads must stay available after a failed mutation"
+    );
+}

@@ -17,6 +17,7 @@ use vtcode_core::tools::tool_intent::{ShellActivity, classify_shell_activity};
 use super::super::ValidationResult;
 use super::super::looping::low_signal_family_key;
 use super::common::{extract_read_path, is_read_action, push_guard_failure_messages};
+use crate::agent::runloop::git::normalize_workspace_path;
 use crate::agent::runloop::unified::tool_reads::spool_page_source_path;
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
 use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{find_duplicate_in_history, signature_key_for};
@@ -437,7 +438,11 @@ pub(crate) fn enforce_read_after_write_guard(
 
     let path = extract_read_path(effective_args)?;
 
-    if !ctx.harness_state.was_recently_written(&path) {
+    // Both sides of the membership check are normalized against the workspace
+    // root: patch payloads record workspace-relative targets while reads may
+    // spell the same file absolutely (or vice versa).
+    let normalized = normalize_workspace_path(&ctx.config.workspace, std::path::Path::new(&path));
+    if !ctx.harness_state.was_recently_written(&normalized.to_string_lossy()) {
         return None;
     }
 
