@@ -80,25 +80,3 @@ add /config option to let user copy on click on TUI or copy manually from keyboa
 ===
 
 implement /config options searchs functionality to allow users to quickly find and access specific configuration options within the TUI. Ensure the search is responsive and provides relevant results as the user types.
-
-===
-
-action plan: post risk-audit deferred items (2026-09-27) — all fixes implemented and committed (cf82d6df1, 1b6d8e0be); re-appended after a merge reset dropped the earlier copy.
-
-DONE — no action:
-
-- [x] B2 idle-session eviction: session.lock liveness lock (event_log::acquire_liveness_lock) + retention::session_dir_is_live in both deletion paths. tests: retention_never_marks_a_live_open_session_abandoned, retention_eviction_skips_live_sessions_even_when_completed, liveness_probe_held_lock_reports_live_consistently
-- [x] B4 Gemini clear_tool_inputs no-op: sync_preserved_parts_with_tool_calls joins preserved parts to cleared tool_calls (id, fallback name; signatures preserved). tests: preserved_parts_sync_tests
-- [x] D2 rewind-lock flock/unlink race: acquire*verified_rewind_lock + identity-checked unlink. tests: rewind_lock*\*
-- [x] A5 bounded-extent key-presence: args_have_bounded_extent requires extent_values_are_valid. test: malformed_extent_values_are_not_bounded
-- [x] B3 envelope prune vs retention pins: retention_pinned_session_ids in vtcode-memory, used by prune_history_envelopes. test: retention_pinned_session_ids_lists_only_real_pinned_dirs
-- [x] symlink-test flake: drop(log) before retain landed in 1b6d8e0be; 6/6 stable, memory suite 117/117
-
-OPEN — needs decision:
-
-- [ ] A4 plan-mode env-value injection (acknowledged in ac328ceab): command_args.rs strips env/VAR=value prefixes without inspecting values, so `env GIT_CONFIG_COUNT=… git status` reproduces the blocked `-c` vector. Pick: inspect known config-injection keys / fail closed on git config via env / readonly env allowlist; add adversarial tests in readonly.rs
-- [ ] C2 approved-plan selection failure skips turn metrics/checkpoint tail (orchestration.rs, 3 sites): documented intentional (self-heals). If wanted: extract loop tail into a shared helper instead of the current continue
-- [ ] C3 macOS notification OnceLock caches failed set_application: mac-notification-sys INIT_APPLICATION_SET is call_once — wrapper retry cannot help. Accept / vendor-patch / upstream
-- [ ] Model-catalog: supported_models_include_current_reasoning_models fails (O3 not in REASONING_MODELS) since 684bdcb90's prune — verify catalog intent or update the assertion
-
-DELIBERATE trade-offs, documented in code (no action): A3 name-mistake rejects never advance the circuit streak; A6 text-response safety cap auto-continues (bounded by continuation budget)
