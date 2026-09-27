@@ -97,7 +97,8 @@ pub enum ToolDocumentationMode {
     /// Best for: Maximum efficiency, experienced users, token-constrained contexts
     Minimal,
     /// Complete tool and parameter descriptions; only unusually long tails are
-    /// trimmed at a sentence boundary (~1,800 tokens for the builtin catalog)
+    /// trimmed at a sentence boundary (measured ~1,793 tokens for the default
+    /// catalog; budgeted ≤ 2,000 in `emitted_model_tool_schema_fits_within_first_request_budget`)
     /// Best for: General usage (recommended)
     #[default]
     Progressive,

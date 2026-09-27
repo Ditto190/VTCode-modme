@@ -151,7 +151,8 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   session history and `ThreadEvent`s keep the full payload.
 - **Builtin tool count is capped.** The number of LLM-exposed builtin tools stays
   within a small cap; new tools must consolidate, defer, or deliberately raise the
-  cap. Builtin tool schemas in `progressive` mode fit in a **1,800-token** envelope.
+  cap. Builtin tool schemas in `progressive` mode fit in a **2,000-token**
+  envelope (measured ~1,793 on the Codex-4 default profile).
   The always-eager set is the Codex baseline (`exec_command`, `write_stdin`,
   `apply_patch` when supported, `search_tools`); planner, skills, and agent tools
   defer until `search_tools` surfaces them (planner tools stay eager while
@@ -188,7 +189,7 @@ A first-request budget guard rail is enforced by tests (lean harness defaults):
 
 | Budget | Cap |
 |---|---|
-| Progressive builtin tool-schema tokens | ≤ 1,800 |
+| Progressive builtin tool-schema tokens | ≤ 2,000 |
 | First request (no MCP) | ≤ 6,000 |
 | First request (MCP growth ceiling) | ≤ 8,000 |
 

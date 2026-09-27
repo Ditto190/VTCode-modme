@@ -823,6 +823,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Overview, Binary Size Summary, Release-fast Binary Analysis (32 MiB), Debug Binary Analysis (84 MiB), Recommendations
   - **User Questions**: "What can you tell me about Bloaty Analysis Report for vtcode?", "How does Overview work?", "How does Binary Size Summary work?"
 
+- **File**: `docs/compose/spec/budget-retune-dead-tools.md`
+  - **Content**: Budget Retune and Dead Tool IDs
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Budget Retune and Dead Tool IDs?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/blog/building-vt-code-a-year-in.md`
   - **Content**: Building VT Code, a year in
   - **Topics**: The model shelf, September 2026, Benchmarks, with honest framing, The roadmap shipped, The harness matters more than the model, Context engineering got real numbers
