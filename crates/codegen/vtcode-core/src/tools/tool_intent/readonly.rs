@@ -75,34 +75,65 @@ fn is_readonly_subcommand(first: &str, second: Option<&str>, third: Option<&str>
 }
 
 /// Flag-shaped git subcommands whose bare or flag-only form is a pure read
-/// (`git tag`, `git branch -a`, `git stash`, `git remote -v`, `git worktree
-/// list`, `git reflog`), while the same name with an operand mutates (`tag
-/// v1`, `branch -D x`, `reflog expire`, `stash pop`, `remote add`, `worktree
-/// add`). The mutating operand survives as the third word, so this
+/// (`git tag`, `git branch -a`, `git remote -v`, `git reflog`, `git stash
+/// list`, `git worktree list`), while the same name with an operand mutates
+/// (`tag v1`, `branch -D x`, `reflog expire`, `stash pop`, `remote add`,
+/// `worktree add`). The mutating operand survives as the third word, so this
 /// classification is position-safe only on the read-only path, which keeps
 /// operands; the flag-skipping parallel-safe extractor must never consult it
 /// (there `git tag -f x` would look identical to `git tag`).
-fn is_readonly_flag_shaped_git_subcommand(second: Option<&str>, third: Option<&str>) -> bool {
+///
+/// Two hardening rules keep the bare/flag-only forms honest:
+/// - bare `stash` is excluded: bare `git stash` is `git stash push`, which
+///   stashes uncommitted work, and flag-only push forms (`-k`, `-u`, `-a`,
+///   `-m=msg`) carry no operand to betray them;
+/// - `branch` carries a mutating-flag denylist, because inline-value flags
+///   (`--set-upstream-to=origin/x`, `--unset-upstream`, `--edit-description`)
+///   and glued short mutators (`-m<name>`, `-c<name>`, `-u<upstream>`) start
+///   with `-` and are invisible to the operand finder.
+fn is_readonly_flag_shaped_git_subcommand(
+    subcommand: Option<&str>,
+    operand: Option<&str>,
+    command_words: &[String],
+    sub_index: usize,
+) -> bool {
+    if subcommand == Some("branch") {
+        let mutates = command_words.iter().skip(sub_index + 1).any(|word| {
+            matches!(word.as_str(), "--set-upstream" | "--unset-upstream" | "--edit-description")
+                || word.starts_with("--set-upstream-to")
+                || word.starts_with("-u")
+                || word.starts_with("-m")
+                || word.starts_with("-M")
+                || word.starts_with("-c")
+                || word.starts_with("-C")
+        });
+        if mutates {
+            return false;
+        }
+    }
+
     matches!(
-        (second, third),
+        (subcommand, operand),
         (Some("tag") | Some("branch"), None)
             | (Some("reflog"), None | Some("show"))
             | (Some("remote"), None | Some("show") | Some("get-url"))
-            | (Some("stash"), None | Some("list") | Some("show"))
+            | (Some("stash"), Some("list") | Some("show"))
             | (Some("worktree"), Some("list"))
     )
 }
 
 /// A version or help probe prints to stdout and mutates nothing for any
-/// program, including subcommand-based tools (`cargo --version`, `node -v`,
-/// `python3 --version`) that the subcommand allow-list cannot classify
+/// program, including subcommand-based tools (`cargo --version`, `node
+/// --version`, `python3 -V`) that the subcommand allow-list cannot classify
 /// because every word after the program is a flag. At least one probe flag
 /// is required (a bare program name like `tsc` still compiles) and ALL
 /// trailing words must be probe flags, so `python3 script.py` or `git commit
-/// -v` stay outside.
+/// -v` stay outside. Lowercase `-v` is deliberately excluded: it means
+/// verbose rather than version for most tools, and for shell interpreters
+/// (`bash -v`) it reads stdin.
 fn is_version_or_help_probe(command_words: &[String]) -> bool {
     fn is_probe_flag(word: &str) -> bool {
-        matches!(word, "-h" | "--help" | "-V" | "-v" | "--version")
+        matches!(word, "-h" | "--help" | "-V" | "--version")
     }
 
     let mut flags = command_words.iter().skip(1);
@@ -183,27 +214,38 @@ pub(crate) fn command_words_are_readonly(words: &[String]) -> bool {
         .take(3)
         .map(|word| word.to_ascii_lowercase())
         .collect::<Vec<_>>();
-    let (second, third) = if first == "git" {
-        git_subcommand_and_operand(command_words)
-    } else {
-        (lowered.get(1).map(String::as_str), lowered.get(2).map(String::as_str))
-    };
+    if first != "git" {
+        let (second, third) = (lowered.get(1).map(String::as_str), lowered.get(2).map(String::as_str));
+        return is_readonly_subcommand(&first, second, third);
+    }
 
-    is_readonly_subcommand(&first, second, third)
-        || (first == "git" && is_readonly_flag_shaped_git_subcommand(second, third))
+    let Some((sub_index, operand)) = git_subcommand_and_operand(command_words) else {
+        return false;
+    };
+    let subcommand = command_words.get(sub_index).map(String::as_str);
+    is_readonly_subcommand("git", subcommand, None)
+        || is_readonly_flag_shaped_git_subcommand(subcommand, operand, command_words, sub_index)
 }
 
 /// Locate the git subcommand and the first operand after it, skipping global
 /// options — including their separate values (`-C <dir>`, `-c <config>`,
-/// `--git-dir <path>`), whose inline forms (`-C<dir>`, `--git-dir=<path>`)
-/// carry no extra word. Without this, the option value occupies the
-/// subcommand slot and worktree-style exploration (`git -C <dir> log`) is
-/// misread as an unknown subcommand.
+/// `--git-dir <path>`, `--shallow-file <info>`), whose inline forms
+/// (`-C<dir>`, `--git-dir=<path>`) carry no extra word. Without this, the
+/// option value occupies the subcommand slot and worktree-style exploration
+/// (`git -C <dir> log`) is misread as an unknown subcommand.
 ///
 /// Position-based on purpose: the operand of a flag-shaped subcommand stays
-/// visible as the second return value, which is what keeps `git tag v1`
-/// distinguishable from `git tag -l`.
-fn git_subcommand_and_operand(command_words: &[String]) -> (Option<&str>, Option<&str>) {
+/// visible as the second tuple field, which is what keeps `git tag v1`
+/// distinguishable from `git tag -l`. Fails closed on any unknown
+/// global-shaped word: an unrecognized option may consume a separate value,
+/// which would otherwise smuggle the real (possibly mutating) subcommand past
+/// the allow-list (`git --shallow-file log commit -m x`).
+///
+/// Returns the subcommand's index into `command_words` (callers re-read it —
+/// real git subcommands are case-sensitive, so no lowercasing happens here)
+/// plus the first non-flag operand after it, or `None` when the command must
+/// stay denied.
+fn git_subcommand_and_operand(command_words: &[String]) -> Option<(usize, Option<&str>)> {
     const GLOBAL_OPTIONS_WITH_VALUE: &[&str] = &[
         "-C",
         "-c",
@@ -213,6 +255,21 @@ fn git_subcommand_and_operand(command_words: &[String]) -> (Option<&str>, Option
         "--super-prefix",
         "--exec-path",
         "--config-env",
+        "--shallow-file",
+        "--attr-source",
+    ];
+    const GLOBAL_OPTIONS_FLAG_ONLY: &[&str] = &[
+        "-p",
+        "--paginate",
+        "--no-pager",
+        "--bare",
+        "--literal-pathspecs",
+        "--no-replace-objects",
+        "--no-optional-locks",
+        "--end-of-options",
+        "--version",
+        "--help",
+        "--html-path",
     ];
 
     let mut index = 1;
@@ -223,14 +280,22 @@ fn git_subcommand_and_operand(command_words: &[String]) -> (Option<&str>, Option
                 .skip(index + 1)
                 .find(|candidate| !candidate.starts_with('-'))
                 .map(String::as_str);
-            return (Some(word.as_str()), operand);
+            return Some((index, operand));
         }
-        index += 1;
         if GLOBAL_OPTIONS_WITH_VALUE.contains(&word.as_str()) {
-            index += 1; // its separate value is not a subcommand candidate
+            index += 2; // skip the option and its separate value
+            continue;
         }
+        if GLOBAL_OPTIONS_FLAG_ONLY.contains(&word.as_str()) {
+            index += 1;
+            continue;
+        }
+        // Unknown global-shaped word: an option this allow-list does not know
+        // may take a separate value, so the next word could be that value
+        // rather than the subcommand. Fail closed.
+        return None;
     }
-    (None, None)
+    None
 }
 
 /// Return whether one command is a side-effect-free inspection suitable for
@@ -586,6 +651,9 @@ mod tests {
             "git reflog | head",
             "git worktree list",
             "git stash list",
+            "git stash show",
+            "git branch --show-current",
+            "git --no-pager log --oneline | head -5",
             "git remote -v",
             "cd /repo && git -C . branch -a && git tag",
         ] {
@@ -597,18 +665,20 @@ mod tests {
     fn version_and_help_probes_are_readonly_for_any_program() {
         for command in [
             "cargo --version",
-            "node -v",
-            "python3 --version",
-            "npm -v",
+            "node --version",
+            "python3 -V",
+            "npm --version",
             "git --version",
             "bash --help",
         ] {
             assert!(is_readonly_command_session_command(&run_cmd(command)), "expected readonly probe: {command}");
         }
         // Only an all-flags probe is a version/help query; real operands keep
-        // the command outside the allow-list.
+        // the command outside the allow-list. Lowercase `-v` is excluded: it
+        // means verbose for most tools and reads stdin for shells.
         assert!(!is_readonly_command_session_command(&run_cmd("python3 script.py --version")));
         assert!(!is_readonly_command_session_command(&run_cmd("git commit -v")));
+        assert!(!is_readonly_command_session_command(&run_cmd("bash -v")));
     }
 
     #[test]
@@ -616,7 +686,7 @@ mod tests {
         // `-C <dir>` only redirects which repository is read; plan mode must
         // not reject worktree-style exploration.
         assert!(is_readonly_command_session_command(&run_cmd("git -C .worktrees/feat log --oneline | head -5")));
-        assert!(is_readonly_command_session_command(&run_cmd("git -C../other rev-parse HEAD")));
+        assert!(is_readonly_command_session_command(&run_cmd("git -C ../other rev-parse HEAD")));
         // Config injection (`-c`) stays denied — the `-C`/`-c` pair must not
         // be relaxed together.
         assert!(!is_readonly_command_session_command(&run_cmd("git -c core.pager=sh log")));
@@ -635,6 +705,22 @@ mod tests {
             // Config injection is a command-execution vector and stays denied.
             "git -c core.fsmonitor=touch status",
             "git --exec-path=/tmp/sh status",
+            // Bare `git stash` is `git stash push` — it stashes uncommitted
+            // work — and flag-only push forms carry no operand to betray
+            // them. Only `list`/`show` are reads.
+            "git stash",
+            "git stash -u",
+            "git stash -k",
+            // Inline-value and glued short mutators are invisible to the
+            // operand finder and must stay denied.
+            "git branch --unset-upstream",
+            "git branch --set-upstream-to=origin/main",
+            "git branch --edit-description",
+            "git branch -mnew-name",
+            "git branch -u=origin/main",
+            // An unknown value-taking global must not smuggle a mutating
+            // subcommand past the allow-list.
+            "git --shallow-file log commit -m x",
             // Operand forms of flag-shaped subcommands mutate and stay denied.
             "git tag v1.0.0",
             "git branch feature-x",

@@ -136,7 +136,7 @@ universal section is not taxed on turns with no live session; per-tool
 hint may appear.
 
 The provider-facing history also has an aggregate tool-preview budget per
-turn (32 KiB execution, 96 KiB planning). After exhaustion, new payload bodies are replaced by bounded metadata,
+turn (64 KiB execution, 96 KiB planning). After exhaustion, new payload bodies are replaced by bounded metadata,
 but scalar control signals such as success, exit code, completion status,
 verification requirements, and retryability remain visible. The metadata tells
 the agent not to repeat equivalent calls merely to recover hidden output, and

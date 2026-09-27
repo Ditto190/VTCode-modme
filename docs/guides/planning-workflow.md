@@ -42,7 +42,10 @@ Shell commands in plan mode are validated against a read-only allow-list. Allowe
 - inspection base commands: `rg`, `ls`, `cat`, `sed`, `grep`, `find`, `head`, `tail`, `fd`, `tree`, `stat`, `file`, `which`, `jq`, and similar
 - discovery commands must remain static: use literal `find` paths with quoted patterns, or prefer `rg --files`; dynamic `find` option/predicate expansion such as `$()`, backticks, variables, or brace expansion is rejected by the command-safety gate
 - `cd` prefixes: `cd <dir> && <read-only command>` (changing directory mutates nothing)
-- read-only subcommands: `git status|log|diff|show|blame|ls-files|rev-parse|describe|shortlog|grep`, `cargo check|test|clippy|metadata|tree|nextest run`, `npm|pnpm|yarn test`
+- read-only subcommands: `git status|log|diff|show|blame|ls-files|rev-parse|describe|shortlog|grep|rev-list|ls-tree|cat-file|diff-tree|merge-base|range-diff|whatchanged|count-objects|var|version|help`, `cargo check|test|clippy|metadata|tree|nextest run`, `npm|pnpm|yarn test`
+- git repository redirects: `git -C <dir> <read-only subcommand>` (only changes which repository is read; `-c` config injection stays rejected)
+- git list-form subcommands: bare/flag-only `git tag`, `git branch`, `git remote`, `git reflog`, plus `git stash list|show` and `git worktree list` (operand forms such as `git tag v1`, `git branch -D x`, `git stash pop`, `git remote add` are rejected, as are upstream/description mutators like `git branch --set-upstream-to=<ref>`)
+- version/help probes for any program: `cargo --version`, `python3 -V`, `bash --help` — every trailing word must be a probe flag (`-h`, `--help`, `-V`, `--version`)
 - `&&` chains and `|` pipelines where every segment is itself read-only
 - static `;` chains where every segment is independently read-only; literal-output `printf` is allowed as an inspection-output separator
 - `2>&1` stderr merges (no file is written)
