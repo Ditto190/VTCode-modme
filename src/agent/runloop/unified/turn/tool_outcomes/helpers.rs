@@ -327,6 +327,48 @@ pub(crate) fn tracker_continue_directive(label: &str, incomplete: &[String]) -> 
     )
 }
 
+/// Shared recoverable blocked-reason shapes for every mode's auto-continue.
+/// Keep this the single allow-list so plan-mode and tracker classifiers cannot
+/// drift (fuse / no-final / budget / recovery-fallback wording).
+/// Deny lists stay per-mode: evaluation order differs (plan allows first so
+/// `PLANNING_COMPLETED_TURN_FALLBACK_REASON` is not shadowed by
+/// "approval-ready plan").
+pub(crate) const RECOVERABLE_BLOCK_ALLOW_TOKENS: &[&str] = &[
+    "recovery fallback",
+    "recovery could not confirm",
+    "recovery exhausted",
+    "recovery was exhausted",
+    "reached the safety cap",
+    "safety cap",
+    "preview budget",
+    "tool preview budget",
+    "turn budget",
+    "tool budget",
+    "tool loop budget",
+    "tool loop",
+    "tool-call budget",
+    "tool follow-up",
+    "tool-free recovery",
+    "wall clock",
+    "blocked due to repeated",
+    "blocked after repeated",
+    "without a harness-visible final assistant response",
+    "blocked tool-call limit",
+    "recovery tool-call limit",
+    "consecutive blocked calls",
+    "tool-call safety limit",
+    "max tool",
+    "per-turn tool",
+    "read cap",
+    "work budget",
+    "budget exhausted",
+    "budget ran out",
+];
+
+fn matches_recoverable_block_shape(lower: &str) -> bool {
+    RECOVERABLE_BLOCK_ALLOW_TOKENS.iter().any(|token| lower.contains(token))
+}
+
 /// Whether a blocked/completed turn reason is recoverable for tracker auto-queue
 /// (budget/preview/tool-free recovery) rather than a user-input handoff.
 ///
@@ -372,37 +414,7 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
     {
         return false;
     }
-    // Recoverable production reason shapes — keep aligned with
-    // `completion::recoverable_status_recap_phrasing` plus outer-only
-    // harness constants (text-cap / no-response / safety-cap wording).
-    reason.contains("recovery fallback")
-        || reason.contains("recovery could not confirm")
-        || reason.contains("recovery exhausted")
-        || reason.contains("recovery was exhausted")
-        || reason.contains("reached the safety cap")
-        || reason.contains("safety cap")
-        || reason.contains("preview budget")
-        || reason.contains("tool preview budget")
-        || reason.contains("turn budget")
-        || reason.contains("tool budget")
-        || reason.contains("tool loop budget")
-        || reason.contains("tool loop")
-        || reason.contains("tool-call budget")
-        || reason.contains("tool follow-up")
-        || reason.contains("wall clock")
-        || reason.contains("blocked due to repeated")
-        || reason.contains("blocked after repeated")
-        || reason.contains("without a harness-visible final assistant response")
-        || reason.contains("blocked tool-call limit")
-        || reason.contains("recovery tool-call limit")
-        || reason.contains("consecutive blocked calls")
-        || reason.contains("tool-call safety limit")
-        || reason.contains("max tool")
-        || reason.contains("per-turn tool")
-        || reason.contains("read cap")
-        || reason.contains("work budget")
-        || reason.contains("budget exhausted")
-        || reason.contains("budget ran out")
+    matches_recoverable_block_shape(&reason)
 }
 
 /// Pure gate for outer-loop tracker auto-continue after a turn end.
@@ -536,26 +548,7 @@ pub(crate) fn plan_mode_recoverable_block(reason: &str) -> bool {
     // model hits the read-only gate (blocked-tool fuse) or ends tools without a
     // published final. Both must auto-continue planning research instead of
     // parking at the user `Continue…` prompt.
-    if lower.contains("recovery fallback")
-        || lower.contains("recovery could not confirm")
-        || lower.contains("recovery exhausted")
-        || lower.contains("recovery was exhausted")
-        || lower.contains("reached the safety cap")
-        || lower.contains("preview budget")
-        || lower.contains("tool preview budget")
-        || lower.contains("turn budget")
-        || lower.contains("tool budget")
-        || lower.contains("tool loop budget")
-        || lower.contains("wall clock")
-        || lower.contains("tool-free recovery")
-        || lower.contains("tool follow-up")
-        || lower.contains("budget exhausted")
-        || lower.contains("without a harness-visible final assistant response")
-        || lower.contains("blocked tool-call limit")
-        || lower.contains("recovery tool-call limit")
-        || lower.contains("consecutive blocked calls")
-        || lower.contains("tool-call safety limit")
-    {
+    if matches_recoverable_block_shape(&lower) {
         return true;
     }
     // Remaining planning handoffs (interview/approval without recovery tokens).

@@ -3,20 +3,21 @@ feature: plan-mode-entry-handoff
 status: delivered
 updated: 2026-09-27
 branch: fix/plan-mode-entry-handoff
-commits: a34d5bfca..7883691f3
+commits: a34d5bfca..55267a058
 ---
 
 # Plan Mode Entry Handoff (Seamless Build → Plan Switch)
 
 ## Report
 
-**What was built** — Mid-turn `start_planning` no longer ends the entry turn. After the user confirms planning, the header badge switches to Plan immediately, mutating tools stay blocked, and the model continues researching in the same turn. The full `plan` primary-agent switch is deferred via `PlanningWorkflowSessionState::plan_entry_agent_switch_pending` and applied only after natural turn completion (and only when no stronger approved-plan handoff owns the boundary). Plan approval still hands off to a write-capable Build/Auto agent through the typed `PlanExecutionTarget` path. All mode-switch paths log under `vtcode.planning_workflow` with a `switch_path` field (`plan_entry`, `plan_approval`, `plan_exit`, `startup_plan_entry`); selection/sync failures stay recoverable instead of aborting the session.
+**What was built** — Mid-turn `start_planning` no longer ends the entry turn. After the user confirms planning, the header badge switches to Plan immediately, mutating tools stay blocked, and the model continues researching in the same turn. The full `plan` primary-agent switch is deferred via `PlanningWorkflowSessionState::plan_entry_agent_switch_pending` and applied only after natural turn completion (and only when no stronger approved-plan handoff owns the boundary). Plan approval still hands off to a write-capable Build/Auto agent through the typed `PlanExecutionTarget` path. All mode-switch paths log under `vtcode.planning_workflow` with a `switch_path` field (`plan_entry`, `plan_approval`, `plan_exit`, `startup_plan_entry`); selection/sync failures stay recoverable instead of aborting the session. Recoverable `Blocked` ends (recovery fallback, blocked-tool fuse, no published final) auto-continue in every mode — including build/auto without tracker items — via one shared `RECOVERABLE_BLOCK_ALLOW_TOKENS` list.
 
 **Verification** — commands run and observed results:
 
 - `cargo check --locked -p vtcode` — PASS
 - `cargo nextest run -p vtcode` planning/plan/mode filters — 362 passed
 - Targeted deferred-switch / restore / approval handoff unit tests (10–13) — PASS
+- Tracker/plan/handoff suites after all-modes blocked recovery — 50–92 passed
 - `cargo fmt --all` — applied
 - PRE-EXISTING: `cli_harness_failures print_mode_requires_prompt_or_stdin` (auth env; fails on base `a34d5bfca` too)
 - Independent review + focused re-review of criticals — PASS after fixes
@@ -27,7 +28,7 @@ commits: a34d5bfca..7883691f3
 2. Session evidence: stuck session `…T030348Z` had 13 events ending at `start_planning`; working session `…T023955Z` continued research in the same turn. Commit `a34d5bfca` introduced the break.
 3. Take the deferred flag unconditionally at turn end even when discarding it; otherwise a stale plan switch can fire mid-implementation.
 4. `harness_try!` in orchestration is a hard abort (`finish_after_unexpected_exit`). Mode-switch failures must `match` + log + `continue`.
-5. tracing field named `display` collides with `tracing::field::display` — do not log `%display`.
+5. tracing field named `display` collides with `tracing::field::display` — do not log `%display`. Session scan showed recovery-fallback/fuse blocked ends parking at `Continue…` in every mode; one shared allow-list prevents classifier drift.
 
 ## [S1] Problem
 
@@ -136,8 +137,10 @@ Contract:
 - Recoverable **blocked** ends auto-continue in build/auto **without** tracker
   items (bounded by `cross_turn_turns`). Completed turns still require
   incomplete tracker work.
-- `tracker_auto_continue_is_recoverable_block` recognizes the same fuse/no-final
-  shapes as plan mode.
+- One shared `RECOVERABLE_BLOCK_ALLOW_TOKENS` list feeds both the plan-mode and
+  tracker classifiers (DRY). Deny lists stay per-mode because evaluation order
+  differs (plan allows first so `PLANNING_COMPLETED_TURN_FALLBACK_REASON` is
+  not shadowed by "approval-ready plan").
 - When no tracker items remain, queue `recoverable_blocked_continue_follow_up`
   (internal-harness quiet prefix) instead of the tracker follow-up.
 - Verification blocks, refusals, permission/user-input handoffs stay denied.
