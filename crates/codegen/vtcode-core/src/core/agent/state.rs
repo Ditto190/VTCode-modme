@@ -390,8 +390,8 @@ const CLEARED_TOOL_RESULT_NOTE: &str = "Older tool result cleared to bound conte
 ///   trigger and cannot re-clear stubs usefully.
 ///
 /// When `clear_tool_inputs` is set, assistant `tool_calls[].function.arguments`
-/// for cleared results are replaced with a JSON placeholder (never prose —
-/// providers send `arguments` verbatim on the wire).
+/// and freeform `text` for cleared results are replaced with a JSON placeholder
+/// (never prose — providers send those fields verbatim on the wire).
 pub fn clear_old_tool_results(
     messages: &[Message],
     trigger_tokens: u64,
