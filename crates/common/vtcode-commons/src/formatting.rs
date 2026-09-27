@@ -855,8 +855,8 @@ mod tests {
         assert_eq!(wrap_shell_command_with_continuations("echo a && echo b", 62, 58), vec!["echo a && echo b"]);
         assert_eq!(wrap_shell_command_with_continuations("a | b | c", 62, 58), vec!["a | b | c"]);
         // The marker-free helper breaks identically minus suffixes.
-        assert_eq!(super::wrap_shell_command_lines("echo a && echo b", 10, 10), vec!["echo a &&", "echo b"]);
-        assert_eq!(super::wrap_shell_command_lines("git status", 62, 58), vec!["git status"]);
+        assert_eq!(wrap_shell_command_lines("echo a && echo b", 10, 10), vec!["echo a &&", "echo b"]);
+        assert_eq!(wrap_shell_command_lines("git status", 62, 58), vec!["git status"]);
     }
 
     #[test]
