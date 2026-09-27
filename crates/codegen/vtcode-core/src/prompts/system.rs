@@ -6,7 +6,7 @@
 //! skill metadata, and runtime notices.
 
 use crate::config::constants::prompt_budget as prompt_budget_constants;
-use crate::config::types::{ShellPromptProfile, SystemPromptMode};
+use crate::config::types::ShellPromptProfile;
 use crate::llm::providers::gemini::wire::Content;
 use crate::prompts::context::PromptContext;
 use crate::prompts::guidelines::{generate_tool_guidelines_for_profile, render_shell_profile_guidance};
@@ -355,9 +355,7 @@ async fn build_prompt_sections(
     vtcode_config: Option<&crate::config::VTCodeConfig>,
     prompt_context: Option<&PromptContext>,
 ) -> Vec<PromptSection> {
-    let prompt_mode = vtcode_config
-        .map(|c| c.agent.system_prompt_mode)
-        .unwrap_or(SystemPromptMode::Default);
+    let prompt_mode = vtcode_config.map(|c| c.agent.system_prompt_mode).unwrap_or_default();
     let static_base_prompt = static_profile_prompt(prompt_mode);
     let resolved_layers = resolve_system_prompt_layers(project_root).await;
     let mut base_prompt = apply_system_prompt_layers(static_base_prompt, &resolved_layers);
@@ -641,9 +639,7 @@ pub async fn apply_output_style(
 /// epoch advances and the old cached prompt is superseded rather than served stale.
 #[cfg(test)]
 fn cache_key(project_root: &Path, vtcode_config: Option<&crate::config::VTCodeConfig>, catalog_epoch: u64) -> String {
-    let mode = vtcode_config
-        .map(|cfg| cfg.agent.system_prompt_mode)
-        .unwrap_or(SystemPromptMode::Default);
+    let mode = vtcode_config.map(|cfg| cfg.agent.system_prompt_mode).unwrap_or_default();
     let instruction_digest =
         crate::core::agent::hash_utils::hash_value(&("context-free", format!("{mode:?}"), static_profile_prompt(mode)));
     cache_key_for_identity(project_root, vtcode_config, instruction_digest, 0, catalog_epoch)
@@ -794,7 +790,7 @@ mod tests {
     use super::*;
     use crate::config::VTCodeConfig;
     use crate::config::constants::tools;
-    use crate::config::types::ResolvedShellPromptProfile;
+    use crate::config::types::{ResolvedShellPromptProfile, SystemPromptMode};
     use std::path::PathBuf;
 
     const REMOVED_MODEL_FACING_TOOL_NAMES: &[&str] = &[
@@ -1106,6 +1102,8 @@ mod tests {
         std::fs::write(workspace.path().join("src/lib.rs"), "pub fn main() {}\n").expect("write lib.rs");
 
         let mut config = VTCodeConfig::default();
+        // Pin Default: this gate covers the fuller profile with instructions.
+        config.agent.system_prompt_mode = SystemPromptMode::Default;
         config.agent.include_temporal_context = false;
         config.agent.include_working_directory = false;
         let base = compose_system_instruction_text(workspace.path(), Some(&config), None).await;
@@ -2009,6 +2007,9 @@ mod tests {
     async fn test_golden_under_budget_output_is_byte_identical() {
         let workspace = tempfile::TempDir::new().expect("workspace");
         let mut config = VTCodeConfig::default();
+        // Pin the Default profile: this golden tracks that profile's composed
+        // text, not the configured default (Minimal after lean harness defaults).
+        config.agent.system_prompt_mode = SystemPromptMode::Default;
         config.agent.include_temporal_context = false;
         config.agent.include_working_directory = false;
         config.agent.instruction_max_bytes = 0;
