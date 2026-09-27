@@ -850,15 +850,34 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         .map(|cfg| cfg.default_primary_agent.as_str())
                         .filter(|name| !name.trim().is_empty());
                     let current_agent = active_primary_agent.active().name().to_string();
-                    let execution_agent = select_approved_plan_execution_agent(
+                    // Selection failure must stay recoverable so an approved
+                    // plan is not lost to a hard session abort.
+                    let execution_agent = match select_approved_plan_execution_agent(
                         &mut active_primary_agent,
                         &tool_registry,
                         &config.workspace,
                         Some(current_agent.as_str()),
                         configured_default,
                     )
-                    .await;
-                    let execution_agent = harness_try!(execution_agent);
+                    .await
+                    {
+                        Ok(agent) => agent,
+                        Err(err) => {
+                            tracing::error!(
+                                target: "vtcode.planning_workflow",
+                                switch_path = "plan_approval",
+                                requested_agent = %current_agent,
+                                error = %err,
+                                "Could not select write-capable agent for approved-plan execution; plan remains approved"
+                            );
+                            harness_try!(renderer.line(
+                                MessageStyle::Error,
+                                &format!("Could not switch to an implementation agent after plan approval: {err}"),
+                            ));
+                            pending_approved_plan_execution_input = false;
+                            continue;
+                        }
+                    };
                     if current_agent != execution_agent {
                         harness_try!(renderer.line(
                             MessageStyle::Info,
@@ -1211,9 +1230,17 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 continue;
                             }
                             Err(err) => {
-                                tracing::error!(error = %err, "approved-plan execution agent selection failed");
-                                session_end_reason = SessionEndReason::Error;
-                                break;
+                                tracing::error!(
+                                    target: "vtcode.planning_workflow",
+                                    switch_path = "plan_approval",
+                                    error = %err,
+                                    "Approved-plan execution agent selection failed; plan remains approved and can be retried"
+                                );
+                                harness_try!(renderer.line(
+                                    MessageStyle::Error,
+                                    &format!("Could not switch to an implementation agent after plan approval: {err}"),
+                                ));
+                                continue;
                             }
                         };
                         if requested_agent != Some(resolved_execution_agent.as_str()) {
