@@ -198,7 +198,10 @@ fn contains_command_substitution(script: &str) -> bool {
             // Quoted heredoc bodies are literal data, not shell. Skipping them
             // keeps `cat <<'EOF'` with backticks/`$()` in the payload from
             // looking like command substitution (session-vtcode-20260925).
-            if character == '<' && characters.peek() == Some(&'<') {
+            // A heredoc only starts outside quotes: inside a double-quoted
+            // string `<<` is literal text while substitution stays active, so
+            // skipping there would hide an executable `$(...)`/backtick.
+            if character == '<' && !in_double_quote && characters.peek() == Some(&'<') {
                 // Probe without mutating so an unquoted `<<` keeps both marks.
                 let mut probe = characters.clone();
                 let _ = probe.next(); // second '<'
@@ -282,6 +285,48 @@ mod tests {
     fn unquoted_heredoc_body_still_detects_substitution() {
         let script = "cat > /tmp/x <<EOF\n$(whoami)\nEOF\n";
         assert!(contains_command_substitution(script), "unquoted heredoc body can substitute");
+    }
+
+    /// Double-quoted string containing heredoc-shaped text with a standalone
+    /// delimiter line: the closing quote sits on its own line after `E` so the
+    /// skip helper matches the delimiter when the double-quote gate is missing.
+    fn dq_heredoc_shaped_script(payload: &str) -> String {
+        format!("echo \"a <<'E'\n{payload}\nE\n\"")
+    }
+
+    #[test]
+    fn double_quoted_heredoc_shaped_text_still_detects_substitution() {
+        // Bash never starts a heredoc inside a double-quoted string: `<<` there
+        // is literal text while substitution stays active. The heredoc skip
+        // must not hide an executable `$(...)`.
+        let script = dq_heredoc_shaped_script("$(touch /tmp/vtcode-scan-probe)");
+        assert!(contains_command_substitution(&script), "substitution inside double quotes must be detected");
+        assert!(validate_shell_script(&script).is_err(), "bypass-shaped script must be rejected: {script:?}");
+    }
+
+    #[test]
+    fn double_quoted_heredoc_shaped_text_still_detects_backticks() {
+        let script = dq_heredoc_shaped_script("`touch /tmp/vtcode-scan-probe`");
+        assert!(contains_command_substitution(&script), "backticks inside double quotes must be detected");
+    }
+
+    #[test]
+    fn double_quoted_heredoc_shaped_text_without_substitution_passes() {
+        // Same shape as the bypass above minus the substitution: scanning
+        // inside the double quotes must not create a false positive.
+        let script = dq_heredoc_shaped_script("plain body line");
+        assert!(!contains_command_substitution(&script), "substitution-free script stays clean: {script:?}");
+        assert!(validate_shell_script(&script).is_ok(), "no false positive from heredoc-shaped text: {script:?}");
+    }
+
+    #[test]
+    fn bash_c_argv_with_double_quoted_heredoc_shaped_substitution_is_rejected() {
+        let command = vec![
+            "bash".to_string(),
+            "-c".to_string(),
+            dq_heredoc_shaped_script("$(touch /tmp/vtcode-scan-probe)"),
+        ];
+        assert!(validate_command_argv(&command).is_err(), "argv unwrap path must reject the bypass shape");
     }
 
     #[test]
