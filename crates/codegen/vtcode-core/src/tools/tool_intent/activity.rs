@@ -721,7 +721,10 @@ mod tests {
             "git diff -oout",
             "git log --output=out",
             "git show --textconv",
-            "git -C /external/repo=alt status",
+            // `-C <dir> <read-only sub>` is an Inspection now (the redirect
+            // only changes which repository is read); config injection stays
+            // a Mutation.
+            "git -c core.fsmonitor=touch status",
             "find . -fprint output.txt",
             "find . -fprintf output.txt '%p'",
             "rg --hostname-bin sh pattern",

@@ -389,7 +389,13 @@ pub(crate) fn has_unsafe_readonly_options(words: &[String]) -> bool {
 
     match program.as_str() {
         "git" => command_words.iter().skip(1).any(|word| {
-            crate::command_safety::git_global_option_requires_prompt(word)
+            // `-C <dir>` (bare or inline `-C<dir>`) only redirects which
+            // repository is read; the subcommand allow-list still gates every
+            // git call, so it cannot turn an inspection into a writer. `-c
+            // key=value` stays prompt-requiring: config injection is a
+            // command-execution vector (fsmonitor/pager hooks).
+            let is_dir_redirect = word == "-C" || (word.starts_with("-C") && word.len() > 2);
+            (!is_dir_redirect && crate::command_safety::git_global_option_requires_prompt(word))
                 || word == "--ext-diff"
                 || word == "--textconv"
                 || word == "-o"
@@ -1328,7 +1334,10 @@ mod tests {
             "git diff -oout.txt",
             "git log --output=out.txt",
             "git -c diff.external=sh diff",
-            "git -C /external/repo=alt status",
+            // `git -C <dir> <read-only sub>` is intentionally admitted now:
+            // the redirect only changes which repository is read, while the
+            // subcommand allow-list still gates the call. Config and helper
+            // redirects below stay rejected.
             "git --git-dir=.evil-git diff",
             "git --exec-path=.evil-git diff",
             "find . -fprint output.txt",
