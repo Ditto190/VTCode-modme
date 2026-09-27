@@ -143,9 +143,10 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   replaying the full parent bootstrap on every child turn.
 - **Tool-result clearing is on by default.** Old tool results are stripped from
   context once it grows past `trigger_tokens` (default 100k), keeping only the most
-  recent `keep_tool_uses` (default 3) results. Anthropic routes use native
-  `context_management.edits.clear_tool_uses_20250919`; every other provider gets
-  an equivalent request-only local rewrite (`clear_old_tool_results`) that stubs
+  recent `keep_tool_uses` (default 3) results. Requests that will not carry native
+  context edits get the request-only local rewrite (`clear_old_tool_results`):
+  non-Anthropic providers, and Anthropic routes whose model capability profile
+  lacks context edits. The local rewrite stubs
   older tool-result bodies while preserving `tool_call_id` pairing. Durable
   session history and `ThreadEvent`s keep the full payload.
 - **Builtin tool count is capped.** The number of LLM-exposed builtin tools stays

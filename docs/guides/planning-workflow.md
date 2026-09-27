@@ -20,7 +20,7 @@ The built-in `plan` agent's permission rules allow `read`, `request_user_input`,
 
 Blocked and denied tool calls are bounded per turn to prevent retry churn. The configured `tools.max_consecutive_blocked_tool_calls_per_turn` value remains the consecutive-call cap. The total fuse is two times that cap in normal mode, four times that cap in Plan Mode, and the consecutive cap in recovery mode. The fuse is strict: with a cap of `3`, Plan Mode permits 12 non-consecutive blocked calls and stops on call 13. A successful or otherwise allowed call resets the consecutive streak, but not the turn's total blocked-call count.
 
-When a turn stops because of blocked behavior, VT Code forces a session-history checkpoint before writing the blocked handoff. The handoff advertises `vtcode --resume <archive-id>` only after that archive is successfully persisted and its identifier is verified. If history persistence is disabled or the checkpoint fails, the handoff explains that resume is unavailable and does not advertise a misleading command. Interactive sessions return to the next input after the handoff.
+When a turn stops because of blocked behavior, VT Code forces a session-history checkpoint before writing the blocked handoff. The handoff advertises `vtcode --resume <archive-id>` only after that archive is successfully persisted and its identifier is verified. If history persistence is disabled or the checkpoint fails, the handoff explains that resume is unavailable and does not advertise a misleading command. Interactive sessions return to the next input after the handoff — except for recoverable blocked ends (budgets, safety caps, blocked-tool fuse, tool-free recovery), which auto-continue a bounded follow-up turn in every mode before control returns to you; manual `continue` matters once that budget (`agent.harness.continuation.cross_turn_turns`) is exhausted.
 
 Runner paths that do not create session archives also omit the resume command and state that limitation in the handoff.
 
@@ -611,7 +611,11 @@ the pending call in the same turn, emits `session_tool_limit_increased`, and
 preserves the granted session fuse across runtime limit refreshes and the next
 turn. A denial remains an explicit denial. The analogous tool-loop prompt emits
 `tool_loop_limit_increased` and keeps tools enabled for the current agent; it
-does not enter tool-free recovery. Transient bridge submissions, including
+does not enter tool-free recovery. Only the first tool-loop grant in a session
+prompts: after one manual grant, later tool-loop limit hits auto-grant the
+remaining increment without a prompt (a denial never latches that
+preauthorization, so the prompt returns if you previously denied). Full-auto
+auto-grants regardless, and the hard cap still applies. Transient bridge submissions, including
 mode-switch input, are deferred or ignored while the prompt owns input and are
 not interpreted as a denial.
 

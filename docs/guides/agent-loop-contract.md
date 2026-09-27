@@ -11,10 +11,12 @@ This guide describes the public lifecycle semantics shared by interactive runs,
 VT Code does not expose Claude-specific SDK structs. The canonical stream stays
 `vtcode_exec_events::ThreadEvent`.
 
-### Tracker-aware auto-continuation
+### Tracker-aware and blocked-end auto-continuation
 
-When `task_tracker` still has incomplete steps, the harness continues instead of
-ending the turn and nudging the user to resume:
+The harness continues instead of ending the turn and nudging the user to
+resume in two cases: when `task_tracker` still has incomplete steps, and when a
+turn ends on a recoverable block — in every mode, even with an empty or absent
+tracker:
 
 - In-turn: status-only assistant text (including budget/tool-loop/recovery
   recaps) is forced to continue unless it is a true user handoff (trailing
@@ -24,25 +26,42 @@ ending the turn and nudging the user to resume:
   tracker in-turn continue. Verification-pending recaps
   (`verification is still pending` / `unverified assistant responses`) are
   terminal in-turn so continuation cannot race past the anti-blind gate.
-- Cross-turn: after a Completed or recoverable Blocked turn, the session loop
-  queues the next tracker implementation turn, bounded by
+- Cross-turn: the session loop queues the next turn automatically in two
+  shapes, bounded by
   `[agent.harness.continuation].cross_turn_turns` (default 32; progress-resets
   when any tracker step completes). `0` disables
-  cross-turn auto-queue. Verification-blocked turns keep their own recovery path
+  cross-turn auto-queue. After a **Completed** turn with incomplete tracker
+  steps it queues the next tracker implementation turn. After a **recoverable
+  Blocked** turn — with or without tracker steps — it queues a bounded
+  blocked-end resume ("The previous turn ended on a recoverable block: …").
+  Recoverable means the production blocked-reason constants only (turn /
+  tool / tool-loop budgets, preview budgets, safety caps, blocked-tool fuse
+  and tool-call limits, tool-free recovery); provider refusals, verification
+  blocks, true handoffs, and unknown reasons never auto-queue.
+  Verification-blocked turns keep their own recovery path
   until that recovery is exhausted. Successful auto-queue never prints
   “Type `continue`”.
-- Exhausted-path UX: when tracker/plan auto-queue is eligible but cannot resume
-  (queue full or `cross_turn_turns` exhausted) and incomplete tracker steps
-  remain, the harness prints **one** info line and skips the generic blocked
+- Exhausted-path UX: when tracker/plan/blocked-end auto-queue is eligible but
+  cannot resume (queue full or `cross_turn_turns` exhausted), the harness
+  prints **one** info line and skips the generic blocked
   handoff nudge stack / blocked TUI placeholder for that recoverable budget end.
-  True handoffs, verification escalation, and unknown blocked reasons still use
+  With incomplete tracker steps the line covers the tracker/plan resume;
+  blocked ends without tracker work name the blocked-end resume directly
+  (`Blocked-end auto-continue could not resume automatically.` or
+  `Blocked-end auto-continue budget exhausted.`, each ending
+  “Type `continue` to retry the request.”). True
+  handoffs, verification escalation, and unknown blocked reasons still use
   the normal blocked handoff.
 - Resume: sessions restored with incomplete tracker steps auto-queue one
   continuation turn after injecting remaining-step context.
 - Plan mode: while planning is active and no validated plan is ready for
   approval, **recoverable blocked** planning ends (budget / safety-cap /
-  tool-free recovery) auto-queue another planning turn (same
-  `cross_turn_turns` budget). Ordinary completed planning turns are not
+  tool-free recovery, including blocked-tool fuse trips and turns ending
+  without a harness-visible final assistant response) auto-queue another
+  planning turn (same
+  `cross_turn_turns` budget). Deterministic empty-turn fallbacks cannot
+  self-loop: after 2 consecutive empty fallback turns the gate closes and the
+  user must `continue` manually. Ordinary completed planning turns are not
   auto-continued — they may be interview or approval handoffs. Planning never
   auto-approves or auto-implements. Plan-mode and tracker auto-continue share
   the `cross_turn_turns` episode budget; a planning episode can exhaust it for

@@ -46,7 +46,7 @@ escape sequence can set profile artwork. Coverage today:
 
 | Terminal | Graphical icon path | Status |
 | --- | --- | --- |
-| iTerm2 | `VT Code` dynamic profile (custom icon + auto-switch) | Automatic: installed on first iTerm2 TUI run (repair via `/terminal-setup install-iterm2-icon`); applied once at TUI startup while installed |
+| iTerm2 | `VT Code` dynamic profile (custom icon + auto-switch) | Automatic: installed on first iTerm2 TUI run and reinstalled whenever missing or stale (repair via `/terminal-setup install-iterm2-icon`); applied once at TUI startup while installed. No config opt-out — deleting the profile file lasts only until the next launch |
 | Windows Terminal | `settings.json` profile `"icon"` (`.png`) | Guided fragment in `/terminal-setup` output; assets in `resources/icons/` |
 | VS Code integrated terminal | Extension terminal `iconPath` | Automatic: bundled `media/vtcode-terminal.png` |
 | Kitty, Ghostty, WezTerm, Alacritty, Terminal.app, Warp, Zed, Hyper, Tabby | None per-session (app/window level only) | `OSC 1`/`OSC 2` text label |
@@ -56,7 +56,11 @@ Bundled assets live in `resources/icons/` (see its `README.md`):
 profiles, and `vtcode-profile-180.png` for Windows Terminal.
 On iTerm2, `/terminal-setup install-iterm2-icon` installs a `VT Code`
 dynamic profile automatically; VT Code switches to it once at startup
-whenever the profile file exists.
+whenever the profile file exists. The installer also runs on every
+interactive iTerm2 launch and rewrites the profile file when it is
+missing or the bundled artwork changed, so deleting the file uninstalls
+the icon only until the next launch. There is no config key to disable
+the install; `--quiet` suppresses only the install notice.
 
 ## Line Break Options
 
@@ -125,6 +129,7 @@ completion_success = false
     - `Ghostty` and `Kitty` support native alert flows well.
     - `iTerm2` can show Notification Center alerts after enabling the relevant profile settings.
     - Other terminals may only expose bell-based notifications.
+- On macOS, desktop notifications (`delivery_mode = "desktop"`) are delivered through the Finder application bundle (`com.apple.finder`). VT Code pins this bundle deliberately so sending a notification never triggers the macOS Apple Events automation permission prompt; as a side effect, notifications are attributed to Finder rather than to VT Code.
 
 ### Lifecycle hook notifications
 
@@ -198,6 +203,7 @@ opening the editor with `v`, or handing the transcript to native scrollback with
 ### Notifications
 
 - Confirm your terminal has OS notification permissions where applicable.
+- On macOS, desktop notifications appear as coming from Finder: VT Code sends them via the Finder app bundle specifically to avoid the Apple Events automation permission prompt.
 - Test bell-based alerts with `printf '\\a'`.
 - Validate hook commands separately before relying on them in `hooks.lifecycle`.
 

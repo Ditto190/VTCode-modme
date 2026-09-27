@@ -31,8 +31,12 @@ once per terminal:
   profile on first run and prints a notice. It installs a `VT Code`
   dynamic profile (custom icon + auto-switch while `vtcode` runs) under
   `~/Library/Application Support/iTerm2/DynamicProfiles/vtcode.json`
-  with artwork in the VT Code data dir. New tabs pick it up immediately;
-  deleting `vtcode.json` uninstalls. VT Code switches to the profile
+  with artwork in the VT Code data dir. New tabs pick it up immediately.
+  The installer also runs on every interactive iTerm2 launch and rewrites
+  the profile file whenever it is missing or the bundled artwork changed,
+  so deleting `vtcode.json` is not a persistent opt-out — it reappears on
+  the next launch (there is no config key to disable this; `--quiet`
+  suppresses only the install notice). VT Code switches to the profile
   once at TUI startup, only when the file exists.
 - iTerm2 (manual): Settings > Profiles > General > Icon, choose
   `vtcode-profile-120.png` (Retina) or `vtcode-profile-32.png`.

@@ -39,7 +39,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | `Ctrl+A` / `Ctrl+E` | Current line start / end (buffer edges when single-line; legacy `Cmd+Left`/`Cmd+Right`). |
 | `Ctrl+F` / `Ctrl+B` | `Ctrl+F` moves forward. `Ctrl+B` hands an active foreground command to the background session manager; when no command is active, it runs the configured background-operation action. |
 | `Alt+F` / `Alt+B`, `Alt+Left/Right` | Word forward / back. |
-| `Ctrl+P` / `Ctrl+N`, `Up`/`Down` | History previous / next (`Up`/`Down` move within the composer first when it spans more than one visual row; `Ctrl+P`/`Ctrl+N` always traverse history). |
+| `Ctrl+P` / `Ctrl+N`, `Up`/`Down` | History previous / next (`Up`/`Down` stay inside a multi-row composer and never traverse history; `Ctrl+P`/`Ctrl+N` always traverse history). |
 | `Ctrl+W`, `Alt+D` | Delete previous / next word. |
 | `Ctrl+U` / `Ctrl+K` | Clear current line / delete to line end (legacy `Cmd+Backspace`/`Cmd+Delete`). |
 | `Ctrl+T` | Transpose chars (when Transcript Review is unbound; otherwise opens review). |
@@ -64,7 +64,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | :-- | :-- |
 | Agent/file palette | `Up`/`Down` move, `Tab` select best match, `Enter` apply, `Esc` close. |
 | Slash palette | `Tab` autocomplete, navigation via slash keys. |
-| History picker (`Ctrl+R`/`Ctrl+S`) | Type to filter, `Tab`/`Esc`/`Enter` accept, `Ctrl+C` or empty `Backspace` cancel. |
+| History picker (`Ctrl+R`/`Ctrl+S`) | Type to filter, `Tab`/`Esc`/`Enter` accept, `Ctrl+C`/`Ctrl+G` or empty `Backspace` cancel; Ctrl-modified characters are always shortcuts, never search text. |
 | Modal list | `Tab`/`BackTab` move per modal, `Esc`/`Enter` cancel/submit per overlay. |
 | Local agents drawer | `Down` opens on empty composer; `Alt+S` focuses. `Enter` inspects; `Ctrl+K` stops; `Ctrl+X` force-terminates or closes. For `exec-session` rows, `Ctrl+R` toggles stdin focus and `Ctrl+P` previews the bounded snapshot. |
 | Queued-input edit | `Alt+Up` (or `Shift+Left` in tmux) pops newest queued message into composer. |
