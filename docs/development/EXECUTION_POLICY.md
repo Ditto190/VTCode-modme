@@ -145,8 +145,9 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   context once it grows past `trigger_tokens` (default 100k), keeping only the most
   recent `keep_tool_uses` (default 3) results. Requests that will not carry native
   context edits get the request-only local rewrite (`clear_old_tool_results`):
-  non-Anthropic providers, and Anthropic routes whose model capability profile
-  lacks context edits. The local rewrite stubs
+  non-Anthropic providers, Anthropic routes whose model capability profile
+  lacks context edits, and headless (`vtcode exec`) Anthropic runs, which never
+  attach native context management. The local rewrite stubs
   older tool-result bodies while preserving `tool_call_id` pairing. Durable
   session history and `ThreadEvent`s keep the full payload.
 - **Builtin tool count is capped.** The number of LLM-exposed builtin tools stays

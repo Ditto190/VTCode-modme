@@ -101,6 +101,47 @@ pub fn session_retention_pinned(session_dir: &Path) -> bool {
     session_dir.join(RETENTION_PIN_FILE).is_file()
 }
 
+/// Whether a live process still holds the session's event-log handles open.
+///
+/// `session.lock` is flock-held for as long as any event-log handle to the
+/// session exists (see `event_log::acquire_liveness_lock`). `WouldBlock`
+/// proves a live holder; a missing lock file (older or crashed sessions) or
+/// an acquirable lock means nothing alive keeps the session open. Unreadable
+/// lock files count as live: deletion paths must not evict what they cannot
+/// inspect.
+pub(crate) fn session_dir_is_live(session_dir: &Path) -> bool {
+    use crate::event_log::SESSION_LOCK_FILE;
+
+    let lock_path = session_dir.join(SESSION_LOCK_FILE);
+    let file = match std::fs::OpenOptions::new().read(true).write(true).open(&lock_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    file.try_lock()
+        .map_err(std::io::Error::from)
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
+}
+
+/// Session ids whose stores are retention-pinned against ordinary eviction.
+///
+/// Companion to [`session_retention_pinned`]: a blocked session pins its store
+/// so ordinary retention cannot erase its evidence. Callers pruning other
+/// session-derived data (e.g. legacy history envelopes) must exclude these ids
+/// or they would erase through a different path what the pin protects.
+#[must_use]
+pub fn retention_pinned_session_ids(workspace: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(sessions_root(workspace)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false))
+        .filter(|entry| session_retention_pinned(&entry.path()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect()
+}
+
 /// Write a retention pin for a session (best-effort path check by caller).
 pub fn pin_session_retention(session_dir: &Path, reason: &str) -> Result<(), SessionStoreError> {
     let path = session_dir.join(RETENTION_PIN_FILE);
@@ -142,6 +183,12 @@ fn retention_candidates(
         }
         // Unresolved blocker forensics must survive count/age eviction.
         if session_retention_pinned(&path) {
+            continue;
+        }
+        // A session still open in a live process must not be evicted even
+        // when its manifest says completed: the user may resume or keep
+        // reading it.
+        if session_dir_is_live(&path) {
             continue;
         }
         let manifest_path = path.join("manifest.json");
@@ -197,6 +244,12 @@ pub fn mark_abandoned_active_sessions(
             continue;
         }
         if session_retention_pinned(&path) {
+            continue;
+        }
+        // A live process still holds this session open (open-but-idle):
+        // marking it completed would let phase-2 evict a session the user
+        // may still resume.
+        if session_dir_is_live(&path) {
             continue;
         }
         let manifest_path = path.join("manifest.json");

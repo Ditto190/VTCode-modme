@@ -140,30 +140,15 @@ pub(super) async fn run_harness_retention(workspace: &Path, vt_cfg: Option<&VTCo
     }
 }
 
-/// Session ids whose stores are retention-pinned against ordinary eviction.
-///
-/// A blocked session is pinned so retention cannot erase its evidence; the
-/// history-envelope prune is ordinary retention too, so pinned sessions'
-/// legacy envelopes must survive its count/age caps.
-fn retention_pinned_session_ids(workspace: &Path) -> Vec<String> {
-    let sessions_root = workspace.join(".vtcode").join("sessions");
-    let Ok(entries) = std::fs::read_dir(&sessions_root) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter(|entry| entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false))
-        .filter(|entry| vtcode_memory::session_retention_pinned(&entry.path()))
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect()
-}
-
 /// Cap `.vtcode/history/*.memory.json` so legacy envelopes cannot grow without
 /// bound while dual writes still land there.
 ///
 /// Keeps the `HISTORY_ENVELOPE_KEEP` newest files, anything belonging to
 /// `preserve_session_id`, and anything belonging to a retention-pinned
-/// session; drops envelopes older than `max_age_days`.
+/// session; drops envelopes older than `max_age_days`. The pinned exclusion
+/// reuses `vtcode_memory::retention_pinned_session_ids`: a blocked session is
+/// pinned so ordinary retention cannot erase its evidence, and this prune is
+/// ordinary retention.
 fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_days: u64) -> Result<usize> {
     const HISTORY_ENVELOPE_KEEP: usize = 50;
 
@@ -171,7 +156,7 @@ fn prune_history_envelopes(workspace: &Path, preserve_session_id: &str, max_age_
     let Ok(entries) = std::fs::read_dir(&history_dir) else {
         return Ok(0);
     };
-    let pinned_session_ids = retention_pinned_session_ids(workspace);
+    let pinned_session_ids = vtcode_memory::retention_pinned_session_ids(workspace);
     let mut envelopes: Vec<(PathBuf, SystemTime)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();

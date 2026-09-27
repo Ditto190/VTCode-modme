@@ -58,7 +58,8 @@ pub use query::{
 };
 pub use retention::{
     RETENTION_PIN_FILE, RetentionPolicy, apply_retention, apply_retention_preserving, gc_legacy,
-    mark_abandoned_active_sessions, pin_session_retention, session_retention_pinned, unpin_session_retention,
+    mark_abandoned_active_sessions, pin_session_retention, retention_pinned_session_ids, session_retention_pinned,
+    unpin_session_retention,
 };
 
 use std::path::{Path, PathBuf};

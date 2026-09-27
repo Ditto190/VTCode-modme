@@ -265,6 +265,24 @@ fn plan_entry_handoff_is_not_approved_plan_execution() {
 }
 
 #[test]
+fn deferred_plan_entry_switch_counts_as_primary_agent_handoff() {
+    use super::is_primary_agent_handoff;
+    use crate::agent::runloop::unified::planning_workflow::{PlanExecutionContext, PlanExecutionTarget};
+
+    let none: Option<String> = None;
+    let plan = Some("plan".to_string());
+    let target = PlanExecutionTarget::build(PlanExecutionContext::Current, false);
+    assert!(is_primary_agent_handoff(&plan, &None, false));
+    assert!(
+        is_primary_agent_handoff(&none, &None, true),
+        "deferred plan entry must exempt the final-response guard"
+    );
+    assert!(!is_primary_agent_handoff(&none, &None, false));
+    // A stronger handoff already owns the boundary even without the switch.
+    assert!(is_primary_agent_handoff(&none, &Some(target), false));
+}
+
+#[test]
 fn completed_fallback_reason_preserves_planning_specificity() {
     use super::completed_fallback_reason;
 

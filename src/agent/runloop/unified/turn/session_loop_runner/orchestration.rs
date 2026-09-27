@@ -1770,7 +1770,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .filter(|name| !name.trim().is_empty());
                         // Selection failure must stay recoverable: the plan is
                         // already approved, so aborting the session here would
-                        // leave a half-switched state with no retry path.
+                        // leave a half-switched state with no retry path. The
+                        // `continue` intentionally skips this iteration's
+                        // metrics/checkpoint tail: the next successful turn
+                        // persists the same messages, so the skip self-heals.
                         let execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,

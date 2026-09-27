@@ -244,6 +244,25 @@ fn retention_removes_oldest_sessions() {
 }
 
 #[test]
+fn retention_pinned_session_ids_lists_only_real_pinned_dirs() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = sessions_root(dir.path());
+    fs::create_dir_all(root.join("sess-pinned")).expect("pinned session dir");
+    crate::retention::pin_session_retention(&root.join("sess-pinned"), "test").expect("pin");
+    fs::create_dir_all(root.join("sess-open")).expect("unpinned session dir");
+    // A symlink to a pinned store is not a real session dir: enumeration
+    // must not follow it.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(root.join("sess-pinned"), root.join("sess-link")).expect("symlink");
+
+    assert_eq!(crate::retention::retention_pinned_session_ids(dir.path()), vec!["sess-pinned".to_string()],);
+
+    // Missing sessions root yields an empty list, not an error.
+    let empty = TempDir::new().expect("tempdir");
+    assert!(crate::retention::retention_pinned_session_ids(empty.path()).is_empty());
+}
+
+#[test]
 fn retention_evicts_old_sessions_even_when_under_count_cap() {
     let dir = TempDir::new().expect("tempdir");
     // Create 3 sessions: 1 old (2020) and 2 recent (today).
@@ -387,6 +406,9 @@ fn retention_evicts_abandoned_active_sessions_past_age_window() {
     log.append(&ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "abandoned".to_string() }))
         .expect("append thread start");
     log.flush().expect("flush abandoned session");
+    // Drop the event-log handle so the session liveness lock is released:
+    // retention must skip sessions a live process still holds open.
+    drop(log);
 
     let session_dir = sessions_root(dir.path()).join("abandoned-session");
     let manifest_path = session_dir.join("manifest.json");
@@ -445,6 +467,7 @@ fn retention_ignores_manifest_session_id_for_deletion_path() {
         log.append(event).expect("append lifecycle");
     }
     log.complete().expect("complete");
+    drop(log);
     let manifest_path = sessions_root(dir.path()).join("safe-session").join("manifest.json");
     let mut manifest: crate::SessionManifest =
         serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse manifest");
@@ -472,6 +495,7 @@ fn retention_skips_symlink_session_entries() {
         log.append(event).expect("append lifecycle");
     }
     log.complete().expect("complete");
+    drop(log);
     let manifest_path = target.join("manifest.json");
     let mut manifest: crate::SessionManifest =
         serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse manifest");
@@ -1154,4 +1178,83 @@ fn retention_skips_pinned_sessions_and_evicts_when_unpinned() {
     let removed = apply_retention(dir.path(), policy).expect("retention 2");
     assert!(removed >= 1, "unpinned oldest should evict under max_sessions=1");
     assert!(!dir.path().join(".vtcode/sessions/sess-old").exists());
+}
+
+#[test]
+fn retention_never_marks_a_live_open_session_abandoned() {
+    // The open-but-idle eviction gap: a session left open with no completed
+    // turn is a retention candidate by manifest age alone. While any
+    // event-log handle exists, the liveness lock must keep it active.
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "sess-live", DEFAULT_MAX_EVENTS).expect("open");
+    let manifest_path = sessions_root(dir.path()).join("sess-live").join("manifest.json");
+    let stale_manifest = |status: &str| {
+        let mut manifest: crate::SessionManifest =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse");
+        manifest.updated_at = "2020-01-01T00:00:00Z".to_string();
+        manifest.status = status.to_string();
+        fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).expect("ser")).expect("write manifest");
+    };
+
+    stale_manifest("active");
+    let marked = crate::retention::mark_abandoned_active_sessions(dir.path(), 30, None).expect("mark while live");
+    assert_eq!(marked, 0, "a live open session must not be marked abandoned");
+
+    // Once every handle is closed the liveness lock releases and the idle
+    // session becomes reclaimable again.
+    drop(log);
+    let marked = crate::retention::mark_abandoned_active_sessions(dir.path(), 30, None).expect("mark after close");
+    assert_eq!(marked, 1, "a closed idle session is reclaimable");
+    let manifest: crate::SessionManifest =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse");
+    assert_eq!(manifest.status, "completed");
+}
+
+#[test]
+fn retention_eviction_skips_live_sessions_even_when_completed() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "sess-live", DEFAULT_MAX_EVENTS).expect("open");
+    log.complete().expect("complete");
+    let manifest_path = sessions_root(dir.path()).join("sess-live").join("manifest.json");
+    let mut manifest: crate::SessionManifest =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest")).expect("parse");
+    manifest.updated_at = "2020-01-01T00:00:00Z".to_string();
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).expect("ser")).expect("write manifest");
+
+    // A user may keep a finished session open: the liveness lock must keep
+    // it out of count/age eviction while it is open.
+    let removed = apply_retention(dir.path(), crate::retention::RetentionPolicy { max_sessions: 1, max_age_days: 30 })
+        .expect("retain while live");
+    assert_eq!(removed, 0, "a live open session must not be evicted");
+    assert!(manifest_path.exists());
+
+    drop(log);
+    let removed = apply_retention(dir.path(), crate::retention::RetentionPolicy { max_sessions: 1, max_age_days: 30 })
+        .expect("retain after close");
+    assert_eq!(removed, 1, "a closed aged session is evictable");
+    assert!(!manifest_path.exists());
+}
+
+#[test]
+fn liveness_probe_held_lock_reports_live_consistently() {
+    let dir = TempDir::new().expect("tempdir");
+    let log = open(dir.path(), "sess-probe", DEFAULT_MAX_EVENTS).expect("open");
+    let target = sessions_root(dir.path()).join("sess-probe");
+    for _ in 0..200 {
+        assert!(
+            crate::retention::session_dir_is_live(&target),
+            "held liveness lock must report live"
+        );
+    }
+    log.complete().expect("complete");
+    // complete() must not release the liveness lock: the session handle is
+    // still open and the user may still be interacting with it.
+    for _ in 0..200 {
+        assert!(
+            crate::retention::session_dir_is_live(&target),
+            "liveness must survive completion while the handle is open"
+        );
+    }
+    drop(log);
+    assert!(!crate::retention::session_dir_is_live(&target), "released lock must report not live");
 }

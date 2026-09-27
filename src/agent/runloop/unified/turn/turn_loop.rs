@@ -493,13 +493,26 @@ fn ensure_completed_turn_response(
 
 /// True when a `Completed` turn must publish a final assistant response.
 ///
-/// Primary-agent handoffs (plan entry via `SwitchPrimaryAgent`, approved-plan
-/// execution via the policy target) are control-flow turns: the session loop
-/// constructs the follow-up request, and the handoff turn legitimately ends on
-/// a tool result with no assistant final. Requiring one would append a
-/// misleading recovery fallback and convert the handoff into `Blocked`.
+/// Primary-agent handoffs (plan entry via `SwitchPrimaryAgent`, deferred
+/// mid-turn `start_planning`, approved-plan execution via the policy target)
+/// are control-flow turns: the session loop constructs the follow-up request,
+/// and the handoff turn legitimately ends on a tool result with no assistant
+/// final. Requiring one would append a misleading recovery fallback and
+/// convert the handoff into `Blocked`.
 fn completed_turn_requires_final_response(result: &TurnLoopResult, primary_agent_handoff: bool) -> bool {
     !primary_agent_handoff && matches!(result, TurnLoopResult::Completed { plan_approved_execution_pending: false })
+}
+
+/// Whether the turn ends on a primary-agent control-flow handoff that the
+/// outer session loop will follow. Includes the deferred plan-entry switch
+/// so mid-turn `start_planning` is exempt from the final-response guard
+/// before that switch is applied to `pending_primary_agent`.
+fn is_primary_agent_handoff(
+    pending_primary_agent: &Option<String>,
+    pending_plan_execution_target: &Option<crate::agent::runloop::unified::planning_workflow::PlanExecutionTarget>,
+    deferred_plan_entry_switch: bool,
+) -> bool {
+    pending_primary_agent.is_some() || pending_plan_execution_target.is_some() || deferred_plan_entry_switch
 }
 
 /// True when a `SwitchPrimaryAgent` handoff is *entering* plan mode rather than
@@ -1934,7 +1947,13 @@ pub(crate) async fn run_turn_loop(
     // constructed by the outer session loop, so requiring a final assistant
     // response here would convert the handoff into `Blocked` before the
     // implementation/planning turn can start.
-    let primary_agent_handoff = pending_primary_agent.is_some() || pending_plan_execution_target.is_some();
+    //
+    // Consume the deferred plan-entry switch *before* the guard: mid-turn
+    // `start_planning` queues it without breaking the turn, and the handoff
+    // must be exempt like an explicit `SwitchPrimaryAgent("plan")`.
+    let deferred_plan_entry_switch = ctx.plan_session.take_plan_entry_agent_switch();
+    let primary_agent_handoff =
+        is_primary_agent_handoff(&pending_primary_agent, &pending_plan_execution_target, deferred_plan_entry_switch);
     let final_response_was_fallback = if completed_turn_requires_final_response(&result, primary_agent_handoff) {
         ensure_completed_turn_response(&mut ctx, working_history, turn_history_start_len)?
     } else {
@@ -1975,14 +1994,11 @@ pub(crate) async fn run_turn_loop(
         }
     }
 
-    // Deferred plan-entry agent switch: mid-turn `start_planning` must not
-    // break the turn (research continues in the entry turn). Always consume
-    // the flag so it cannot fire later; apply it at this turn boundary unless
+    // Apply the deferred plan-entry agent switch at this turn boundary unless
     // a stronger handoff (approved-plan policy target / explicit switch) owns
     // the boundary. Apply on Blocked too: plan mode often blocks tools in the
     // entry turn, and discarding here would leave the build agent selected
     // forever while planning stays active.
-    let deferred_plan_entry_switch = ctx.plan_session.take_plan_entry_agent_switch();
     if deferred_plan_entry_switch {
         if pending_primary_agent.is_none() && pending_plan_execution_target.is_none() {
             pending_primary_agent =

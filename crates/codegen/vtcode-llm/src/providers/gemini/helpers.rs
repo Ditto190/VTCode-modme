@@ -213,8 +213,16 @@ impl GeminiProvider {
                 continue;
             }
 
-            let mut parts: Vec<Part> = preserved_gemini_parts_from_message(message)
-                .unwrap_or_else(|| build_message_parts(message, request.model.as_str()));
+            let mut parts = match preserved_gemini_parts_from_message(message) {
+                Some(mut preserved) => {
+                    // Preserved parts bypass `tool_calls`, so request-only
+                    // input clearing would never reach the wire without
+                    // reconciling them here.
+                    sync_preserved_parts_with_tool_calls(&mut preserved, message);
+                    preserved
+                }
+                None => build_message_parts(message, request.model.as_str()),
+            };
 
             if message.role == MessageRole::Tool {
                 if let Some(tool_call_id) = &message.tool_call_id {
@@ -947,6 +955,54 @@ fn preserved_gemini_parts_from_message(message: &Message) -> Option<Vec<Part>> {
     None
 }
 
+/// Reconcile preserved parts with the message's current tool calls.
+///
+/// `clear_old_tool_results` stubs tool-call inputs on `Message.tool_calls`
+/// request-only, and preserved Gemini parts bypass `tool_calls` entirely:
+/// without this sync the original arguments would ride the wire and
+/// `clear_tool_inputs` would be a silent no-op on Gemini. Parts were
+/// deserialized into these same tool calls at response time, so the part id
+/// (falling back to the function name) is the faithful join. Thought
+/// signatures stay on the part — Gemini requires them — and only arguments
+/// that still parse as JSON are replaced.
+fn sync_preserved_parts_with_tool_calls(parts: &mut [Part], message: &Message) {
+    let Some(tool_calls) = message.tool_calls.as_ref() else {
+        return;
+    };
+    if tool_calls.is_empty() {
+        return;
+    }
+    let arguments_by_id: BTreeMap<&str, &str> = tool_calls
+        .iter()
+        .filter_map(|call| Some((call.id.as_str(), call.function.as_ref()?.arguments.as_str())))
+        .collect();
+    let arguments_by_name: BTreeMap<&str, &str> = tool_calls
+        .iter()
+        .filter_map(|call| {
+            let function = call.function.as_ref()?;
+            Some((function.name.as_str(), function.arguments.as_str()))
+        })
+        .collect();
+    for part in parts.iter_mut() {
+        let Part::FunctionCall { function_call, .. } = part else {
+            continue;
+        };
+        let arguments = function_call
+            .id
+            .as_deref()
+            .and_then(|id| arguments_by_id.get(id))
+            .or_else(|| arguments_by_name.get(function_call.name.as_str()));
+        let Some(arguments) = arguments else {
+            continue;
+        };
+        if let Ok(parsed) = serde_json::from_str::<Value>(arguments)
+            && function_call.args != parsed
+        {
+            function_call.args = parsed;
+        }
+    }
+}
+
 fn preserved_gemini_parts_detail(parts: &[Part]) -> Option<Vec<String>> {
     if !parts_require_roundtrip_history(parts) {
         return None;
@@ -1554,5 +1610,110 @@ mod fabricated_id_tests {
         let tool = ToolDefinition::google_maps(json!({"type": "unexpected"}));
         let error = serialize_gemini_tools(&[tool]).expect_err("reserved extension keys must be rejected");
         assert!(error.to_string().contains("collides with a reserved wire field"));
+    }
+}
+
+#[cfg(test)]
+mod preserved_parts_sync_tests {
+    use super::*;
+
+    const CLEARED_ARGS: &str = "{\"cleared\":\"tool_input\"}";
+
+    fn function_part(id: Option<&str>, name: &str, args: Value) -> Part {
+        Part::FunctionCall {
+            function_call: GeminiFunctionCall {
+                id: id.map(str::to_string),
+                name: name.to_string(),
+                args,
+            },
+            thought_signature: Some("sig".to_string()),
+        }
+    }
+
+    fn tool_call(id: &str, name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            call_type: "function".to_string(),
+            function: Some(FunctionCall {
+                namespace: None,
+                name: name.to_string(),
+                arguments: arguments.to_string(),
+            }),
+            text: None,
+            thought_signature: None,
+        }
+    }
+
+    fn assistant_message(tool_calls: Option<Vec<ToolCall>>) -> Message {
+        Message {
+            tool_calls,
+            ..Message::assistant("working".to_string())
+        }
+    }
+
+    fn part_args(part: &Part) -> Option<&Value> {
+        match part {
+            Part::FunctionCall { function_call, .. } => Some(&function_call.args),
+            _ => None,
+        }
+    }
+
+    fn part_signature(part: &Part) -> Option<&str> {
+        match part {
+            Part::FunctionCall { thought_signature, .. } => thought_signature.as_deref(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn sync_replaces_arguments_by_id_then_name() {
+        let mut parts = vec![
+            function_part(Some("call_1"), "read_file", json!({"path": "big.rs"})),
+            function_part(None, "grep_file", json!({"pattern": "x"})),
+        ];
+        let message = assistant_message(Some(vec![
+            tool_call("call_1", "read_file", CLEARED_ARGS),
+            tool_call("call_2", "grep_file", CLEARED_ARGS),
+        ]));
+
+        sync_preserved_parts_with_tool_calls(&mut parts, &message);
+
+        assert_eq!(part_args(&parts[0]), Some(&json!({"cleared": "tool_input"})));
+        assert_eq!(part_args(&parts[1]), Some(&json!({"cleared": "tool_input"})));
+        // Thought signatures stay on the part: Gemini requires them.
+        assert_eq!(part_signature(&parts[0]), Some("sig"));
+    }
+
+    #[test]
+    fn sync_leaves_unmatched_parts_untouched() {
+        let original_args = json!({"path": "keep.rs"});
+        let mut parts = vec![function_part(Some("call_other"), "write_file", original_args.clone())];
+        let message = assistant_message(Some(vec![tool_call("call_1", "read_file", CLEARED_ARGS)]));
+
+        sync_preserved_parts_with_tool_calls(&mut parts, &message);
+
+        assert_eq!(part_args(&parts[0]), Some(&original_args));
+    }
+
+    #[test]
+    fn sync_keeps_original_when_tool_call_arguments_unparseable() {
+        let original_args = json!({"path": "big.rs"});
+        let mut parts = vec![function_part(Some("call_1"), "read_file", original_args.clone())];
+        let message = assistant_message(Some(vec![tool_call("call_1", "read_file", "not-json")]));
+
+        sync_preserved_parts_with_tool_calls(&mut parts, &message);
+
+        assert_eq!(part_args(&parts[0]), Some(&original_args));
+    }
+
+    #[test]
+    fn sync_ignores_messages_without_tool_calls() {
+        let original_args = json!({"path": "big.rs"});
+        let mut parts = vec![function_part(Some("call_1"), "read_file", original_args.clone())];
+        let message = assistant_message(None);
+
+        sync_preserved_parts_with_tool_calls(&mut parts, &message);
+
+        assert_eq!(part_args(&parts[0]), Some(&original_args));
     }
 }
