@@ -68,3 +68,7 @@ session: /Users/vinhnguyenxuan/Developer/learn-by-doing/vtcode/.vtcode/sessions/
 read and apply to improve VT Code system, use relavant skills
 
 https://harnesstax.github.io/
+
+===
+
+can you check: there is something wrong with vtcode. when it is running (via tui cli, and ghostty, can happen on other terminals too, and macos currently). sometimes it showing a brief security permsiion and disappear briefly. it is very annoying because it show and hide very quickly ana can't see anything or act. please check and deep dive and fix between vtcode and macos security permission. also check for other env/os too.
