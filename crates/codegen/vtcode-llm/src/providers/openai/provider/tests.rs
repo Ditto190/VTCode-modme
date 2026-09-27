@@ -2808,12 +2808,13 @@ fn supported_models_include_current_reasoning_models() {
     // Current reasoning models must be in the supported list.
     assert!(supported.contains(&"gpt-5.6-sol".to_string()));
     assert!(supported.contains(&models::openai::DEFAULT_MODEL.to_string()));
-    // Deprecated o-series models are removed from the picker but retained in
-    // REASONING_MODELS for backward-compat routing.
+    // Deprecated o-series models are removed from the picker and from
+    // REASONING_MODELS (the pruned catalog keeps only current generations).
+    // They remain as remap constants for DEPRECATED_MODEL_REMAPPINGS.
     assert!(!supported.contains(&models::openai::O3.to_string()));
     assert!(!supported.contains(&models::openai::O4_MINI.to_string()));
-    assert!(models::openai::REASONING_MODELS.contains(&models::openai::O3));
-    assert!(models::openai::REASONING_MODELS.contains(&models::openai::O4_MINI));
+    assert!(!models::openai::REASONING_MODELS.contains(&models::openai::O3));
+    assert!(!models::openai::REASONING_MODELS.contains(&models::openai::O4_MINI));
 }
 
 #[test]

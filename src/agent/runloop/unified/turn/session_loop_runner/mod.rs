@@ -9,6 +9,7 @@ mod notifications;
 mod orchestration;
 mod plan_seed;
 mod support;
+mod turn_tail;
 
 #[cfg(test)]
 mod tests;

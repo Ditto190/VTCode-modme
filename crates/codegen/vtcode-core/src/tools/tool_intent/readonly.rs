@@ -636,6 +636,44 @@ mod tests {
     }
 
     #[test]
+    fn env_value_injection_is_not_readonly() {
+        // A4: `command_words_after_environment_prefix` strips assignments, so
+        // values must still be inspected. `GIT_CONFIG_*` reproduces the blocked
+        // `git -c core.fsmonitor` injection without any `-c` token.
+        for command in [
+            "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0='touch /tmp/pwned' git status",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0='touch /tmp/pwned' git status",
+            "env GIT_CONFIG_GLOBAL=/tmp/evil.gitconfig git status",
+            "env GIT_EXTERNAL_DIFF=evil git diff",
+            "env GIT_TEXTCONV=evil git show HEAD",
+            "env LD_PRELOAD=./evil.so ls",
+            "env DYLD_INSERT_LIBRARIES=./evil.dylib ls",
+            "env BASH_ENV=./evil.sh bash -lc 'echo hi'",
+            "env NODE_OPTIONS='--require ./evil.js' node --version",
+            "env EDITOR=evil sed -n '1,10p' README.md",
+        ] {
+            assert!(
+                !is_readonly_command_session_command(&run_cmd(command)),
+                "expected mutating env-injection command: {command}"
+            );
+        }
+
+        // Ordinary env prefixes stay read-only.
+        for command in [
+            "env LANG=C.UTF-8 rg 'TODO' src",
+            "FOO=bar git status",
+            "env FOO=bar git log --oneline",
+            "env -u GIT_CONFIG_COUNT git status",
+            "env -C /repo git status",
+        ] {
+            assert!(
+                is_readonly_command_session_command(&run_cmd(command)),
+                "expected readonly env-prefixed command: {command}"
+            );
+        }
+    }
+
+    #[test]
     fn git_worktree_and_history_plumbing_subcommands_are_readonly() {
         // turn-1030-class exploration: read-only plumbing subcommands the
         // plan gate used to deny outright.

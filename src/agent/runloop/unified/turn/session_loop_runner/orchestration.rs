@@ -19,21 +19,17 @@ use vtcode_core::llm::provider::MessageRole;
 use vtcode_core::session::SessionId;
 use vtcode_core::utils::ansi::MessageStyle;
 use vtcode_core::utils::session_archive;
-use vtcode_core::utils::session_archive::{SessionMessage, SessionProgressArgs};
+use vtcode_core::utils::session_archive::SessionMessage;
 use vtcode_ui::tui::app::ArchivedPromptEntry;
 
-use super::super::{CancelGuard, RECENT_MESSAGE_LIMIT, TerminalCleanupGuard, extract_idle_config};
+use super::super::{CancelGuard, TerminalCleanupGuard, extract_idle_config};
 use super::archive::{create_session_archive, refresh_runtime_debug_context_for_next_session, workspace_archive_label};
-use super::blocked_handoff::{
-    SessionCheckpointOutcome, persist_session_checkpoint, write_blocked_handoff_after_checkpoint,
-};
+use super::blocked_handoff::write_blocked_handoff_after_checkpoint;
 use super::handoff::{
     append_approved_plan_execution_input, apply_primary_agent_tool_policy_overrides,
     build_approved_plan_execution_prompt, report_plan_approval_selection_failure, select_approved_plan_execution_agent,
 };
-use super::metrics::{
-    TurnExecutionMetrics, capture_code_change_snapshot, emit_turn_execution_metrics, estimate_history_bytes,
-};
+use super::metrics::{capture_code_change_snapshot, estimate_history_bytes};
 use super::plan_seed::load_active_plan_seed;
 use super::support::{
     ExecutionSummaryStatus, RefusedTurnRollback, append_transient_turn_notes, approved_plan_execution_summary,
@@ -42,6 +38,7 @@ use super::support::{
     prepare_resume_bootstrap_without_archive, prompt_startup_planning_workflow, remove_transient_system_notes,
     take_pending_resumed_user_prompt,
 };
+use super::turn_tail::{TurnPersistenceTail, complete_turn_persistence_tail};
 use crate::agent::runloop::ResumeSession;
 use crate::agent::runloop::git::{compute_session_code_change_delta, normalize_workspace_path};
 use crate::agent::runloop::model_picker::ModelPickerState;
@@ -91,6 +88,43 @@ fn persist_primary_agent(
     if let Some(archive) = session_archive.as_mut() {
         archive.set_primary_agent(active_primary_agent.active().name());
     }
+}
+
+/// Persist the turn tail when approved-plan agent selection fails.
+///
+/// Selection failure must stay recoverable (no hard session abort). The
+/// iteration may already have produced history (plan-approval handoff after a
+/// finished turn), so metrics/checkpoint run before `continue` instead of being
+/// skipped until the next successful turn.
+#[allow(clippy::too_many_arguments, reason = "turn-tail context is a flat bag of loop locals")]
+async fn record_plan_selection_failure_tail(
+    runtime: &mut AgentRuntime,
+    session_archive: &mut Option<session_archive::SessionArchive>,
+    session_stats: &SessionStats,
+    loaded_skills: &std::sync::Arc<tokio::sync::RwLock<hashbrown::HashMap<String, vtcode_core::skills::types::Skill>>>,
+    next_checkpoint_turn: usize,
+    workspace: &std::path::Path,
+    session_id: &str,
+    vt_cfg: Option<&VTCodeConfig>,
+    timeout_secs: u64,
+) {
+    complete_turn_persistence_tail(TurnPersistenceTail {
+        outcome: "aborted",
+        history_snapshot_bytes: 0,
+        timeout_secs,
+        elapsed_ms: 0,
+        blocked_turn: false,
+        turn_diagnostics: None,
+        runtime,
+        session_archive,
+        next_checkpoint_turn,
+        session_stats,
+        loaded_skills,
+        workspace,
+        session_id,
+        vt_cfg,
+    })
+    .await;
 }
 
 /// Startup planning entry: select the plan primary agent and refresh the
@@ -866,6 +900,19 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             let msg = report_plan_approval_selection_failure(&current_agent, &err);
                             harness_try!(renderer.line(MessageStyle::Error, &msg));
                             pending_approved_plan_execution_input = false;
+                            let session_id = tool_registry.harness_context_snapshot().session_id;
+                            record_plan_selection_failure_tail(
+                                &mut runtime,
+                                &mut session_archive,
+                                &session_stats,
+                                &loaded_skills,
+                                next_checkpoint_turn,
+                                config.workspace.as_path(),
+                                &session_id,
+                                vt_cfg.as_ref(),
+                                harness_config.max_tool_wall_clock_secs,
+                            )
+                            .await;
                             continue;
                         }
                     };
@@ -1218,11 +1265,37 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     false,
                                 )
                                 .await;
+                                let session_id = tool_registry.harness_context_snapshot().session_id;
+                                record_plan_selection_failure_tail(
+                                    &mut runtime,
+                                    &mut session_archive,
+                                    &session_stats,
+                                    &loaded_skills,
+                                    next_checkpoint_turn,
+                                    config.workspace.as_path(),
+                                    &session_id,
+                                    vt_cfg.as_ref(),
+                                    harness_config.max_tool_wall_clock_secs,
+                                )
+                                .await;
                                 continue;
                             }
                             Err(err) => {
                                 let msg = report_plan_approval_selection_failure(requested_agent, &err);
                                 harness_try!(renderer.line(MessageStyle::Error, &msg));
+                                let session_id = tool_registry.harness_context_snapshot().session_id;
+                                record_plan_selection_failure_tail(
+                                    &mut runtime,
+                                    &mut session_archive,
+                                    &session_stats,
+                                    &loaded_skills,
+                                    next_checkpoint_turn,
+                                    config.workspace.as_path(),
+                                    &session_id,
+                                    vt_cfg.as_ref(),
+                                    harness_config.max_tool_wall_clock_secs,
+                                )
+                                .await;
                                 continue;
                             }
                         };
@@ -1770,10 +1843,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .filter(|name| !name.trim().is_empty());
                         // Selection failure must stay recoverable: the plan is
                         // already approved, so aborting the session here would
-                        // leave a half-switched state with no retry path. The
-                        // `continue` intentionally skips this iteration's
-                        // metrics/checkpoint tail: the next successful turn
-                        // persists the same messages, so the skip self-heals.
+                        // leave a half-switched state with no retry path. Run
+                        // the turn-persistence tail before `continue` so a
+                        // finished turn is checkpointed here, not deferred.
                         let execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,
@@ -1787,6 +1859,28 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             Err(err) => {
                                 let msg = report_plan_approval_selection_failure(&requested_agent, &err);
                                 harness_try!(renderer.line(MessageStyle::Error, &msg));
+                                // This site runs after the turn's work. Persist
+                                // the real turn tail before abandoning the
+                                // iteration so the just-finished turn is
+                                // checkpointed (not deferred to the next turn).
+                                persist_primary_agent(&mut session_archive, &active_primary_agent);
+                                complete_turn_persistence_tail(TurnPersistenceTail {
+                                    outcome: "aborted",
+                                    history_snapshot_bytes,
+                                    timeout_secs: harness_config.max_tool_wall_clock_secs,
+                                    elapsed_ms: turn_elapsed.as_millis(),
+                                    blocked_turn: false,
+                                    turn_diagnostics: Some(turn_diagnostics),
+                                    runtime: &mut runtime,
+                                    session_archive: &mut session_archive,
+                                    next_checkpoint_turn,
+                                    session_stats: &session_stats,
+                                    loaded_skills: &loaded_skills,
+                                    workspace: config.workspace.as_path(),
+                                    session_id: &harness_snapshot.session_id,
+                                    vt_cfg: vt_cfg.as_ref(),
+                                })
+                                .await;
                                 continue;
                             }
                         };
@@ -1940,12 +2034,12 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         ),
                     );
                 }
-                emit_turn_execution_metrics(TurnExecutionMetrics {
-                    attempts_made: 1,
-                    retry_count: 0,
-                    history_snapshot_bytes,
-                    timeout_secs: harness_config.max_tool_wall_clock_secs,
-                    elapsed_ms: turn_elapsed.as_millis(),
+                last_activity_time = Some(Instant::now());
+                vtcode_core::tools::cache::FILE_CACHE.check_pressure_and_evict().await;
+                tool_result_cache.write().await.check_pressure_and_evict();
+                let blocked_turn = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { .. });
+                persist_primary_agent(&mut session_archive, &active_primary_agent);
+                let checkpoint_outcome = complete_turn_persistence_tail(TurnPersistenceTail {
                     outcome: match &outcome_result {
                         RunLoopTurnLoopResult::Completed { .. } => "completed",
                         RunLoopTurnLoopResult::Aborted => "aborted",
@@ -1953,73 +2047,21 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         RunLoopTurnLoopResult::Exit => "exit",
                         RunLoopTurnLoopResult::Blocked { .. } => "blocked",
                     },
-                });
-
-                last_activity_time = Some(Instant::now());
-                vtcode_core::tools::cache::FILE_CACHE.check_pressure_and_evict().await;
-                tool_result_cache.write().await.check_pressure_and_evict();
-                let blocked_turn = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { .. });
-                let mut checkpoint_outcome = SessionCheckpointOutcome::without_archive(blocked_turn);
-                persist_primary_agent(&mut session_archive, &active_primary_agent);
-                if let Some(archive) = session_archive.as_ref() {
-                    let messages: Vec<SessionMessage> =
-                        runtime.state.messages.iter().map(SessionMessage::from).collect();
-                    let mut recent_messages: Vec<SessionMessage> = runtime
-                        .state
-                        .messages
-                        .iter()
-                        .rev()
-                        .take(RECENT_MESSAGE_LIMIT)
-                        .map(SessionMessage::from)
-                        .collect();
-                    recent_messages.reverse();
-
-                    let progress_turn = next_checkpoint_turn.saturating_sub(1).max(1);
-                    let distinct_tools = session_stats.sorted_tools();
-                    let skill_names: Vec<String> = loaded_skills.read().await.keys().cloned().collect();
-                    let checkpoint_args = SessionProgressArgs {
-                        total_messages: runtime.state.messages.len(),
-                        distinct_tools,
-                        messages,
-                        recent_messages,
-                        turn_number: progress_turn,
-                        token_usage: None,
-                        max_context_tokens: None,
-                        loaded_skills: Some(skill_names),
-                        turn_diagnostics: Some(turn_diagnostics),
-                    };
-                    checkpoint_outcome = persist_session_checkpoint(archive, checkpoint_args, blocked_turn).await;
-                }
-                let steering_update = {
-                    let (_, steering) = runtime.split_mut();
-                    if checkpoint_outcome.history_checkpoint_succeeded() {
-                        steering.acknowledge_durable_follow_up_intents();
-                    } else if session_archive.is_none() || checkpoint_outcome.history_persistence_disabled() {
-                        steering.release_in_flight_follow_up_intents_without_persistence();
-                    }
-                    vtcode_core::compaction::memory_envelope::SessionMemoryEnvelopeUpdate {
-                        pending_intents: Some(steering.pending_follow_up_intents_snapshot()),
-                        applied_intent_ids: steering.applied_follow_up_intent_ids().iter().cloned().collect(),
-                        ..Default::default()
-                    }
-                };
-                if let Err(err) =
-                    crate::agent::runloop::unified::turn::compaction::refresh_session_memory_envelope_async(
-                        config.workspace.as_path(),
-                        &harness_snapshot.session_id,
-                        vt_cfg.as_ref(),
-                        &runtime.state.messages,
-                        &session_stats,
-                        Some(&steering_update),
-                    )
-                    .await
-                {
-                    tracing::warn!(
-                        error = %err,
-                        session_id = %harness_snapshot.session_id,
-                        "Failed to refresh session memory envelope after turn"
-                    );
-                }
+                    history_snapshot_bytes,
+                    timeout_secs: harness_config.max_tool_wall_clock_secs,
+                    elapsed_ms: turn_elapsed.as_millis(),
+                    blocked_turn,
+                    turn_diagnostics: Some(turn_diagnostics),
+                    runtime: &mut runtime,
+                    session_archive: &mut session_archive,
+                    next_checkpoint_turn,
+                    session_stats: &session_stats,
+                    loaded_skills: &loaded_skills,
+                    workspace: config.workspace.as_path(),
+                    session_id: &harness_snapshot.session_id,
+                    vt_cfg: vt_cfg.as_ref(),
+                })
+                .await;
                 // Tracker-aware outer auto-continue after checkpoint/persistence:
                 // incomplete tracker work + recoverable turn end → queue the next
                 // turn instead of nudging the user. Verification blocks keep their
