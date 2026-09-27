@@ -250,6 +250,9 @@ pub struct Session {
     /// Number of new transcript lines that arrived while the user was scrolled
     /// away from the live bottom edge.
     pub(crate) pending_new_messages: usize,
+    /// Most recent transcript line index that was created or revised.
+    /// Backs the minimal Jump-to-last-change navigation (`Ctrl+End`).
+    pub(crate) last_change_line_idx: Option<usize>,
     should_exit: bool,
     /// Timestamp of the last Ctrl+C press for double-press exit detection.
     pub(crate) last_interrupt_press: Option<Instant>,

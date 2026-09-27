@@ -213,6 +213,7 @@ impl Session {
 
         self.lines.drain(..remove_count);
         self.evicted_message_count += remove_count;
+        self.shift_tracked_change_after_eviction(remove_count);
 
         self.invalidate_transcript_cache();
         self.invalidate_scroll_metrics();

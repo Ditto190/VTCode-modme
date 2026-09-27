@@ -1,4 +1,6 @@
-use super::{PLACEHOLDER_COLOR, Session, measure_text_width, ratatui_color_from_ansi, ratatui_style_from_inline};
+use super::{
+    Action, PLACEHOLDER_COLOR, Session, measure_text_width, ratatui_color_from_ansi, ratatui_style_from_inline,
+};
 use crate::tui::config::constants::ui;
 use crate::tui::ui::tui::types::InlineTextStyle;
 use anstyle::{Color as AnsiColorEnum, Effects};
@@ -1213,6 +1215,8 @@ impl Session {
     /// - While scrolled: `↑ {visible_top}/{total}` shows the top row position.
     /// - When new lines arrived while scrolled: `↓ {N} new` highlights the
     ///   pending content until the user returns to the bottom.
+    /// - When scrolled up with a tracked change: appends
+    ///   `⤓ Jump to last change [key]` hint.
     fn build_scroll_indicator(&self) -> Option<String> {
         if !self.user_scrolled {
             return None;
@@ -1222,11 +1226,15 @@ impl Session {
         let total = self.transcript_rows.max(1) as usize;
         let top = self.scroll_manager.offset().saturating_add(1).min(total);
 
-        let label = if pending > 0 {
+        let mut label = if pending > 0 {
             format!("↓ {} new", pending)
         } else {
             format!("↑ {}/{}", top, total)
         };
+        if self.should_show_jump_to_last_change() {
+            let key_label = self.primary_binding_label(Action::JumpToLastChange).unwrap_or("Ctrl+End");
+            label.push_str(&format!(" · ⤓ Jump to last change [{key_label}]"));
+        }
         Some(label)
     }
 

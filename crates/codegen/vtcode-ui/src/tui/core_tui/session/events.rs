@@ -213,6 +213,28 @@ pub(crate) fn dispatch_rebindable_action(session: &mut Session, action: Action) 
             session.mark_dirty();
             Some(InlineEvent::RequestInlinePromptSuggestion(session.input_manager.content().to_string()))
         }
+        Action::JumpToLastChange => {
+            // Only jump while scrolled away from the change. At the live bottom
+            // the legacy Ctrl+End cursor/scroll behavior wins, so a stale tracked
+            // change cannot turn the key into a no-op.
+            if session.should_show_jump_to_last_change() && session.jump_to_last_change() {
+                Some(InlineEvent::JumpToLastChange)
+            } else if session.user_scrolled {
+                // Scrolled up but no live target (fresh/cleared transcript):
+                // fall back to the legacy bottom jump.
+                session.scroll_to_bottom();
+                Some(InlineEvent::JumpToLastChange)
+            } else if session.input_enabled {
+                // Not scrolled and nothing to jump to: preserve legacy cursor-end
+                // instead of swallowing the key.
+                session.clear_inline_prompt_suggestion();
+                session.move_to_end();
+                session.mark_dirty();
+                None
+            } else {
+                None
+            }
+        }
     }
 }
 

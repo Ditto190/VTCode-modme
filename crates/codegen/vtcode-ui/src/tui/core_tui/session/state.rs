@@ -176,6 +176,7 @@ impl Session {
             Some(current) => Some(current.min(index)),
             None => Some(index),
         };
+        self.record_transcript_change(index);
         self.render_state.request_redraw();
         self.invalidate_transcript_viewport();
     }
@@ -627,7 +628,41 @@ impl Session {
             Some(current) => Some(current.min(index)),
             None => Some(index),
         };
+        self.record_transcript_change(index);
         self.mark_dirty();
+    }
+
+    /// Record a transcript modification for Jump to last change.
+    ///
+    /// `line_idx` is the post-reflow logical line index. Minimal tracking:
+    /// only the most recent index is kept; streaming chunks to the same line
+    /// simply overwrite it.
+    pub(crate) fn record_transcript_change(&mut self, line_idx: usize) {
+        self.last_change_line_idx = Some(line_idx);
+        self.clamp_tracked_change();
+    }
+
+    /// Shift the tracked change index after front-eviction. Drops the target
+    /// when it pointed into the evicted prefix.
+    pub(crate) fn shift_tracked_change_after_eviction(&mut self, remove_count: usize) {
+        if remove_count == 0 {
+            return;
+        }
+        if let Some(idx) = self.last_change_line_idx {
+            self.last_change_line_idx = idx.checked_sub(remove_count);
+        }
+        self.clamp_tracked_change();
+    }
+
+    /// Keep the tracked index inside the live line range, clearing it when the
+    /// transcript is empty. Single source of truth for every tracking writer.
+    fn clamp_tracked_change(&mut self) {
+        let len = self.lines.len();
+        self.last_change_line_idx = match self.last_change_line_idx {
+            Some(_) if len == 0 => None,
+            Some(idx) if idx >= len => Some(len - 1),
+            other => other,
+        };
     }
 
     fn reflow_dirty_index(&mut self, index: usize) -> usize {
@@ -671,6 +706,7 @@ impl Session {
         self.collapsed_pastes.clear();
         self.thinking_runs.clear();
         self.user_scrolled = false;
+        self.last_change_line_idx = None;
         self.scroll_manager.set_offset(0);
         self.invalidate_transcript_cache();
         self.invalidate_scroll_metrics();

@@ -54,7 +54,7 @@ When VT Code is running in alternate-screen mode, the transcript and composer us
 | :-------------- | :------------------------------------------------------------ |
 | `PgUp` / `PgDn` | Scroll the live transcript by half a page.                    |
 | `Ctrl+Home`     | Jump to the oldest transcript content.                        |
-| `Ctrl+End`      | Jump to the latest transcript content and resume auto-follow. |
+| `Ctrl+End`      | While scrolled up, jump to the last change, pinned to the bottom edge (footer shows `⤓ Jump to last change [Ctrl+End]`; `jump_to_last_change` is rebindable). At the live bottom it keeps the normal composer cursor-to-end behavior. |
 | Mouse wheel     | Scroll the live transcript when mouse capture is enabled.     |
 
 ### Diff Preview Navigation

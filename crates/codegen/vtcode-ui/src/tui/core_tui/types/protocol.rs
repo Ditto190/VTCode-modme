@@ -224,6 +224,7 @@ pub enum InlineEvent {
     ScrollLineDown,
     ScrollPageUp,
     ScrollPageDown,
+    JumpToLastChange,
     OpenFileInEditor(String),
     OpenUrl(String),
     LaunchEditor {
