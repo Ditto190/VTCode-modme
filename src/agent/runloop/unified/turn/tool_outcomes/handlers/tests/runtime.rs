@@ -1841,9 +1841,24 @@ async fn registry_exhaustion_latches_runloop_and_blocks_the_next_inspection() {
 
     // Registry markers remain authoritative when an in-progress response is
     // replaced by its terminal update: suppression is counted once per call.
+    // Replace the call that actually carries the marker — the budget exhausts
+    // on whichever read overflows, not necessarily the first one issued.
     let suppressed_before_replacement = diagnostics.suppressed_tool_previews;
+    let suppressed_call_id = outcome_ctx
+        .ctx
+        .working_history
+        .iter()
+        .filter(|message| message.role == uni::MessageRole::Tool)
+        .find(|message| {
+            serde_json::from_str::<serde_json::Value>(&message.content.as_text())
+                .ok()
+                .and_then(|value| value.get("preview_budget_exhausted").and_then(serde_json::Value::as_bool))
+                == Some(true)
+        })
+        .and_then(|message| message.tool_call_id.clone())
+        .expect("registry marker response must exist in working history");
     outcome_ctx.ctx.push_tool_response(
-        "registry-read-0",
+        suppressed_call_id,
         Some(tool_names::READ_FILE),
         json!({
             "total_output_bytes": 80_000,

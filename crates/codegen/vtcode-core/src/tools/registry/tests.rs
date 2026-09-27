@@ -595,7 +595,9 @@ async fn harness_terminal_runs_retain_completed_sessions_until_close() -> Result
         .to_string();
     assert_eq!(response["exit_code"], 0);
     assert_eq!(response["output"].as_str(), Some("vtcode-terminal"));
-    assert_eq!(active_pty_sessions.load(Ordering::Relaxed), 1);
+    // A completed command releases its foreground-PTY count immediately; the
+    // retention contract applies to the session record, not the live count.
+    assert_eq!(active_pty_sessions.load(Ordering::Relaxed), 0);
     assert_eq!(registry.harness_exec_session_completed(&session_id).await?, Some(0));
 
     registry.close_harness_exec_session(&session_id).await?;
