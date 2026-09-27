@@ -39,7 +39,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | `Ctrl+A` / `Ctrl+E` | Current line start / end (buffer edges when single-line; legacy `Cmd+Left`/`Cmd+Right`). |
 | `Ctrl+F` / `Ctrl+B` | `Ctrl+F` moves forward. `Ctrl+B` hands an active foreground command to the background session manager; when no command is active, it runs the configured background-operation action. |
 | `Alt+F` / `Alt+B`, `Alt+Left/Right` | Word forward / back. |
-| `Ctrl+P` / `Ctrl+N`, `Up`/`Down` | History previous / next (`Up`/`Down` move within multiline first). |
+| `Ctrl+P` / `Ctrl+N`, `Up`/`Down` | History previous / next (`Up`/`Down` move within the composer first when it spans more than one visual row; `Ctrl+P`/`Ctrl+N` always traverse history). |
 | `Ctrl+W`, `Alt+D` | Delete previous / next word. |
 | `Ctrl+U` / `Ctrl+K` | Clear current line / delete to line end (legacy `Cmd+Backspace`/`Cmd+Delete`). |
 | `Ctrl+T` | Transpose chars (when Transcript Review is unbound; otherwise opens review). |

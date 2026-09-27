@@ -220,6 +220,16 @@ struct InputLayout {
     cursor_column: u16,
 }
 
+/// Visual-row geometry of the composer input.
+///
+/// Dimension key: `total_rows` is the soft-wrapped row count (at least 1);
+/// `cursor_row` is the 0-based row holding the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InputVisualGeometry {
+    pub(crate) total_rows: usize,
+    pub(crate) cursor_row: usize,
+}
+
 const SHELL_MODE_BORDER_TITLE: &str = " ! Shell mode ";
 const SHELL_MODE_STATUS_HINT: &str = "Shell mode (!): direct command execution";
 
@@ -436,6 +446,86 @@ impl Session {
         }
         let end = (start + visible_limit).min(total_lines);
         (layout, start, end)
+    }
+
+    /// Visual-row geometry of the composer.
+    ///
+    /// Rows are soft-wrapped visual rows from [`Session::input_layout`], not
+    /// logical `\n` lines: a long single-line draft that wraps on screen
+    /// spans multiple visual rows. Returns `None` before the first render
+    /// (no input area yet) or for a zero-width area.
+    pub(crate) fn input_visual_geometry(&self) -> Option<InputVisualGeometry> {
+        let area = self.input_area()?;
+        if area.width == 0 {
+            return None;
+        }
+        let prompt_width = UnicodeWidthStr::width(self.prompt_prefix.as_str()) as u16;
+        let layout = self.input_layout(area.width, prompt_width.min(area.width));
+        Some(InputVisualGeometry {
+            total_rows: layout.buffers.len().max(1),
+            cursor_row: layout.cursor_line_idx,
+        })
+    }
+
+    /// Whether the composer spans more than one visual row.
+    ///
+    /// Falls back to logical lines before the first render (no input area).
+    pub(crate) fn is_multi_row_composer(&self) -> bool {
+        match self.input_visual_geometry() {
+            Some(geometry) => geometry.total_rows > 1,
+            None => !self.input_manager.is_single_line(),
+        }
+    }
+
+    /// Move the cursor up one visual (soft-wrapped) row.
+    ///
+    /// Returns `true` when the cursor moved, `false` at the first row or
+    /// when the input area is unknown.
+    pub(crate) fn move_cursor_up_within_visual(&mut self) -> bool {
+        self.move_cursor_visual_rows(-1)
+    }
+
+    /// Move the cursor down one visual (soft-wrapped) row.
+    ///
+    /// Returns `true` when the cursor moved, `false` at the last row or
+    /// when the input area is unknown.
+    pub(crate) fn move_cursor_down_within_visual(&mut self) -> bool {
+        self.move_cursor_visual_rows(1)
+    }
+
+    fn move_cursor_visual_rows(&mut self, delta: isize) -> bool {
+        let area = match self.input_area() {
+            Some(area) if area.width > 0 => area,
+            _ => return false,
+        };
+        let prompt_width = UnicodeWidthStr::width(self.prompt_prefix.as_str()) as u16;
+        let layout = self.input_layout(area.width, prompt_width.min(area.width));
+        let total = layout.buffers.len();
+        if total == 0 {
+            return false;
+        }
+        let current = layout.cursor_line_idx.min(total - 1);
+        let Some(target_idx) = current.checked_add_signed(delta) else {
+            return false;
+        };
+        if target_idx >= total || target_idx == current {
+            return false;
+        }
+        let desired = layout.cursor_column.saturating_sub(layout.buffers[current].prefix_width);
+        let target = &layout.buffers[target_idx];
+        let mut acc = 0u16;
+        let mut offset = 0usize;
+        for ch in target.text.chars() {
+            if acc >= desired {
+                break;
+            }
+            acc = acc.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(0) as u16);
+            offset += 1;
+        }
+        let char_index = target.char_start.saturating_add(offset);
+        self.input_manager
+            .set_cursor(char_index_to_byte_index(self.input_manager.content(), char_index));
+        true
     }
 
     fn build_input_render(&self, width: u16, height: u16) -> InputRender {

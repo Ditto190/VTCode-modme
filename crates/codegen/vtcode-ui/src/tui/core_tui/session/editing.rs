@@ -510,13 +510,14 @@ impl Session {
         }
     }
 
-    /// Arrow-Up handling for single-line history gating.
+    /// Arrow-Up handling for single-row history gating.
     ///
-    /// Returns `true` when the key was consumed by an intra-line cursor move
-    /// (caller should `mark_dirty()` and emit no history event). Movement is
-    /// by logical lines; wrapped visual rows do not count as separate lines.
-    /// The events layer consumes the key for all multiline input, so a
-    /// `false` return only reaches history traversal for single-line input.
+    /// Returns `true` when the key was consumed by an intra-composer cursor
+    /// move (caller should `mark_dirty()` and emit no history event).
+    /// Movement is by logical lines; wrapped visual rows are handled by
+    /// [`Session::move_up_within_composer`]. The events layer consumes the
+    /// key for all multi-row input, so a `false` return only reaches history
+    /// traversal for single-row input.
     pub(crate) fn move_cursor_up_for_history(&mut self) -> bool {
         if !self.input_enabled {
             return false;
@@ -525,19 +526,56 @@ impl Session {
         self.input_manager.move_cursor_up()
     }
 
-    /// Arrow-Down handling for single-line history gating.
+    /// Arrow-Down handling for single-row history gating.
     ///
-    /// Returns `true` when the key was consumed by an intra-line cursor move
-    /// (caller should `mark_dirty()` and emit no history event). Movement is
-    /// by logical lines; wrapped visual rows do not count as separate lines.
-    /// The events layer consumes the key for all multiline input, so a
-    /// `false` return only reaches history traversal for single-line input.
+    /// Returns `true` when the key was consumed by an intra-composer cursor
+    /// move (caller should `mark_dirty()` and emit no history event).
+    /// Movement is by logical lines; wrapped visual rows are handled by
+    /// [`Session::move_down_within_composer`]. The events layer consumes the
+    /// key for all multi-row input, so a `false` return only reaches history
+    /// traversal for single-row input.
     pub(crate) fn move_cursor_down_for_history(&mut self) -> bool {
         if !self.input_enabled {
             return false;
         }
         self.clear_inline_prompt_suggestion();
         self.input_manager.move_cursor_down()
+    }
+
+    /// Arrow-Up movement within a multi-row composer, honoring soft wraps.
+    ///
+    /// Uses visual-row movement when the input area is known, logical-line
+    /// movement before the first render. Returns `true` when the cursor
+    /// moved; the events layer consumes the key for multi-row input even
+    /// when already at the edge (returns `false` there).
+    pub(crate) fn move_up_within_composer(&mut self) -> bool {
+        if !self.input_enabled {
+            return false;
+        }
+        self.clear_inline_prompt_suggestion();
+        if self.input_visual_geometry().is_some() {
+            self.move_cursor_up_within_visual()
+        } else {
+            self.input_manager.move_cursor_up()
+        }
+    }
+
+    /// Arrow-Down movement within a multi-row composer, honoring soft wraps.
+    ///
+    /// Uses visual-row movement when the input area is known, logical-line
+    /// movement before the first render. Returns `true` when the cursor
+    /// moved; the events layer consumes the key for multi-row input even
+    /// when already at the edge (returns `false` there).
+    pub(crate) fn move_down_within_composer(&mut self) -> bool {
+        if !self.input_enabled {
+            return false;
+        }
+        self.clear_inline_prompt_suggestion();
+        if self.input_visual_geometry().is_some() {
+            self.move_cursor_down_within_visual()
+        } else {
+            self.input_manager.move_cursor_down()
+        }
     }
 
     /// Returns the current history position for status bar display

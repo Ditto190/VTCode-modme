@@ -992,17 +992,12 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 }
                 session.mark_dirty();
                 Some(InlineEvent::EditQueue)
-            } else if !has_control
-                && !has_alt
-                && !has_command
-                && !has_shift
-                && !session.core.input_manager.is_single_line()
-            {
-                // Multiline input consumes Up as an intra-buffer cursor move
-                // (no-op at the first logical line) and never traverses
-                // history. Single-line history follows below; Ctrl+P remains
-                // the unconditional history shortcut.
-                let _ = session.move_cursor_up_for_history();
+            } else if !has_control && !has_alt && !has_command && !has_shift && session.is_multi_row_composer() {
+                // Multi-row composer consumes Up as an intra-buffer visual
+                // move (no-op at the first row) and never traverses history.
+                // Single-row history follows below; Ctrl+P remains the
+                // unconditional history shortcut.
+                let _ = session.move_up_within_composer();
                 session.mark_dirty();
                 None
             } else if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_up_for_history() {
@@ -1021,12 +1016,12 @@ pub(super) fn process_key_with_clipboard_image_reader(
                 session.mark_dirty();
                 return None;
             }
-            if !has_control && !has_alt && !has_command && !has_shift && !session.core.input_manager.is_single_line() {
-                // Multiline input consumes Down as an intra-buffer cursor move
-                // (no-op at the last logical line) and never traverses
-                // history. Single-line history follows below; Ctrl+N remains
-                // the unconditional history shortcut.
-                let _ = session.move_cursor_down_for_history();
+            if !has_control && !has_alt && !has_command && !has_shift && session.is_multi_row_composer() {
+                // Multi-row composer consumes Down as an intra-buffer visual
+                // move (no-op at the last row) and never traverses history.
+                // Single-row history follows below; Ctrl+N remains the
+                // unconditional history shortcut.
+                let _ = session.move_down_within_composer();
                 session.mark_dirty();
                 None
             } else if !has_control && !has_alt && !has_command && !has_shift && session.move_cursor_down_for_history() {

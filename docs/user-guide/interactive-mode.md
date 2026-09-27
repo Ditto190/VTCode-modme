@@ -201,7 +201,7 @@ When a task is already running, VT Code keeps the active turn alive and lets you
 - `Ctrl+B` has foreground-command priority: while a foreground PTY or pipe command is running, it hands that session to the retained background-session manager without killing it. The command keeps its stable `session_id` and can later be waited, polled, written to, inspected, terminated, or closed. If no foreground command is active, `Ctrl+B` keeps its background-subagent behavior and opens the Local Agents setup when that feature is not configured.
 - `Alt+S` opens or focuses the Local Agents drawer.
 - `/jobs` is a compatibility alias for the same drawer. It combines delegated agents, managed background subagents, and promoted or explicitly background raw exec sessions; foreground sessions stay hidden until Ctrl+B promotes them.
-- When the composer is empty and local agents exist, `Down` opens the Local Agents drawer. `Up` and `Down` keep normal history navigation once history traversal is active.
+- When the composer is empty and local agents exist, `Down` opens the Local Agents drawer. `Up` and `Down` keep normal history navigation once history traversal is active, as long as the recalled entry fits on a single row; multi-row entries keep the arrow keys inside the draft (use `Ctrl+P`/`Ctrl+N` to keep traversing).
 - For `exec-session` rows, `Enter` inspects the command and bounded output, `Ctrl+R` toggles stdin focus, `Ctrl+P` previews the snapshot, `Ctrl+K` requests graceful termination, and `Ctrl+X` force-terminates an active session or closes an exited one.
 - In the active-agent and subprocess inspectors, `Esc` closes the overlay, `Ctrl+R` reloads it, `Ctrl+K` requests a graceful stop, and `Ctrl+X` force-cancels the selected subprocess.
 - Foreground `!` commands keep their status in the input/status area, and `Esc` collapses verbose output without killing the job.
@@ -230,7 +230,7 @@ When a task is already running, VT Code keeps the active turn alive and lets you
 VT Code keeps a command history scoped to the working directory. The history resets when you clear it manually or start a new directory session.
 
 - Cleared with the `/clear` command.
-- Use the arrow keys to navigate between entries.
+- Use the arrow keys to navigate between entries when the composer fits on a single row. When the draft wraps or spans multiple rows, `Up`/`Down` move within the draft instead (`Ctrl+P`/`Ctrl+N` still traverse history).
 - History expansion via `!` is disabled by default to prevent accidental execution.
 
 ### Reverse Search with `Ctrl+R`
