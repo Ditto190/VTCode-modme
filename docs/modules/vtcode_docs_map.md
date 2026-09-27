@@ -174,8 +174,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/rust-performance-principles.md`
   - **Content**: Rust-Specific Performance Principles for VT Code
-  - **Topics**: Table of Contents, Core Insight: Rust Is Not Faster Than C/C++ — It Is *Safer While Being Equally Fast*, Destructive Move Semantics, Aliasing Guarantees (`noalias`), Immutable by Default & `const` Semantics
-  - **User Questions**: "What can you tell me about Rust-Specific Performance Principles for VT Code?", "How does Table of Contents work?", "How does Core Insight: Rust Is Not Faster Than C/C++ — It Is *Safer While Being Equally Fast* work?"
+  - **Topics**: Core Insight: Rust Is Not Faster Than C/C++ — It Is *Safer While Being Equally Fast*, Destructive Move Semantics, Aliasing Guarantees (`noalias`), Immutable by Default & `const` Semantics, Bounds Checking & Iterator Elision
+  - **User Questions**: "What can you tell me about Rust-Specific Performance Principles for VT Code?", "How does Core Insight: Rust Is Not Faster Than C/C++ — It Is *Safer While Being Equally Fast* work?", "How does Destructive Move Semantics work?"
 
 - **File**: `docs/development/sandboxing-basics-reference.md`
   - **Content**: Sandboxing Basics — Reference Notes
@@ -503,8 +503,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/guides/terminal-optimization.md`
   - **Content**: VT Code Terminal Optimization Guide
-  - **Topics**: Table of Contents, Theme and Appearance, Profile Icon, Line Break Options, Paste Handling
-  - **User Questions**: "What can you tell me about VT Code Terminal Optimization Guide?", "How does Table of Contents work?", "How does Theme and Appearance work?"
+  - **Topics**: Theme and Appearance, Profile Icon, Line Break Options, Paste Handling, Notification Setup
+  - **User Questions**: "What can you tell me about VT Code Terminal Optimization Guide?", "How does Theme and Appearance work?", "How does Profile Icon work?"
 
 - **File**: `docs/guides/UPDATE_SYSTEM.md`
   - **Content**: VT Code Update System Guide
