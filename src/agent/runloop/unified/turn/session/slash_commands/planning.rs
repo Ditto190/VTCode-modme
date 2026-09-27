@@ -108,6 +108,13 @@ pub(crate) async fn handle_toggle_planning_workflow(
         ctx.header_context.primary_agent = Some(exit_name.clone());
         ctx.header_context.primary_agent_color = color.clone();
         apply_agent_header(ctx.handle, &exit_name, color);
+        tracing::info!(
+            target: "vtcode.planning_workflow",
+            switch_path = "plan_exit",
+            restored_agent = ?restore_agent,
+            header_agent = %exit_name,
+            "Planning workflow finished via /plan off"
+        );
         sync_workspace_trust_prompt_policy(&mut ctx, false).await?;
         ctx.renderer.line(MessageStyle::Info, "Planning workflow finished")?;
         ctx.renderer.line(
@@ -147,9 +154,21 @@ async fn select_plan_primary_agent(ctx: &mut SlashCommandContext<'_>) -> Result<
             ctx.header_context.primary_agent = Some(display_name.clone());
             ctx.header_context.primary_agent_color = color.clone();
             apply_agent_header(ctx.handle, &display_name, color);
+            tracing::info!(
+                target: "vtcode.planning_workflow",
+                switch_path = "plan_entry",
+                agent = %display_name,
+                "Selected plan primary agent via /plan"
+            );
             Ok(())
         }
         Err(err) => {
+            tracing::warn!(
+                target: "vtcode.planning_workflow",
+                switch_path = "plan_entry",
+                error = %err,
+                "Failed to select plan primary agent via /plan; planning workflow stays active"
+            );
             ctx.renderer
                 .line(MessageStyle::Error, &format!("Failed to select plan primary agent: {err}"))?;
             Ok(())
@@ -178,9 +197,22 @@ async fn restore_execution_primary_agent(ctx: &mut SlashCommandContext<'_>, name
             ctx.header_context.primary_agent = Some(display_name.clone());
             ctx.header_context.primary_agent_color = color.clone();
             apply_agent_header(ctx.handle, &display_name, color);
+            tracing::info!(
+                target: "vtcode.planning_workflow",
+                switch_path = "plan_exit",
+                agent = %display_name,
+                "Restored execution primary agent after planning"
+            );
             Ok(())
         }
         Err(err) => {
+            tracing::warn!(
+                target: "vtcode.planning_workflow",
+                switch_path = "plan_exit",
+                requested_agent = %name,
+                error = %err,
+                "Could not restore primary agent after planning; header falls back to active agent"
+            );
             ctx.renderer.line(
                 MessageStyle::Warning,
                 &format!("Could not restore primary agent '{name}' after planning: {err}"),

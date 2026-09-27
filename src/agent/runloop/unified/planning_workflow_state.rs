@@ -60,6 +60,14 @@ pub(crate) struct PlanningWorkflowSessionState {
     fallback_primary_agent: Option<String>,
     /// Telemetry identity for the latest unresolved plan approval request.
     pending_approval: Option<PendingPlanApproval>,
+    /// Deferred full switch to the plan primary agent after a mid-turn
+    /// `start_planning` entry. Must not end the current turn: research is
+    /// supposed to continue in the entry turn. Always consumed at turn end
+    /// (`take_plan_entry_agent_switch`); applied at the turn boundary unless
+    /// a stronger handoff owns it. Applies on Blocked turns too — plan mode
+    /// often blocks tools in the entry turn, and discarding would leave the
+    /// execution agent selected while planning stays active.
+    plan_entry_agent_switch_pending: bool,
 }
 
 /// Maximum number of pseudo-tool-call-markup re-prompts per planning session.
@@ -96,6 +104,7 @@ impl PlanningWorkflowSessionState {
         self.previous_primary_agent = None;
         self.fallback_primary_agent = None;
         self.pending_approval = None;
+        self.plan_entry_agent_switch_pending = false;
     }
 
     pub(crate) fn exit(&mut self) {
@@ -110,6 +119,7 @@ impl PlanningWorkflowSessionState {
         self.previous_primary_agent = None;
         self.fallback_primary_agent = None;
         self.pending_approval = None;
+        self.plan_entry_agent_switch_pending = false;
     }
 
     /// Leave Planning after the artifact/tracker handoff while retaining the
@@ -261,6 +271,21 @@ impl PlanningWorkflowSessionState {
 
     pub(crate) fn interview_forcing_allowed(&self) -> bool {
         !self.is_budget_exhausted() && !self.is_recovery_exhausted() && !self.is_interview_denied()
+    }
+
+    /// Queue a full switch to the plan primary agent for after the current
+    /// turn completes. Mid-turn entry must keep the turn alive so research can
+    /// continue; `ToolPipelineOutcome::pending_primary_agent` would become
+    /// `SwitchPrimaryAgent` and break the turn before any research runs.
+    pub(crate) fn queue_plan_entry_agent_switch(&mut self) {
+        self.plan_entry_agent_switch_pending = true;
+    }
+
+    /// Take the deferred plan-entry agent switch. Returns true once per
+    /// queued entry so the turn-loop can attach it to `TurnLoopOutcome`
+    /// after final-response validation.
+    pub(crate) fn take_plan_entry_agent_switch(&mut self) -> bool {
+        std::mem::take(&mut self.plan_entry_agent_switch_pending)
     }
 
     pub(crate) fn set_previous_primary_agent(&mut self, agent: Option<String>) {
@@ -524,6 +549,43 @@ mod tests {
         assert_eq!(plan_exit_header_name(Some("build"), "auto"), "build");
         assert_eq!(plan_exit_header_name(Some("  "), "auto"), "auto");
         assert_eq!(plan_exit_header_name(None, "build"), "build");
+    }
+
+    #[test]
+    fn plan_entry_agent_switch_is_deferred_and_consumed_once() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::AgentSuggestion);
+        assert!(!state.take_plan_entry_agent_switch());
+
+        // Mid-turn start_planning queues the switch without ending the turn.
+        state.queue_plan_entry_agent_switch();
+        assert!(state.take_plan_entry_agent_switch());
+        // Consumed once: a second take must not re-trigger SwitchPrimaryAgent.
+        assert!(!state.take_plan_entry_agent_switch());
+    }
+
+    #[test]
+    fn plan_entry_agent_switch_cleared_on_enter_and_exit() {
+        let mut state = PlanningWorkflowSessionState::default();
+        state.queue_plan_entry_agent_switch();
+        state.enter(PlanningEntrySource::AgentSuggestion);
+        assert!(!state.take_plan_entry_agent_switch(), "enter must clear a stale deferred switch");
+
+        state.queue_plan_entry_agent_switch();
+        state.exit();
+        assert!(!state.take_plan_entry_agent_switch(), "exit must clear the deferred plan-agent switch");
+    }
+
+    #[test]
+    fn take_plan_entry_agent_switch_always_consumes_even_when_not_applied() {
+        // Stronger handoffs discard the deferred switch at the turn boundary,
+        // but the take itself must still clear the flag so a later turn cannot
+        // fire a stale plan-agent switch mid-implementation.
+        let mut state = PlanningWorkflowSessionState::default();
+        state.enter(PlanningEntrySource::AgentSuggestion);
+        state.queue_plan_entry_agent_switch();
+        assert!(state.take_plan_entry_agent_switch());
+        assert!(!state.take_plan_entry_agent_switch());
     }
 
     #[test]

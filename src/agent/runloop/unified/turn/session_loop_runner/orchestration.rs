@@ -29,7 +29,7 @@ use super::blocked_handoff::{
 };
 use super::handoff::{
     append_approved_plan_execution_input, apply_primary_agent_tool_policy_overrides,
-    build_approved_plan_execution_prompt, select_approved_plan_execution_agent,
+    build_approved_plan_execution_prompt, report_plan_approval_selection_failure, select_approved_plan_execution_agent,
 };
 use super::metrics::{
     TurnExecutionMetrics, capture_code_change_snapshot, emit_turn_execution_metrics, estimate_history_bytes,
@@ -124,9 +124,19 @@ async fn apply_startup_plan_agent_selection(
             let display = active.display_name.clone();
             let color = active.color.clone().filter(|c| !c.trim().is_empty());
             handle.set_primary_agent(Some(display), color);
+            tracing::info!(
+                target: "vtcode.planning_workflow",
+                switch_path = "startup_plan_entry",
+                "Selected plan primary agent at startup planning entry"
+            );
         }
         Err(err) => {
-            tracing::warn!(error = %err, "Startup planning entry could not select plan primary agent");
+            tracing::warn!(
+                target: "vtcode.planning_workflow",
+                switch_path = "startup_plan_entry",
+                error = %err,
+                "Startup planning entry could not select plan primary agent; header will still show Plan"
+            );
             apply_plan_agent_header(handle);
         }
     }
@@ -840,15 +850,25 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         .map(|cfg| cfg.default_primary_agent.as_str())
                         .filter(|name| !name.trim().is_empty());
                     let current_agent = active_primary_agent.active().name().to_string();
-                    let execution_agent = select_approved_plan_execution_agent(
+                    // Selection failure must stay recoverable so an approved
+                    // plan is not lost to a hard session abort.
+                    let execution_agent = match select_approved_plan_execution_agent(
                         &mut active_primary_agent,
                         &tool_registry,
                         &config.workspace,
                         Some(current_agent.as_str()),
                         configured_default,
                     )
-                    .await;
-                    let execution_agent = harness_try!(execution_agent);
+                    .await
+                    {
+                        Ok(agent) => agent,
+                        Err(err) => {
+                            let msg = report_plan_approval_selection_failure(&current_agent, &err);
+                            harness_try!(renderer.line(MessageStyle::Error, &msg));
+                            pending_approved_plan_execution_input = false;
+                            continue;
+                        }
+                    };
                     if current_agent != execution_agent {
                         harness_try!(renderer.line(
                             MessageStyle::Info,
@@ -1201,9 +1221,10 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                 continue;
                             }
                             Err(err) => {
-                                tracing::error!(error = %err, "approved-plan execution agent selection failed");
-                                session_end_reason = SessionEndReason::Error;
-                                break;
+                                let msg =
+                                    report_plan_approval_selection_failure(requested_agent.unwrap_or("(none)"), &err);
+                                harness_try!(renderer.line(MessageStyle::Error, &msg));
+                                continue;
                             }
                         };
                         if requested_agent != Some(resolved_execution_agent.as_str()) {
@@ -1685,10 +1706,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         };
                         match active_primary_agent.select_from_specs(&specs, PLAN_PRIMARY_AGENT_NAME) {
                             Ok(active) => {
-                                let display = active.display_name.clone();
+                                let agent_display = active.display_name.clone();
                                 let color = active.color.clone().filter(|c| !c.trim().is_empty());
-                                apply_primary_agent_tool_policy_overrides(&tool_registry, active_primary_agent.active())
-                                    .await;
+                                apply_primary_agent_tool_policy_overrides(
+                                    &tool_registry,
+                                    active_primary_agent.active(),
+                                )
+                                .await;
                                 sync_primary_agent_permissions(&mut vt_cfg, active_primary_agent.active());
                                 let mut runtime_sync = PrimaryAgentRuntimeSyncContext {
                                     config: &config,
@@ -1704,15 +1728,36 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     pending_mcp_refresh: &mut pending_mcp_refresh,
                                     provider_client: &*provider_client,
                                 };
-                                harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
-                                handle.set_primary_agent(Some(display), color);
+                                if let Err(err) = sync_primary_agent_runtime(&mut runtime_sync).await {
+                                    tracing::error!(
+                                        target: "vtcode.planning_workflow",
+                                        switch_path = "plan_entry",
+                                        requested_agent = %requested_agent,
+                                        resolved_agent = %agent_display,
+                                        error = %err,
+                                        "Plan-entry runtime sync failed; header will still show Plan and planning stays active"
+                                    );
+                                    harness_try!(renderer.line(
+                                        MessageStyle::Warning,
+                                        &format!("Plan mode is active, but runtime sync failed: {err}"),
+                                    ));
+                                }
+                                handle.set_primary_agent(Some(agent_display), color);
                                 tracing::info!(
                                     target: "vtcode.planning_workflow",
+                                    switch_path = "plan_entry",
                                     "Switched primary agent to plan after confirmed planning entry"
                                 );
                                 persist_primary_agent(&mut session_archive, &active_primary_agent);
                             }
                             Err(err) => {
+                                tracing::warn!(
+                                    target: "vtcode.planning_workflow",
+                                    switch_path = "plan_entry",
+                                    requested_agent = %requested_agent,
+                                    error = %err,
+                                    "Could not select plan primary agent after planning entry; planning stays active"
+                                );
                                 harness_try!(renderer.line(
                                     MessageStyle::Warning,
                                     &format!("Could not select plan primary agent after planning entry: {err}"),
@@ -1724,17 +1769,29 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             .as_ref()
                             .map(|cfg| cfg.default_primary_agent.as_str())
                             .filter(|name| !name.trim().is_empty());
-                        let execution_agent = select_approved_plan_execution_agent(
+                        // Selection failure must stay recoverable: the plan is
+                        // already approved, so aborting the session here would
+                        // leave a half-switched state with no retry path.
+                        let execution_agent = match select_approved_plan_execution_agent(
                             &mut active_primary_agent,
                             &tool_registry,
                             &config.workspace,
                             Some(requested_agent.as_str()),
                             configured_default,
                         )
-                        .await;
-                        let execution_agent = harness_try!(execution_agent);
+                        .await
+                        {
+                            Ok(agent) => agent,
+                            Err(err) => {
+                                let msg = report_plan_approval_selection_failure(&requested_agent, &err);
+                                harness_try!(renderer.line(MessageStyle::Error, &msg));
+                                continue;
+                            }
+                        };
                         if execution_agent != requested_agent {
                             tracing::warn!(
+                                target: "vtcode.planning_workflow",
+                                switch_path = "plan_approval",
                                 requested_agent = %requested_agent,
                                 resolved_agent = %execution_agent,
                                 "Approved plan requested a non-executable primary agent; using a write-capable agent"
@@ -1769,12 +1826,25 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                             pending_mcp_refresh: &mut pending_mcp_refresh,
                             provider_client: &*provider_client,
                         };
-                        harness_try!(sync_primary_agent_runtime(&mut runtime_sync).await);
-                        let display = active_primary_agent.active().display_name.clone();
+                        if let Err(err) = sync_primary_agent_runtime(&mut runtime_sync).await {
+                            tracing::error!(
+                                target: "vtcode.planning_workflow",
+                                switch_path = "plan_approval",
+                                agent = %execution_agent,
+                                error = %err,
+                                "Approved-plan runtime sync failed; plan remains approved and can be retried"
+                            );
+                            harness_try!(renderer.line(
+                                MessageStyle::Error,
+                                &format!("Approved plan is ready, but mode switch failed: {err}"),
+                            ));
+                        }
+                        let agent_display = active_primary_agent.active().display_name.clone();
                         let color = active_primary_agent.active().color.clone().filter(|c| !c.trim().is_empty());
-                        handle.set_primary_agent(Some(display), color);
+                        handle.set_primary_agent(Some(agent_display), color);
                         tracing::info!(
                             target: "vtcode.planning_workflow",
+                            switch_path = "plan_approval",
                             agent = %execution_agent,
                             "Switched primary agent after plan approval"
                         );
@@ -2104,11 +2174,21 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         }
                     } else if should_queue {
                         let incomplete = incomplete.unwrap_or_default();
-                        let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
-                        let directive = tracker_continue::tracker_continue_directive(
-                            tracker_continue::TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL,
-                            &incomplete,
-                        );
+                        let (follow_up, directive) = if incomplete.is_empty() {
+                            let reason = blocked_reason.unwrap_or("recoverable block");
+                            (
+                                tracker_continue::recoverable_blocked_continue_follow_up(reason),
+                                tracker_continue::recoverable_blocked_auto_continue_directive(reason),
+                            )
+                        } else {
+                            (
+                                tracker_continue::tracker_continue_follow_up(&incomplete),
+                                tracker_continue::tracker_continue_directive(
+                                    tracker_continue::TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL,
+                                    &incomplete,
+                                ),
+                            )
+                        };
                         let budget_remaining = session_stats.tracker_continuation_turns() < max_turns;
                         let queued = budget_remaining
                             && match runtime.try_queue_follow_up_input(follow_up) {
@@ -2133,7 +2213,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                                     tracing::warn!(%err, "Tracker auto-continue queue full; falling through to turn end");
                                     let _ = renderer.line(
                                         MessageStyle::Info,
-                                        "[i] Tracker auto-continue could not resume automatically; incomplete tracker steps remain. Type `continue` to resume remaining steps.",
+                                        if incomplete.is_empty() {
+                                            "[i] Blocked-end auto-continue could not resume automatically. Type `continue` to retry the request."
+                                        } else {
+                                            "[i] Tracker auto-continue could not resume automatically; incomplete tracker steps remain. Type `continue` to resume remaining steps."
+                                        },
                                     );
                                     tracker_auto_continue_exhausted = true;
                                     false
@@ -2148,7 +2232,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         if !budget_remaining {
                             let _ = renderer.line(
                                 MessageStyle::Info,
-                                "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume remaining steps.",
+                                if incomplete.is_empty() {
+                                    "[i] Blocked-end auto-continue budget exhausted. Type `continue` to retry the request."
+                                } else {
+                                    "[i] Tracker auto-continue budget exhausted; incomplete tracker steps remain. Type `continue` to resume remaining steps."
+                                },
                             );
                             tracker_auto_continue_exhausted = true;
                         }
