@@ -633,7 +633,7 @@ mod tests {
 
         let handle = agent.build_session_handle(acp::SessionId::new("session-1"), thread);
 
-        assert_eq!(primary_agent(&handle), "duck");
+        assert_eq!(primary_agent(&handle), "build");
     }
 
     #[tokio::test]

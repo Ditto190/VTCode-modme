@@ -34,7 +34,7 @@ fn format_model_summary_label(model: &str) -> String {
 
 fn primary_agent_header_label(name: Option<&str>) -> String {
     let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) else {
-        return "Duck".to_string();
+        return "Build".to_string();
     };
     format_model_summary_label(name)
 }
