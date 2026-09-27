@@ -67,6 +67,11 @@ pub(crate) struct PreparedAssistantToolCall {
     is_command_execution: bool,
 }
 
+/// Preflight args_error for non-dispatchable (prose-blob) tool names.
+/// Matched, lowercased, by `preflight_failure_is_llm_mistake`; rewording this
+/// string changes preflight circuit classification.
+pub(crate) const TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR: &str = "tool name is not a clean identifier";
+
 impl PreparedAssistantToolCall {
     pub(crate) fn new(raw_call: uni::ToolCall) -> Self {
         let mut raw_call = raw_call;
@@ -81,7 +86,7 @@ impl PreparedAssistantToolCall {
                 return Self {
                     raw_call,
                     parsed_args: None,
-                    args_error: Some(format!("tool name is not a clean identifier: {name}")),
+                    args_error: Some(format!("{TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR}: {name}")),
                     is_parallel_safe: false,
                     is_command_execution: false,
                 };

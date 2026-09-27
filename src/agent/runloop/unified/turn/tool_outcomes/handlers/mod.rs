@@ -24,7 +24,8 @@ use crate::agent::runloop::unified::tool_routing::{
     PreToolHookPhaseResult, ToolPermissionFlow, ensure_tool_permission_with_call_id,
 };
 use crate::agent::runloop::unified::turn::context::{
-    PreparedAssistantToolCall, TurnHandlerOutcome, TurnLoopResult, TurnProcessingContext,
+    PreparedAssistantToolCall, TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR, TurnHandlerOutcome, TurnLoopResult,
+    TurnProcessingContext,
 };
 pub(crate) use looping::low_signal_family_key;
 use looping::maybe_apply_spool_read_offset_hint;
@@ -86,10 +87,14 @@ pub(crate) fn preflight_failure_is_llm_mistake(error: &str) -> bool {
     {
         return false;
     }
-    lower.contains("tool name is not a clean identifier")
+    // Name-mistake allow-list. Each phrase names its producer so rewording
+    // one side keeps the other discoverable:
+    // - `TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR` from `turn/context.rs`.
+    // - "unknown tool" from vtcode-core `tools/handlers/router.rs`.
+    // - "empty tool name" from the empty-name guard in this file below.
+    lower.contains(TOOL_NAME_NOT_CLEAN_IDENTIFIER_ERROR)
         || lower.contains("unknown tool")
         || lower.contains("empty tool name")
-        || lower.contains("tool call has an empty tool name")
 }
 
 /// Record a malformed or preflight-invalid tool call. When the independent
@@ -849,6 +854,7 @@ pub(crate) async fn validate_tool_call<'a>(
 ) -> Result<ValidationResult> {
     // Early guard: reject empty tool names with a clear error message.
     // This handles malformed LLM responses where tool name is missing.
+    // The "empty tool name" phrase is matched by `preflight_failure_is_llm_mistake`.
     if tool_name.trim().is_empty() {
         let outcome = handle_preflight_failure(
             ctx,
