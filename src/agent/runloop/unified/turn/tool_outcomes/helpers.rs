@@ -286,6 +286,29 @@ pub(crate) fn tracker_continue_follow_up(incomplete: &[String]) -> String {
     )
 }
 
+/// Stable opening for recoverable blocked-end auto-continue when no tracker
+/// items remain (or none were created). Session evidence: build/auto turns
+/// ending with recovery fallback / blocked-tool fuse parked at `Continue…`.
+pub(crate) const RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX: &str =
+    "The previous turn ended on a recoverable block:";
+
+pub(crate) fn recoverable_blocked_continue_follow_up(reason: &str) -> String {
+    format!(
+        "{RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX} {reason} This follow-up is the harness resuming \
+         the work, so no user reply is needed. Retry the requested work with tools; if a policy block \
+         repeated, switch to a read-only approach or ask the user. A status-only recap does not advance \
+         the work. The turn can end when the request is complete, or when a user decision or a \
+         permission/policy block stops progress."
+    )
+}
+
+pub(crate) fn recoverable_blocked_auto_continue_directive(reason: &str) -> String {
+    format!(
+        "Blocked-end auto-continue: the harness queued this turn after a recoverable block ({reason}). \
+         No user reply is needed. Resume the original request; do not restate a status recap as the answer."
+    )
+}
+
 /// Label of the system directive paired with a session-resume tracker continuation.
 pub(crate) const TRACKER_RESUME_DIRECTIVE_LABEL: &str = "Resume continuation";
 /// Label of the system directive paired with an in-session tracker auto-continue.
@@ -370,6 +393,10 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
         || reason.contains("blocked due to repeated")
         || reason.contains("blocked after repeated")
         || reason.contains("without a harness-visible final assistant response")
+        || reason.contains("blocked tool-call limit")
+        || reason.contains("recovery tool-call limit")
+        || reason.contains("consecutive blocked calls")
+        || reason.contains("tool-call safety limit")
         || reason.contains("max tool")
         || reason.contains("per-turn tool")
         || reason.contains("read cap")
@@ -387,6 +414,11 @@ pub(crate) fn tracker_auto_continue_is_recoverable_block(reason: Option<&str>) -
 /// on `Completed` ends with incomplete tracker work.
 /// `final_text_requires_user_input` is true when the final text asks the user
 /// a genuine question/decision — Completed ends must not auto-queue past the ask.
+///
+/// Completed turns require incomplete tracker work. Recoverable **blocked**
+/// ends continue even without tracker items: session evidence shows
+/// recovery-fallback and blocked-tool fuse turns parking at the user
+/// `Continue…` prompt in build/auto when no tracker is active.
 pub(crate) fn should_queue_tracker_auto_continue(
     auto_continue_enabled: bool,
     planning_active: bool,
@@ -404,11 +436,8 @@ pub(crate) fn should_queue_tracker_auto_continue(
     if final_text_is_safety_handoff || final_text_requires_user_input {
         return false;
     }
-    if incomplete_items.is_none_or(|items| items.is_empty()) {
-        return false;
-    }
     if turn_completed {
-        return true;
+        return incomplete_items.is_some_and(|items| !items.is_empty());
     }
     if is_verification_block || blocked_reason.is_none() {
         return false;
@@ -998,6 +1027,78 @@ mod tracker_continue_tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn recoverable_blocked_continues_without_tracker_items() {
+        // Session evidence: build/auto recovery-fallback and fuse trips parked
+        // at Continue when no tracker was active. Recoverable blocked ends must
+        // still auto-continue (bounded by cross_turn_turns).
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some(
+                "Turn ended with a recovery fallback; the requested work was not confirmed. The current plan and task state were retained."
+            ),
+            false,
+            None,
+            8,
+            false,
+            false
+        ));
+        let empty: &[String] = &[];
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("Turn ended with a recovery fallback; the requested work was not confirmed."),
+            false,
+            Some(empty),
+            8,
+            false,
+            false
+        ));
+        // Fuse / no-final shapes (common after read-only policy blocks).
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("Blocked tool-call limit reached after 3 consecutive blocked calls."),
+            false,
+            None,
+            8,
+            false,
+            false
+        ));
+        assert!(should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some(
+                "Turn ended without a harness-visible final assistant response, so successful completion could not be confirmed."
+            ),
+            false,
+            None,
+            8,
+            false,
+            false
+        ));
+        // Completed without tracker still requires incomplete items.
+        assert!(!should_queue_tracker_auto_continue(true, false, true, None, false, None, 8, false, false));
+        // Verification / unknown blocked stay off.
+        assert!(!should_queue_tracker_auto_continue(
+            true,
+            false,
+            false,
+            Some("Turn blocked after repeated unverified assistant responses; verification is still pending."),
+            true,
+            None,
+            8,
+            false,
+            false
+        ));
+        assert!(!should_queue_tracker_auto_continue(true, false, false, None, false, None, 8, false, false));
     }
 
     #[test]

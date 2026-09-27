@@ -2174,11 +2174,21 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         }
                     } else if should_queue {
                         let incomplete = incomplete.unwrap_or_default();
-                        let follow_up = tracker_continue::tracker_continue_follow_up(&incomplete);
-                        let directive = tracker_continue::tracker_continue_directive(
-                            tracker_continue::TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL,
-                            &incomplete,
-                        );
+                        let (follow_up, directive) = if incomplete.is_empty() {
+                            let reason = blocked_reason.unwrap_or("recoverable block");
+                            (
+                                tracker_continue::recoverable_blocked_continue_follow_up(reason),
+                                tracker_continue::recoverable_blocked_auto_continue_directive(reason),
+                            )
+                        } else {
+                            (
+                                tracker_continue::tracker_continue_follow_up(&incomplete),
+                                tracker_continue::tracker_continue_directive(
+                                    tracker_continue::TRACKER_AUTO_CONTINUE_DIRECTIVE_LABEL,
+                                    &incomplete,
+                                ),
+                            )
+                        };
                         let budget_remaining = session_stats.tracker_continuation_turns() < max_turns;
                         let queued = budget_remaining
                             && match runtime.try_queue_follow_up_input(follow_up) {

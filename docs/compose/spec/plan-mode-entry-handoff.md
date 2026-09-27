@@ -124,6 +124,24 @@ True handoffs stay denied (permission / user-input / interview / verification).
 The `start_planning` success message must steer the remainder of the entry turn
 to read-only research so mutations do not burn the fuse.
 
+### C3. Recoverable `Blocked` recovery (every mode)
+
+Session evidence (`.vtcode/sessions`) shows the common stuck end outside plan
+mode is `Turn ended with a recovery fallback; the requested work was not
+confirmed.` (plus blocked-tool fuse / no-final), which parked at `Continue…`
+because `should_queue_tracker_auto_continue` required incomplete tracker items.
+
+Contract:
+
+- Recoverable **blocked** ends auto-continue in build/auto **without** tracker
+  items (bounded by `cross_turn_turns`). Completed turns still require
+  incomplete tracker work.
+- `tracker_auto_continue_is_recoverable_block` recognizes the same fuse/no-final
+  shapes as plan mode.
+- When no tracker items remain, queue `recoverable_blocked_continue_follow_up`
+  (internal-harness quiet prefix) instead of the tracker follow-up.
+- Verification blocks, refusals, permission/user-input handoffs stay denied.
+
 ### D. Out of scope
 
 - Plan validation, tracker distill, or approval policy changes.
@@ -162,3 +180,7 @@ changes beyond existing plan-approval / planning lifecycle events.
   trips, no-final) and `start_planning` steers read-only research —
   acceptance: `plan_mode_auto_continue_recovers_entry_turn_blocked_shapes`
   passes and permission handoffs still never auto-queue (covers: S2 C2)
+- [x] T7: Recoverable blocked ends auto-continue in every mode without tracker
+  items; generic blocked-end follow-up when tracker is empty —
+  acceptance: `recoverable_blocked_continues_without_tracker_items` passes and
+  Completed turns still require incomplete tracker work (covers: S2 C3)

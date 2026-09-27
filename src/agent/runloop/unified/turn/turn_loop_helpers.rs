@@ -544,11 +544,13 @@ fn is_internal_harness_follow_up(input: &str) -> bool {
         BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX, VERIFICATION_AUTO_RECOVERY_PREFIX,
     };
     use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-        PLAN_MODE_AUTO_CONTINUE_MARKER, TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
+        PLAN_MODE_AUTO_CONTINUE_MARKER, RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX,
+        TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
     };
 
     input.starts_with(TRACKER_CONTINUE_FOLLOW_UP_PREFIX)
         || input.starts_with(PLAN_MODE_AUTO_CONTINUE_MARKER)
+        || input.starts_with(RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX)
         || input.starts_with(BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX)
         || input.starts_with(VERIFICATION_AUTO_RECOVERY_PREFIX)
 }
@@ -1141,7 +1143,8 @@ mod tests {
             BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX, VERIFICATION_AUTO_RECOVERY_PREFIX,
         };
         use crate::agent::runloop::unified::turn::tool_outcomes::helpers::{
-            PLAN_MODE_AUTO_CONTINUE_MARKER, TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
+            PLAN_MODE_AUTO_CONTINUE_MARKER, RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX,
+            TRACKER_CONTINUE_FOLLOW_UP_PREFIX,
         };
 
         assert!(is_internal_harness_follow_up(
@@ -1150,6 +1153,9 @@ mod tests {
         ));
         assert!(is_internal_harness_follow_up(
             format!("{PLAN_MODE_AUTO_CONTINUE_MARKER} no validated persisted plan is ready for approval yet.").as_str()
+        ));
+        assert!(is_internal_harness_follow_up(
+            format!("{RECOVERABLE_BLOCKED_CONTINUE_FOLLOW_UP_PREFIX} Turn ended with a recovery fallback.").as_str()
         ));
         assert!(is_internal_harness_follow_up(
             format!("{BACKGROUND_COMPLETION_CONTINUATION_PROMPT_PREFIX} and continue.").as_str()
