@@ -95,3 +95,7 @@ MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.
 
 fix "Tool 'write_stdin' failed: The 'write_stdin' tool reported a execution failure (Execution failed): exec session '
 exec_1fd61528cc9a462b90b9819e' not found. Copy the exact `session_id` from the error message and use it to troubleshoot the issue."
+
+===
+
+the TUI fps and responsiveness should be monitored and optimized to ensure a smooth user experience, especially when handling large files or complex operations. Currently it seems janky and may suffer from frame drops or input lag under heavy load. Consider profiling the TUI rendering pipeline and input handling to identify bottlenecks and implement necessary optimizations. and check for any memory leaks or inefficient rendering patterns that could be contributing to the performance issues. Research ratatui.rs and crossterm for potential improvements and best practices.
