@@ -902,12 +902,13 @@ pub(crate) async fn run_turn_loop(
         ctx.safety_validator.set_limits(max_per_turn, max_per_session);
         ctx.safety_validator.start_turn();
     }
-    // Tracks whether planning-aware budgets are already in effect. When
-    // planning is entered mid-turn (via the enter trigger below), the limits
-    // computed above used `planning_active = false` and must be re-applied so
-    // the planning research floor (120 calls/turn) takes effect immediately
-    // instead of exhausting the smaller build-mode budget (checkpoint turn_804).
-    let mut planning_limits_applied = ctx.is_planning_active();
+    // Tracks the planning flag from the previous loop iteration so Build↔Plan
+    // auto-switches mid-turn re-apply budgets in *both* directions. Raising
+    // only `max(limit, floor)` is not enough: the prior mode may have already
+    // consumed that cap, so the new mode needs a full floor of remaining
+    // headroom from now (user report: explicit Plan works, auto-switch hits
+    // the tool-call limit).
+    let mut last_planning_active = ctx.is_planning_active();
 
     loop {
         if handle_steering_messages(&mut ctx, working_history, &mut result).await? {
@@ -943,31 +944,45 @@ pub(crate) async fn run_turn_loop(
             break;
         }
 
-        // Planning entered mid-turn: re-derive turn config and budgets with
-        // `planning_active = true` so research isn't capped by the smaller
-        // build-mode limits that were computed at turn start.
-        if !planning_limits_applied && ctx.is_planning_active() {
-            planning_limits_applied = true;
-            ctx.plan_session.start_turn();
-            // Planning just became active inside a running turn: promote to
-            // the stage and show the researching row once, since work is live.
-            crate::agent::runloop::unified::planning_workflow_state::mark_planning_turn_started(
-                ctx.renderer,
-                ctx.handle,
-            );
+        // Build↔Plan auto-switch mid-turn: re-derive turn config and grant a
+        // full *remaining* mode floor so the new phase is not starved by the
+        // prior phase's consumption (checkpoint turn_804 + user Build→Plan
+        // tool-call-limit report).
+        let planning_now = ctx.is_planning_active();
+        if planning_now != last_planning_active {
+            last_planning_active = planning_now;
+            if planning_now {
+                ctx.plan_session.start_turn();
+                // Planning just became active inside a running turn: promote to
+                // the stage and show the researching row once, since work is live.
+                crate::agent::runloop::unified::planning_workflow_state::mark_planning_turn_started(
+                    ctx.renderer,
+                    ctx.handle,
+                );
+            }
             turn_config = extract_turn_config(
                 effective_vt_cfg(ctx.vt_cfg, &ctx.live_vt_cfg),
-                true,
+                planning_now,
                 ctx.renderer.supports_inline_ui(),
             );
             if ctx.plan_session.is_interview_denied() {
                 turn_config.request_user_input_enabled = false;
             }
-            current_max_tool_loops = current_max_tool_loops.max(turn_config.max_tool_loops);
-            ctx.harness_state.max_tool_calls =
-                super::turn_loop_helpers::effective_max_tool_calls_for_turn(ctx.harness_state.max_tool_calls, true);
-            let (max_per_turn, max_per_session) =
-                resolve_safety_tool_call_limits(ctx.harness_state.max_tool_calls, turn_config.max_session_turns, true);
+            super::turn_loop_helpers::apply_mode_switch_remaining_tool_call_floor(
+                &mut ctx.harness_state.max_tool_calls,
+                ctx.harness_state.tool_calls,
+                planning_now,
+            );
+            super::turn_loop_helpers::apply_mode_switch_remaining_tool_loop_floor(
+                &mut current_max_tool_loops,
+                step_count,
+                planning_now,
+            );
+            let (max_per_turn, max_per_session) = resolve_safety_tool_call_limits(
+                ctx.harness_state.max_tool_calls,
+                turn_config.max_session_turns,
+                planning_now,
+            );
             ctx.safety_validator.set_limits(max_per_turn, max_per_session);
         }
 
