@@ -134,11 +134,17 @@ Use this loop for any non-trivial performance change. Change one thing at a time
 ## TUI hotpath profiling
 
 The `vtcode-ui` crate is instrumented with [hotpath](https://hotpath.rs/) for
-function timing and allocation attribution. Profile the TUI hot paths with:
+function timing and allocation attribution. Profile the TUI hot paths **from
+this workspace** (the `profiling` feature lives on `vtcode-ui`):
 
 ```bash
-cargo run -p vtcode-ui --example tui_hotpath --features profiling
+# From the repo root of this branch (not a checkout without the feature):
+cargo run -p vtcode-ui --features vtcode-ui/profiling --example tui_hotpath
 ```
+
+If you see `the package 'vtcode-ui' does not contain this feature: profiling`,
+you are in a tree that predates the feature — switch to the branch/worktree
+that has `profiling` in `crates/codegen/vtcode-ui/Cargo.toml`.
 
 This prints a timing + alloc report on exit (reflow, wrap, render, input).
 Root `--features profiling` also forwards `vtcode-ui/profiling` so the full
@@ -161,6 +167,10 @@ TUI invariants found via hotpath (keep these):
   paint via `paint_pre_wrapped_lines` (`Buffer::set_span`) — do not clone
   `Line`s into `Paragraph`. Bottom padding is empty space, not a reason to
   clone/pad the line list.
+- Header content paints via `Buffer::set_span`; the block title is cached
+  (`header_block_title_cache`) and invalidated with `header_lines_cache`.
+  Do not rebuild `Paragraph` + `Block::title(...)` every frame.
+- `build_input_render` is fingerprint-cached (size/content_len/cursor/flags).
 
 ## TUI frame metrics
 

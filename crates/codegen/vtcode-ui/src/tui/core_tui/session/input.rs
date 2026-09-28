@@ -19,7 +19,7 @@ use vtcode_commons::fs::{is_image_path, trim_trailing_image_path_str, unescape_w
 
 use super::utils::line_truncation::truncate_line_with_ellipsis_if_overflow;
 
-struct InputRender {
+pub(super) struct InputRender {
     text: Text<'static>,
     cursor_x: u16,
     cursor_y: u16,
@@ -533,8 +533,50 @@ impl Session {
         true
     }
 
+    /// Build (or reuse) the input paragraph model for the current input state.
+    fn build_input_render(&mut self, width: u16, height: u16) -> InputRender {
+        if width == 0 || height == 0 {
+            return InputRender { text: Text::default(), cursor_x: 0, cursor_y: 0 };
+        }
+
+        let content_len = self.input_manager.content().len();
+        let cursor = self.input_manager.cursor();
+        let compact = self.input_compact_mode;
+        let suggested = self.suggested_prompt_state.active;
+        let key = (width, height, content_len, cursor, compact, suggested);
+
+        if let Some((w, h, len, cur, cmp, sug, cached)) = self.input_render_cache.take() {
+            if (w, h, len, cur, cmp, sug) == key {
+                let render = InputRender {
+                    text: cached.text.clone(),
+                    cursor_x: cached.cursor_x,
+                    cursor_y: cached.cursor_y,
+                };
+                self.input_render_cache = Some((w, h, len, cur, cmp, sug, cached));
+                return render;
+            }
+            // Stale — drop before rebuild.
+        }
+
+        let render = self.build_input_render_uncached(width, height);
+        self.input_render_cache = Some((
+            width,
+            height,
+            content_len,
+            cursor,
+            compact,
+            suggested,
+            InputRender {
+                text: render.text.clone(),
+                cursor_x: render.cursor_x,
+                cursor_y: render.cursor_y,
+            },
+        ));
+        render
+    }
+
     #[cfg_attr(feature = "profiling", hotpath::measure)]
-    fn build_input_render(&self, width: u16, height: u16) -> InputRender {
+    fn build_input_render_uncached(&self, width: u16, height: u16) -> InputRender {
         if width == 0 || height == 0 {
             return InputRender { text: Text::default(), cursor_x: 0, cursor_y: 0 };
         }
@@ -1286,7 +1328,7 @@ impl Session {
 
     /// Build input render data for external widgets
     pub(crate) fn build_input_widget_data(&self, width: u16, height: u16) -> InputWidgetData {
-        let input_render = self.build_input_render(width, height);
+        let input_render = self.build_input_render_uncached(width, height);
         let background_style = self.styles.input_background_style();
 
         InputWidgetData {

@@ -191,9 +191,11 @@ impl Session {
 
             // --- Performance Caching ---
             header_lines_cache: None,
+            header_block_title_cache: None,
             header_height_cache: hashbrown::HashMap::new(),
             queued_inputs_preview_cache: None,
             subprocess_entries_preview_cache: None,
+            input_render_cache: None,
 
             // --- Terminal Title ---
             app_name,

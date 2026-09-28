@@ -70,6 +70,16 @@ impl Session {
         arc
     }
 
+    /// Cached border-block title (rebuilt only when the header cache drops).
+    pub(crate) fn header_block_title_cached(&mut self) -> Line<'static> {
+        if let Some(title) = &self.header_block_title_cache {
+            return title.clone();
+        }
+        let title = self.header_block_title();
+        self.header_block_title_cache = Some(title.clone());
+        title
+    }
+
     pub(crate) fn header_height_from_lines(&mut self, width: u16, lines: &[Line<'static>]) -> u16 {
         if self.appearance.hide_header {
             return 1;
@@ -658,7 +668,7 @@ impl Session {
         style
     }
 
-    fn header_primary_style(&self) -> Style {
+    pub(crate) fn header_primary_style(&self) -> Style {
         let mut style = self.styles.default_style().add_modifier(Modifier::DIM);
         if let Some(primary) = self.theme.primary.or(self.theme.foreground) {
             style = style.fg(ratatui_color_from_ansi(primary));

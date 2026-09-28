@@ -162,6 +162,7 @@ impl Session {
     pub(crate) fn mark_dirty(&mut self) {
         self.render_state.request_redraw();
         self.header_lines_cache = None;
+        self.header_block_title_cache = None;
         self.header_height_cache.clear();
         self.queued_inputs_preview_cache = None;
         self.subprocess_entries_preview_cache = None;
@@ -184,6 +185,7 @@ impl Session {
     /// Invalidate only the header cache (e.g. when provider/model changes)
     pub(crate) fn invalidate_header_cache(&mut self) {
         self.header_lines_cache = None;
+        self.header_block_title_cache = None;
         self.header_height_cache.clear();
         self.render_state.request_redraw();
     }
