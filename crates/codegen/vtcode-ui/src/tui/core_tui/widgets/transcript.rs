@@ -292,6 +292,10 @@ fn is_file_operation_indicator_line(line: &Line<'_>) -> bool {
 /// uncoloured sibling (or two different colours), and full-width fill would
 /// paint the empty pane with the other side's tint.
 fn line_background(line: &Line<'_>) -> Option<Color> {
+    // Fast reject: plain prose has no tinted spans and no side-by-side divider.
+    if !line.spans.iter().any(|span| span.style.bg.is_some()) {
+        return None;
+    }
     let mut first_background = None;
     let mut marker_background = None;
     let mut has_uncolored_divider = false;
