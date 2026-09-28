@@ -155,7 +155,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/performance.md`
   - **Content**: Performance Optimization
-  - **Topics**: Goals, Performance & Simplicity Rules, Local Workflow, Standalone startup benchmark, Profiling Build
+  - **Topics**: Goals, Performance & Simplicity Rules, Local Workflow, TUI frame metrics, Standalone startup benchmark
   - **User Questions**: "What can you tell me about Performance Optimization?", "How does Goals work?", "How does Performance & Simplicity Rules work?"
 
 - **File**: `docs/development/preview-budget-blocked-replan.md`
@@ -1147,6 +1147,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: TUI Diff Auto-Resize and Expand
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about TUI Diff Auto-Resize and Expand?", "How does Report work?", "How does [S1] Problem work?"
+
+- **File**: `docs/compose/spec/tui-fps-responsiveness.md`
+  - **Content**: TUI FPS and Responsiveness
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about TUI FPS and Responsiveness?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/harness/TECH_DEBT_TRACKER.md`
   - **Content**: Tech Debt Tracker

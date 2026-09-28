@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct SessionFrameMetrics {
-    header_lines: Vec<Line<'static>>,
+    header_lines: Arc<Vec<Line<'static>>>,
     pub(crate) header_height: u16,
     pub(crate) input_core_height: u16,
 }
@@ -10,7 +10,7 @@ pub(crate) struct SessionFrameMetrics {
 #[derive(Clone)]
 pub(crate) struct SessionFrameLayout {
     pub(crate) viewport: Rect,
-    header_lines: Vec<Line<'static>>,
+    header_lines: Arc<Vec<Line<'static>>>,
     header_area: Rect,
     pub(crate) main_area: Rect,
     pub(crate) input_area: Rect,
@@ -32,7 +32,7 @@ impl Session {
 
     pub(crate) fn measure_frame(&mut self, viewport: Rect) -> SessionFrameMetrics {
         let header_lines = self.header_lines();
-        let header_height = self.header_height_from_lines(viewport.width, &header_lines);
+        let header_height = self.header_height_from_lines(viewport.width, header_lines.as_slice());
         if header_height != self.header_rows {
             self.header_rows = header_height;
             self.recalculate_transcript_rows();
@@ -93,7 +93,7 @@ impl Session {
         let navigation_area = Rect::new(layout.main_area.x, layout.main_area.y, 0, 0);
 
         SessionWidget::new(self)
-            .header_lines(layout.header_lines.clone())
+            .header_lines_arc(Arc::clone(&layout.header_lines))
             .header_area(layout.header_area)
             .transcript_area(transcript_area)
             .navigation_area(navigation_area)

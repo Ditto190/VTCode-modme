@@ -131,12 +131,15 @@ impl<'a> Widget for TranscriptWidget<'a> {
         // Paint full-width line tints AFTER Paragraph. Paragraph::render
         // first fills the whole area with `default_style` (terminal bg),
         // which would wipe a pre-painted band on cells past the line text.
+        // Precompute per-row tints so the owned lines can move into Paragraph
+        // without a second clone.
         let default_bg = self.session.styles.default_style().bg;
-        let paragraph = Paragraph::new(visible_lines.clone())
+        let row_tints: Vec<Option<Color>> = visible_lines.iter().map(line_background).collect();
+        let paragraph = Paragraph::new(visible_lines)
             .style(self.session.styles.default_style())
             .wrap(Wrap { trim: false });
         paragraph.render(scroll_area, buf);
-        apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines, default_bg);
+        apply_precomputed_line_backgrounds(buf, scroll_area, &row_tints, default_bg);
     }
 }
 
@@ -256,14 +259,19 @@ fn line_background(line: &Line<'_>) -> Option<Color> {
 /// Only cells still on the terminal default background are painted. Word-chip
 /// cells (stronger red/green) must keep their colour so the two-level band
 /// survives the full-width fill.
-fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line<'_>], default_bg: Option<Color>) {
+fn apply_precomputed_line_backgrounds(
+    buf: &mut Buffer,
+    area: Rect,
+    row_tints: &[Option<Color>],
+    default_bg: Option<Color>,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
-    let max_rows = usize::from(area.height).min(lines.len());
-    for (row, line) in lines.iter().take(max_rows).enumerate() {
-        let Some(bg) = line_background(line) else {
+    let max_rows = usize::from(area.height).min(row_tints.len());
+    for (row, bg) in row_tints.iter().take(max_rows).enumerate() {
+        let Some(bg) = bg else {
             continue;
         };
         let y = area.y + row as u16;
@@ -272,10 +280,17 @@ fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line
             // Reset / terminal default → line tint. Any explicit paint
             // (word chip, already-tinted span, etc.) is left alone.
             if cell.bg == Color::Reset || Some(cell.bg) == default_bg {
-                cell.bg = bg;
+                cell.bg = *bg;
             }
         }
     }
+}
+
+/// Fill untinted cells on a diff row with the line tint (test helper).
+#[cfg(test)]
+fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line<'_>], default_bg: Option<Color>) {
+    let row_tints: Vec<Option<Color>> = lines.iter().map(line_background).collect();
+    apply_precomputed_line_backgrounds(buf, area, &row_tints, default_bg);
 }
 
 #[cfg(test)]

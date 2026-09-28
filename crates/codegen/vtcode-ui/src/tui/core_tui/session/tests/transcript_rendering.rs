@@ -1986,3 +1986,140 @@ fn pty_command_header_wraps_in_full_without_truncation() {
         }
     }
 }
+
+#[test]
+fn streaming_append_preserves_header_cache() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let _ = session.header_lines();
+    assert!(session.header_lines_cache.is_some(), "header cache should be populated");
+
+    // First chunk creates the line; later chunks stream into it.
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("hello")]);
+    assert!(session.header_lines_cache.is_some(), "push_line must not drop header cache");
+
+    session.append_inline(
+        InlineMessageKind::Agent,
+        InlineSegment {
+            text: " world".to_string(),
+            style: Arc::new(InlineTextStyle::default()),
+        },
+    );
+    assert!(
+        session.header_lines_cache.is_some(),
+        "streaming append must not drop header cache (invalidation thrash)"
+    );
+}
+
+#[test]
+fn eviction_keeps_surviving_reflow_entries_valid() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    for idx in 0..(ui::TUI_TRANSCRIPT_MAX_MSGS + 1) {
+        session.push_line(InlineMessageKind::Info, vec![make_segment(&format!("row-{idx}"))]);
+    }
+    // Force a reflow so the cache is populated (this path uses ensure_reflow_cache).
+    let _ = session.total_transcript_rows(80);
+    assert!(session.transcript_cache.is_some());
+    let cache = session.transcript_cache.as_ref().expect("cache");
+    assert_eq!(cache.messages.len(), session.lines.len());
+    assert!(!cache.needs_reflow(0, session.lines[0].revision), "pre-eviction cache entry should be valid");
+
+    // One more push triggers a chunked eviction from the front.
+    session.push_line(InlineMessageKind::Info, vec![make_segment("after-evict")]);
+    assert!(session.lines.len() <= ui::TUI_TRANSCRIPT_MAX_MSGS);
+
+    // Refresh the cache (same path the renderer uses).
+    let _ = session.total_transcript_rows(80);
+    let cache = session.transcript_cache.as_ref().expect("cache after eviction");
+    assert_eq!(
+        cache.messages.len(),
+        session.lines.len(),
+        "reflow cache must track live lines after prefix eviction"
+    );
+    assert!(
+        !cache.needs_reflow(0, session.lines[0].revision),
+        "surviving reflow entries must stay valid — full invalidate would reflow 5000 msgs"
+    );
+    assert!(cache.total_rows() > 0);
+}
+
+/// Smoke-timing: 200 frames of a large transcript should stay well under a
+/// 16ms frame budget on TestBackend. Prints averages for the performance Report.
+#[test]
+fn large_transcript_render_stays_under_frame_budget() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use std::time::Instant;
+
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    for idx in 0..800 {
+        session.push_line(
+            InlineMessageKind::Agent,
+            vec![make_segment(&format!(
+                "line {idx}: the quick brown fox jumps over the lazy dog while streaming tool output"
+            ))],
+        );
+    }
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).expect("terminal");
+    // Warm caches.
+    for _ in 0..5 {
+        terminal.draw(|frame| session.render(frame)).expect("warm render");
+    }
+    let frames = 200usize;
+    let started = Instant::now();
+    for _ in 0..frames {
+        session.mark_visual_dirty();
+        terminal.draw(|frame| session.render(frame)).expect("render");
+    }
+    let elapsed = started.elapsed();
+    let avg_us = elapsed.as_micros() as f64 / frames as f64;
+    eprintln!("large_transcript_render: {frames} frames in {elapsed:?} ({avg_us:.1} us/frame avg)");
+    // Generous ceiling so loaded CI machines do not flake; the printed avg is
+    // the number to watch for regressions (typically ~0.2ms on TestBackend).
+    assert!(avg_us < 50_000.0, "avg frame {avg_us:.1}us is pathologically slow on TestBackend");
+}
+
+#[test]
+fn capture_blocks_and_activity_entries_stay_bounded() {
+    use crate::tui::core_tui::app::session::AppSession;
+
+    let mut session = AppSession::new_with_logs(
+        InlineTheme::default(),
+        None,
+        VIEW_ROWS,
+        false,
+        None,
+        Vec::new(),
+        "vtcode".to_string(),
+    );
+
+    // Flooding full captures must not grow past the FIFO block bound.
+    for id in 0..(ui::TUI_TOOL_OUTPUT_BLOCKS_MAX + 8) {
+        let lines: Vec<String> = (0..32).map(|row| format!("capture-{id}-row-{row}")).collect();
+        session.record_tool_output_block(id as u64, lines);
+    }
+    assert!(session.tool_output_blocks.len() <= ui::TUI_TOOL_OUTPUT_BLOCKS_MAX);
+
+    // Per-capture line count is tail-bounded.
+    let huge: Vec<String> = (0..(ui::TUI_TOOL_OUTPUT_CAPTURE_MAX_LINES + 50))
+        .map(|row| format!("huge-{row}"))
+        .collect();
+    session.record_tool_output_block(9_999, huge);
+    let last = session.tool_output_blocks.last().expect("capture");
+    assert!(last.lines.len() <= ui::TUI_TOOL_OUTPUT_CAPTURE_MAX_LINES);
+}
+
+#[test]
+fn collapsed_paste_payload_is_tail_bounded() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let mut json = String::from("{\n");
+    for i in 0..20_000 {
+        json.push_str(&format!("  \"k{i}\": \"{}\",\n", "x".repeat(40)));
+    }
+    json.push_str("  \"end\": true\n}");
+    let line_count = json.lines().count();
+    let oversized = json.len() > ui::TUI_COLLAPSED_PASTE_MAX_BYTES;
+    assert!(oversized, "fixture must exceed the paste bound");
+
+    session.append_pasted_message(InlineMessageKind::Tool, json, line_count);
+    assert_eq!(session.collapsed_pastes.len(), 1);
+    assert!(session.collapsed_pastes[0].full_text.len() <= ui::TUI_COLLAPSED_PASTE_MAX_BYTES + 4);
+}

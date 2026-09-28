@@ -507,7 +507,7 @@ impl Session {
                             self.update_transcript_file_link_hover(mouse_event.column, mouse_event.row)
                         };
                         if mode_hover_changed || close_hover_changed || link_hover_changed {
-                            self.mark_dirty();
+                            self.mark_visual_dirty();
                         }
                     }
                     MouseEventKind::ScrollDown => {
@@ -518,7 +518,7 @@ impl Session {
                             && !self.handle_bottom_panel_scroll(true)
                         {
                             self.scroll_line_down();
-                            self.mark_dirty();
+                            self.mark_visual_dirty();
                         }
                     }
                     MouseEventKind::ScrollUp => {
@@ -529,7 +529,7 @@ impl Session {
                             && !self.handle_bottom_panel_scroll(false)
                         {
                             self.scroll_line_up();
-                            self.mark_dirty();
+                            self.mark_visual_dirty();
                         }
                     }
                     MouseEventKind::Down(crossterm::event::MouseButton::Left) => {

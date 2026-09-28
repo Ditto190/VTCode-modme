@@ -145,7 +145,9 @@ impl Session {
         let index = self.lines.len();
         self.lines
             .push(MessageLine { kind, segments, link_ranges: Vec::new(), revision });
-        self.mark_line_dirty(index);
+        // Transcript-only content change: do not drop header/sidebar caches on
+        // every streamed or appended line (see `mark_transcript_line_dirty`).
+        self.mark_transcript_line_dirty(index);
         self.invalidate_scroll_metrics();
         self.evict_old_messages_if_needed();
 
@@ -215,7 +217,19 @@ impl Session {
         self.evicted_message_count += remove_count;
         self.shift_tracked_change_after_eviction(remove_count);
 
-        self.invalidate_transcript_cache();
+        // Partial cache eviction: surviving reflow entries stay valid; only the
+        // dropped prefix and row-offset table change. Full
+        // `invalidate_transcript_cache` would reflow up to TUI_TRANSCRIPT_MAX_MSGS.
+        if let Some(cache) = self.transcript_cache.as_mut() {
+            cache.evict_prefix(remove_count);
+        }
+        self.invalidate_transcript_viewport();
+        self.request_transcript_clear();
+        if self.first_dirty_line.is_none() {
+            self.first_dirty_line = Some(0);
+        } else if let Some(first) = self.first_dirty_line.as_mut() {
+            *first = first.saturating_sub(remove_count);
+        }
         self.invalidate_scroll_metrics();
         self.adjust_scroll_after_change(previous_max_offset);
     }
@@ -244,7 +258,18 @@ impl Session {
                     style: Arc::new(InlineTextStyle::default()),
                 }],
             );
-            self.collapsed_pastes.push(CollapsedPaste { line_index, full_text: text });
+            // Bound the expand payload so paste floods cannot grow without limit.
+            let max_chars = ui::TUI_COLLAPSED_PASTE_MAX_BYTES;
+            let full_text = if text.len() > max_chars {
+                let mut start = text.len() - max_chars;
+                while start < text.len() && !text.is_char_boundary(start) {
+                    start += 1;
+                }
+                text[start..].to_string()
+            } else {
+                text
+            };
+            self.collapsed_pastes.push(CollapsedPaste { line_index, full_text });
             return;
         }
 
@@ -552,7 +577,8 @@ impl Session {
         }
 
         if appended {
-            self.mark_line_dirty(self.lines.len() - 1);
+            // Streaming chunk into an existing line: keep header/sidebar caches.
+            self.mark_transcript_line_dirty(self.lines.len() - 1);
             self.invalidate_scroll_metrics();
             return;
         }
@@ -572,7 +598,7 @@ impl Session {
                 });
                 line.revision = revision;
             }
-            self.mark_line_dirty(index);
+            self.mark_transcript_line_dirty(index);
             self.invalidate_scroll_metrics();
             return;
         }
@@ -642,7 +668,7 @@ impl Session {
             {
                 line.revision = revision;
             }
-            self.mark_line_dirty(index);
+            self.mark_transcript_line_dirty(index);
             self.invalidate_scroll_metrics();
             return;
         }

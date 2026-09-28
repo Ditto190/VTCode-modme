@@ -69,6 +69,18 @@ pub const TUI_TRANSCRIPT_MAX_MSGS: usize = 5000;
 /// Number of oldest message lines removed per eviction pass.
 pub const TUI_TRANSCRIPT_EVICT_CHUNK: usize = 1000;
 
+/// Maximum full PTY/tool capture lines retained per `ToolOutputBlock` for the
+/// review overlay. Older capture lines are dropped from the head so a flood
+/// cannot grow without bound; the live transcript is already capped separately.
+pub const TUI_TOOL_OUTPUT_CAPTURE_MAX_LINES: usize = 20_000;
+/// Maximum number of retained full tool/PTY capture blocks.
+pub const TUI_TOOL_OUTPUT_BLOCKS_MAX: usize = 64;
+/// Maximum compact-activity rows retained (FIFO).
+pub const TUI_COMPACT_ACTIVITY_MAX_ENTRIES: usize = 512;
+/// Maximum UTF-8 bytes retained for a collapsed paste's expand payload. Larger
+/// pastes keep a tail so review/expand stays bounded under paste floods.
+pub const TUI_COLLAPSED_PASTE_MAX_BYTES: usize = 256 * 1024;
+
 /// Scroll percentage format in status bar
 pub const SCROLL_INDICATOR_FORMAT: &str = "↕";
 

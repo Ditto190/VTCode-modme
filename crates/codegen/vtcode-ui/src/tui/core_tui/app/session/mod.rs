@@ -7,6 +7,7 @@ pub(super) use ratatui::prelude::*;
 pub(super) use ratatui::widgets::Clear;
 pub(super) use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+use crate::tui::config::constants::ui;
 use crate::tui::core_tui::app::types::{
     CompactActivityMetadata, DiffOverlayRequest, DiffPreviewMode, DiffPreviewState, InlineCommand, InlineEvent,
     InlineMessageKind, InlineSegment, LocalAgentsTransientRequest, SlashCommandItem, TaskPanelMetadata,
@@ -562,9 +563,16 @@ impl AppSession {
         self.core.mark_dirty();
     }
 
-    fn record_tool_output_block(&mut self, id: ToolOutputId, lines: Vec<String>) {
+    pub(crate) fn record_tool_output_block(&mut self, id: ToolOutputId, mut lines: Vec<String>) {
         if lines.is_empty() {
             return;
+        }
+        // Bound retained capture size so long-running floods cannot grow the
+        // TUI heap without limit. Keep the tail — that is what review shows.
+        let max_lines = ui::TUI_TOOL_OUTPUT_CAPTURE_MAX_LINES;
+        if lines.len() > max_lines {
+            let drop = lines.len() - max_lines;
+            lines.drain(..drop);
         }
 
         // A non-PTY capture is recorded after the live PTY stream has rendered
@@ -591,6 +599,12 @@ impl AppSession {
             recorded_at_line: Some(recorded_at_line),
             lines,
         });
+        // FIFO bound on capture blocks (oldest dropped first).
+        let max_blocks = ui::TUI_TOOL_OUTPUT_BLOCKS_MAX;
+        if self.tool_output_blocks.len() > max_blocks {
+            let drop = self.tool_output_blocks.len() - max_blocks;
+            self.tool_output_blocks.drain(..drop);
+        }
         self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
         self.core.mark_dirty();
     }
@@ -693,6 +707,11 @@ impl AppSession {
         self.core.invalidate_scroll_metrics();
     }
 
+    /// Visual-only redraw (cursor, scroll, hover). Does not drop header/sidebar caches.
+    pub(crate) fn mark_visual_dirty(&mut self) {
+        self.core.mark_visual_dirty();
+    }
+
     fn append_compact_activity(&mut self, metadata: CompactActivityMetadata) {
         let segments = tool_output_viewer::compact_activity_segments(self, &metadata);
         self.handle_core_command(crate::tui::core_tui::types::InlineCommand::AppendLine {
@@ -702,6 +721,11 @@ impl AppSession {
         let line_index = self.core.lines.len().saturating_sub(1);
         self.compact_activity_entries
             .push(CompactActivityEntry { line_index, metadata: metadata.clone() });
+        let max_entries = ui::TUI_COMPACT_ACTIVITY_MAX_ENTRIES;
+        if self.compact_activity_entries.len() > max_entries {
+            let drop = self.compact_activity_entries.len() - max_entries;
+            self.compact_activity_entries.drain(..drop);
+        }
         self.update_tool_output_anchors(&metadata, line_index);
     }
 

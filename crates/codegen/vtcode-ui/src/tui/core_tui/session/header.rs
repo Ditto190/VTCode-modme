@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::sync::Arc;
 
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -54,9 +55,9 @@ fn line_is_empty(spans: &[Span<'static>]) -> bool {
 }
 
 impl Session {
-    pub(crate) fn header_lines(&mut self) -> Vec<Line<'static>> {
+    pub(crate) fn header_lines(&mut self) -> Arc<Vec<Line<'static>>> {
         if let Some(cached) = &self.header_lines_cache {
-            return cached.clone();
+            return Arc::clone(cached);
         }
 
         let lines = if self.appearance.hide_header {
@@ -64,8 +65,9 @@ impl Session {
         } else {
             vec![self.header_compact_line()]
         };
-        self.header_lines_cache = Some(lines.clone());
-        lines
+        let arc = Arc::new(lines);
+        self.header_lines_cache = Some(Arc::clone(&arc));
+        arc
     }
 
     pub(crate) fn header_height_from_lines(&mut self, width: u16, lines: &[Line<'static>]) -> u16 {
@@ -117,7 +119,7 @@ impl Session {
     #[cfg(test)]
     pub(crate) fn header_height_for_width(&mut self, width: u16) -> u16 {
         let lines = self.header_lines();
-        self.header_height_from_lines(width, &lines)
+        self.header_height_from_lines(width, lines.as_slice())
     }
 
     fn header_block_title(&self) -> Line<'static> {

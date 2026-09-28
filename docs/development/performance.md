@@ -131,6 +131,33 @@ measurements still work when `sccache` is configured but unavailable. Set
 
 Use this loop for any non-trivial performance change. Change one thing at a time so the comparison stays attributable.
 
+## TUI frame metrics
+
+Steady-state TUI jank (frame drops, input lag under streaming tool/PTY load) is
+diagnosed with an opt-in sampler in `vtcode-ui` (`tui/frame_metrics.rs`):
+
+```bash
+VTCODE_TUI_FRAME_METRICS=1 vtcode
+```
+
+When enabled, `render_if_dirty` records draw and input-to-draw durations into a
+256-sample ring and logs a windowed summary (p50/p95/max, slow counts, frames
+drawn/skipped) every 5s on the `vtcode.tui.latency` target. When the flag is
+unset the sampler is a no-op.
+
+Slow thresholds match the existing debug logs: draw ≥ 8ms, input-to-draw ≥ 16ms.
+
+Related TUI invariants to preserve when optimizing the render path:
+
+- Streaming appends use `mark_transcript_line_dirty` (not `mark_dirty`) so header
+  and sidebar caches survive every chunk.
+- Transcript eviction drops only the evicted prefix of the reflow cache
+  (`TranscriptReflowCache::evict_prefix`); do not call full
+  `invalidate_transcript_cache` on eviction.
+- Hover and scroll use `mark_visual_dirty`; only content changes drop caches.
+- Capture retention is bounded (`TUI_TOOL_OUTPUT_CAPTURE_MAX_LINES`,
+  `TUI_TOOL_OUTPUT_BLOCKS_MAX`, `TUI_COMPACT_ACTIVITY_MAX_ENTRIES`).
+
 ## Standalone startup benchmark
 
 Startup policy is defined by the command case and launch state, not by one

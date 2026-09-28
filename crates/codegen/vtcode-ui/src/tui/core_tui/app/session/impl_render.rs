@@ -233,7 +233,13 @@ fn find_expand_action_text_region(buffer: &Buffer, area: Rect, row: u16) -> Vec<
     for start_column in area.x..=area.right().saturating_sub(phrase_width) {
         let matched = phrase_chars.iter().enumerate().all(|(offset, expected)| {
             let column = start_column + offset as u16;
-            column < area.right() && buffer[(column, row)].symbol() == expected.to_string()
+            if column >= area.right() {
+                return false;
+            }
+            // Compare against a stack-encoded UTF-8 buffer — no per-cell String.
+            let mut utf8 = [0u8; 4];
+            let expected_str = expected.encode_utf8(&mut utf8);
+            buffer[(column, row)].symbol() == expected_str
         });
         if matched {
             return vec![Rect::new(start_column, row, phrase_width, 1)];

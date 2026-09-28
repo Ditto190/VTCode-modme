@@ -53,6 +53,20 @@ impl TranscriptReflowCache {
         }
     }
 
+    /// Drop only the first `count` cached messages after a front-eviction of
+    /// the live transcript. Surviving entries keep their reflowed lines (their
+    /// content and revisions are unchanged); only row offsets rebuild.
+    pub(crate) fn evict_prefix(&mut self, count: usize) {
+        let remove = count.min(self.messages.len());
+        if remove == 0 {
+            return;
+        }
+        self.messages.drain(..remove);
+        self.row_offsets.clear();
+        self.total_rows = 0;
+        self.update_row_offsets_from(0);
+    }
+
     /// Checks if a specific message needs reflow based on revision and content hash
     pub fn needs_reflow(&self, index: usize, current_revision: u64) -> bool {
         if index >= self.messages.len() {
