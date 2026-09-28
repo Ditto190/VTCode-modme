@@ -875,7 +875,8 @@ fn is_core_tool_entry(entry: &ToolCatalogEntry, config: &SessionToolsConfig) -> 
     match entry.public_name.as_str() {
         tools::EXEC_COMMAND | tools::WRITE_STDIN | tools::SEARCH_TOOLS | tools::CODE_SEARCH | tools::GREP_FILE => true,
         // Planning keeps its workflow surface on the wire even when MCP tools
-        // force deferral. Read-only inspection is always-eager (above).
+        // force deferral. Structured search (code_search/grep_file) is
+        // always-eager above; read_file/list_files stay planning-only.
         tools::TASK_TRACKER | tools::START_PLANNING if config.planning_active => true,
         tools::READ_FILE | tools::LIST_FILES if config.planning_active => true,
         tools::MCP_SEARCH_TOOLS | tools::MCP_GET_TOOL_DETAILS | tools::MCP_LIST_SERVERS => {

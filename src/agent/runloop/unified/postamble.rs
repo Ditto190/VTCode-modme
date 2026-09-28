@@ -37,6 +37,9 @@ pub(crate) struct ExitData<'a> {
     /// without a configured USD budget so cancelled/failed runs still report
     /// what they cost. `None` means unknown pricing, not free.
     pub total_cost_usd: Option<f64>,
+    /// Terminal outcome label for the stats line (`completed` / `cancelled` /
+    /// `error` / …). Always shown so a cancelled or errored run is labeled.
+    pub end_reason_label: &'static str,
     /// First assembled request composition (harness-tax breakdown). When
     /// present, the stats line surfaces the per-call fixed overhead.
     pub first_call_composition: Option<FirstCallComposition>,
@@ -175,6 +178,10 @@ fn build_stats_line(data: &ExitData<'_>) -> String {
     // cancelled runs — a 17M-token interrupt must not look free.
     if let Some(cost) = data.total_cost_usd {
         stats.push(format!("Cost ${cost:.2}"));
+    }
+
+    if !data.end_reason_label.is_empty() {
+        stats.push(format!("End {}", data.end_reason_label));
     }
 
     if let Some(overhead) = data.first_call_composition {
@@ -332,6 +339,7 @@ mod tests {
             resume_identifier: None,
             budget_limit: None,
             total_cost_usd: None,
+            end_reason_label: "",
             first_call_composition: None,
             session_end_reason: vtcode_core::hooks::SessionEndReason::Completed,
         }
@@ -381,10 +389,12 @@ mod tests {
     fn stats_line_includes_cost_when_pricing_is_known() {
         let data = ExitData {
             total_cost_usd: Some(0.42),
+            end_reason_label: "cancelled",
             ..stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0)
         };
         let line = build_stats_line(&data);
         assert!(line.contains("Cost $0.42"), "missing cost: {line}");
+        assert!(line.contains("End cancelled"), "missing end reason: {line}");
     }
 
     #[test]

@@ -252,7 +252,7 @@ fn retention_evicts_zero_turn_completed_stores_immediately() {
     // Generous age/count: only the empty shell is removed.
     let removed = apply_retention(dir.path(), crate::retention::RetentionPolicy { max_sessions: 50, max_age_days: 30 })
         .expect("retain");
-    assert!(removed >= 1, "empty shell must be evicted: {removed}");
+    assert_eq!(removed, 1, "exactly the empty shell must be evicted");
     assert!(!sessions_root(dir.path()).join("empty-shell").exists());
     assert!(sessions_root(dir.path()).join("worked-session").exists());
 }
@@ -278,6 +278,37 @@ fn evict_zero_turn_completed_store_is_a_noop_for_real_sessions() {
     drop(empty);
     assert!(crate::retention::evict_zero_turn_completed_store(dir.path(), "empty").expect("evict"));
     assert!(!sessions_root(dir.path()).join("empty").exists());
+}
+
+#[test]
+fn evict_zero_turn_completed_store_skips_live_and_pinned() {
+    let dir = TempDir::new().expect("tempdir");
+    // Live: handle still held (liveness flock active).
+    let live = open(dir.path(), "live-empty", DEFAULT_MAX_EVENTS).expect("open live");
+    for e in &sample_zero_turn_completion() {
+        live.append(e).expect("append");
+    }
+    live.complete().expect("complete live");
+    assert!(
+        !crate::retention::evict_zero_turn_completed_store(dir.path(), "live-empty").expect("live noop"),
+        "a live process's store must not be evicted"
+    );
+    assert!(sessions_root(dir.path()).join("live-empty").exists());
+    drop(live);
+
+    // Pinned: retention pin wins even for a 0-turn completed store.
+    let pinned = open(dir.path(), "pinned-empty", DEFAULT_MAX_EVENTS).expect("open pinned");
+    for e in &sample_zero_turn_completion() {
+        pinned.append(e).expect("append");
+    }
+    pinned.complete().expect("complete pinned");
+    drop(pinned);
+    crate::retention::pin_session_retention(&sessions_root(dir.path()).join("pinned-empty"), "test").expect("pin");
+    assert!(
+        !crate::retention::evict_zero_turn_completed_store(dir.path(), "pinned-empty").expect("pin noop"),
+        "a pinned store must not be evicted"
+    );
+    assert!(sessions_root(dir.path()).join("pinned-empty").exists());
 }
 
 #[test]
