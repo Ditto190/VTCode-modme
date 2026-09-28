@@ -62,7 +62,7 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 
 | Context | Keys |
 | :-- | :-- |
-| Agent/file palette | `Up`/`Down` move, `Tab` select best match, `Enter` apply, `Esc` close. |
+| Agent/file palette | `Up`/`Down` move, `Tab` select best match, `Enter` open/apply, `Esc` close. In the `@` file picker, `PageUp`/`PageDown` jump a page, `←` ascends a directory, and `Alt+Enter` references the highlighted folder (`@dir/`) instead of opening it. |
 | Slash palette | `Tab` autocomplete, navigation via slash keys. |
 | History picker (`Ctrl+R`/`Ctrl+S`) | Type to filter, `Tab`/`Esc`/`Enter` accept, `Ctrl+C`/`Ctrl+G` or empty `Backspace` cancel; Ctrl-modified characters are always shortcuts, never search text. |
 | Modal list | `Tab`/`BackTab` move per modal, `Esc`/`Enter` cancel/submit per overlay. Modals and multi-step wizards without a search box number their options when nine or fewer are visible: `1`–`9` jumps to an option (`Enter` still confirms, except wizards confirm immediately). In numbered modals, out-of-range digits are swallowed, never typed into the composer. |

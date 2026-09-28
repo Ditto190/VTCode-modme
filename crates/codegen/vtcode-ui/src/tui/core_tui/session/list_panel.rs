@@ -111,7 +111,7 @@ impl ListPanelLayout {
         split_bottom_list_panel(area, self.fixed_rows, self.desired_list_rows)
     }
 
-    fn visible_list_rows(&self, panel_area: Rect) -> usize {
+    pub(crate) fn visible_list_rows(&self, panel_area: Rect) -> usize {
         panel_area.height.saturating_sub(self.fixed_rows).into()
     }
 

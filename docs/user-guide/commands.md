@@ -165,6 +165,8 @@ Normal forks keep the full archived transcript unchanged.
 VT Code provides several quick actions directly in the chat input for faster workflow:
 
 -   **File Picker (`@`)** — Type `@` anywhere in your input to open the file picker and select files to reference in your message. This allows you to quickly mention files without typing full paths.
+
+    The picker is hierarchical: with an empty query it browses one directory at a time (`Enter` opens a folder, `←` ascends, `PageUp`/`PageDown` jump a page), and once you type it switches to a fuzzy search across the workspace. Rows show a type glyph (`▸` folder, `▧` image, `⚙` executable) and symlinks render their target, with dangling links flagged as `(broken)`. Press `Alt+Enter` on a folder to reference it (`@dir/`) instead of opening it. Files and folders ignored by `.gitignore`, `.vtcodegitignore`, and the built-in sensitive-file list are never shown.
 -   **Slash Commands (`/`)** — Type `/` at the start of input to access all available slash commands including `/files`, `/status`, and many more.
 
 ## Configuration quick reference

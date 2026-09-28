@@ -68,6 +68,7 @@ arboard          = { workspace = true }
 criterion = { workspace = true }
 insta = "1.39"
 serial_test = { workspace = true }
+tempfile = { workspace = true }
 
 [[bench]]
 name = "markdown_render"

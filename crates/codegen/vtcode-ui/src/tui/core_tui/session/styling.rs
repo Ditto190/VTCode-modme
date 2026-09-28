@@ -120,6 +120,15 @@ impl SessionStyles {
         ratatui_style_from_inline(&self.accent_inline_style(), self.theme.foreground)
     }
 
+    /// Get the warning style (amber token, falling back to the theme foreground).
+    ///
+    /// Reuses the canonical [`Self::text_fallback`] chain for `Warning` so this
+    /// style cannot drift from the semantic warning color.
+    pub(crate) fn warning_style(&self) -> Style {
+        let color = self.text_fallback(InlineMessageKind::Warning);
+        ratatui_style_from_inline(&InlineTextStyle { color, ..InlineTextStyle::default() }, self.theme.foreground)
+    }
+
     pub(crate) fn transcript_link_style(&self) -> Style {
         let style = InlineTextStyle {
             color: self.theme.tool_accent.or(self.theme.primary).or(self.theme.foreground),
@@ -204,5 +213,44 @@ impl SessionStyles {
     /// glanceable while the muted tone avoids clutter.
     pub(crate) fn message_divider_style(&self, _kind: InlineMessageKind) -> Style {
         self.dimmed_border_style(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anstyle::Color as AnsiColorEnum;
+    use ratatui::style::Color;
+
+    use super::*;
+
+    #[test]
+    fn warning_style_prefers_explicit_theme_warning() {
+        let theme = InlineTheme {
+            warning: Some(AnsiColorEnum::Rgb(RgbColor(0xAB, 0xCD, 0xEF))),
+            foreground: Some(AnsiColorEnum::Rgb(RgbColor(0x11, 0x22, 0x33))),
+            ..InlineTheme::default()
+        };
+
+        assert_eq!(
+            SessionStyles::new(theme).warning_style().fg,
+            Some(Color::Rgb(0xAB, 0xCD, 0xEF)),
+            "explicit warning token must win"
+        );
+    }
+
+    #[test]
+    fn warning_style_falls_back_to_amber_not_foreground() {
+        // With no warning token, the canonical `text_fallback(Warning)` chain
+        // supplies amber — not the theme foreground.
+        let theme = InlineTheme {
+            foreground: Some(AnsiColorEnum::Rgb(RgbColor(0x11, 0x22, 0x33))),
+            ..InlineTheme::default()
+        };
+
+        assert_eq!(
+            SessionStyles::new(theme).warning_style().fg,
+            Some(Color::Yellow),
+            "missing warning token must fall back to amber"
+        );
     }
 }

@@ -190,31 +190,65 @@ pub(crate) fn sample_local_agent_entry_with_id(
 }
 
 pub(crate) fn load_app_file_palette(session: &mut AppSession, files: Vec<String>, workspace: PathBuf) {
-    use crate::tui::core_tui::app::session::file_palette::DirLister;
+    use crate::tui::core_tui::app::session::file_palette::{DirEntryInfo, DirLister};
     use std::path::Path;
 
     // Synthesize a directory lister from the flat file list so navigation works
-    // in tests (the paths do not exist on disk). A child is a directory when some
-    // other entry is nested beneath it.
+    // in tests (the paths do not exist on disk). Directories are inferred from
+    // the ancestors of the listed files, so `src/main.rs` yields a `src/` child.
     let dir_lister = DirLister::new({
         let files = files.clone();
         move |dir: &Path| {
             let dir_str = dir.display().to_string();
-            let mut out: Vec<(PathBuf, bool)> = Vec::new();
+            let mut out: Vec<DirEntryInfo> = Vec::new();
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            let mut push = |path: PathBuf, is_dir: bool, seen: &mut std::collections::HashSet<String>| {
+                let key = path.display().to_string();
+                if seen.insert(key) {
+                    out.push(DirEntryInfo {
+                        path,
+                        is_dir,
+                        kind: if is_dir {
+                            crate::tui::core_tui::app::session::file_palette::FileKind::Directory
+                        } else {
+                            crate::tui::core_tui::app::session::file_palette::FileKind::Other
+                        },
+                        symlink_target: None,
+                        symlink_broken: false,
+                    });
+                }
+            };
+
             for f in &files {
                 let p = Path::new(f);
-                let Some(parent) = p.parent() else {
-                    continue;
-                };
-                if parent.display().to_string() != dir_str {
-                    continue;
+
+                // Every ancestor directory that is an immediate child of `dir`.
+                let mut ancestor = p.parent();
+                while let Some(a) = ancestor {
+                    let a_str = a.display().to_string();
+                    if a.parent().map(|pp| pp.display().to_string()).as_deref() == Some(dir_str.as_str()) {
+                        push(PathBuf::from(&a_str), true, &mut seen);
+                    }
+                    if a_str == dir_str {
+                        break;
+                    }
+                    ancestor = a.parent();
                 }
-                let is_dir = files.iter().any(|other| other != f && other.starts_with(&format!("{f}/")));
-                out.push((PathBuf::from(f), is_dir));
+
+                // The file itself when it is an immediate child of `dir`.
+                if p.parent().map(|pp| pp.display().to_string()).as_deref() == Some(dir_str.as_str()) {
+                    push(PathBuf::from(f), false, &mut seen);
+                }
             }
+
             out.sort_by(|a, b| {
-                b.1.cmp(&a.1)
-                    .then_with(|| a.0.to_string_lossy().to_lowercase().cmp(&b.0.to_string_lossy().to_lowercase()))
+                b.is_dir.cmp(&a.is_dir).then_with(|| {
+                    a.path
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .cmp(&b.path.to_string_lossy().to_lowercase())
+                })
             });
             out
         }
