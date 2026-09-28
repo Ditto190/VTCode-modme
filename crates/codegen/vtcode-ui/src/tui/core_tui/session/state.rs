@@ -1001,6 +1001,7 @@ impl Session {
 
         // Invalidate visible lines cache if offset actually changed
         if self.scroll_manager.offset() != previous_offset {
+            self.user_scrolled = self.scroll_manager.offset() != 0;
             self.invalidate_transcript_viewport();
             // Compute actual row delta for selection adjustment.
             // Inverted model: increasing offset → content moves down → positive row delta.

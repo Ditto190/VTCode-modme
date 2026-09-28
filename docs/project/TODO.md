@@ -80,3 +80,18 @@ add /config option to let user copy on click on TUI or copy manually from keyboa
 ===
 
 implement /config options searchs functionality to allow users to quickly find and access specific configuration options within the TUI. Ensure the search is responsive and provides relevant results as the user types.
+
+===
+
+critical: check session: session-vtcode-20260928T023416Z_908014-03754. it still being blocked during execution.
+
+[!] Planning recovery: tool preview budget exhausted; synthesizing plan from collected evidence.
+
+Execution summary: blocked; changed files: none recorded; verification: see the final response and task tracker;
+blockers: the approved-plan turn produced no file changes, so implementation completion was not confirmed.
+MCP tools ready (3 registered). Use /mcp tools to inspect the catalog.
+
+---
+
+fix "Tool 'write_stdin' failed: The 'write_stdin' tool reported a execution failure (Execution failed): exec session '
+exec_1fd61528cc9a462b90b9819e' not found. Copy the exact `session_id` from the error message and use it to troubleshoot the issue."
