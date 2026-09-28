@@ -247,6 +247,30 @@ fn agent_messages_use_zero_indent_prose() {
 }
 
 #[test]
+fn labeled_agent_message_continuations_align_under_the_body() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.labels.agent = Some("Assistant: ".to_string());
+    session.push_line(
+        InlineMessageKind::Agent,
+        vec![make_segment(
+            "This response wraps so its continuation should start beneath the message body.",
+        )],
+    );
+
+    let lines = session.reflow_transcript_lines(28);
+    let content_lines: Vec<String> = lines.iter().map(line_text).filter(|text| !text.trim().is_empty()).collect();
+    let first = content_lines.first().expect("first labeled message row");
+    let second = content_lines.get(1).expect("wrapped continuation row");
+    let prefix_width = "Assistant: ".chars().count();
+
+    assert!(first.starts_with("Assistant: This"), "role label should remain on the first row: {first:?}");
+    assert!(
+        second.starts_with(&" ".repeat(prefix_width)),
+        "continuation should align under the message body: {second:?}",
+    );
+}
+
+#[test]
 fn agent_prose_has_no_bullet_gap() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     session.push_line(InlineMessageKind::Agent, vec![make_segment("Response")]);
@@ -1257,6 +1281,37 @@ fn tool_command_header_does_not_use_accent_tool_body_as_fallback() {
     assert_eq!(command_span.style.fg, Some(Color::Rgb(0xCC, 0xCC, 0xCC)));
     assert!(!verb_span.style.add_modifier.contains(Modifier::DIM));
     assert!(!command_span.style.add_modifier.contains(Modifier::DIM));
+}
+
+#[test]
+fn tool_actions_use_theme_semantic_colors_instead_of_terminal_palette_colors() {
+    let primary = AnsiColorEnum::Rgb(RgbColor(0x70, 0x90, 0xB0));
+    let tool_accent = AnsiColorEnum::Rgb(RgbColor(0xD0, 0x70, 0x60));
+    let mut session = Session::new(
+        InlineTheme {
+            foreground: Some(AnsiColorEnum::Rgb(RgbColor(0xF0, 0xF0, 0xF0))),
+            primary: Some(primary),
+            tool_accent: Some(tool_accent),
+            ..InlineTheme::default()
+        },
+        None,
+        VIEW_ROWS,
+    );
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• Write file.rs")]);
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• git status")]);
+    session.push_line(InlineMessageKind::Tool, vec![make_segment("• version_control status")]);
+
+    let rendered = session.reflow_transcript_lines(80);
+    for (action_name, expected_color) in [("Write", tool_accent), ("git", primary), ("version_control", primary)] {
+        let action = rendered
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == action_name)
+            .unwrap_or_else(|| panic!("tool action span {action_name:?}"));
+
+        assert_eq!(action.style.fg, Some(ratatui_color_from_ansi(expected_color)));
+        assert!(action.style.add_modifier.contains(Modifier::BOLD));
+    }
 }
 
 #[test]

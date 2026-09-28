@@ -32,6 +32,10 @@ pub const INLINE_CONTENT_MIN_WIDTH: u16 = 48;
 pub const INLINE_STACKED_NAVIGATION_PERCENT: u16 = INLINE_NAVIGATION_PERCENT;
 pub const INLINE_SCROLLBAR_EDGE_PADDING: u16 = 1;
 pub const INLINE_TRANSCRIPT_BOTTOM_PADDING: u16 = 2;
+pub(crate) const INLINE_TRANSCRIPT_WIDE_GUTTER_MIN_WIDTH: u16 = 120;
+pub(crate) const INLINE_TRANSCRIPT_STANDARD_GUTTER_MIN_WIDTH: u16 = 60;
+pub(crate) const INLINE_TRANSCRIPT_WIDE_GUTTER_COLUMNS: u16 = 2;
+pub(crate) const INLINE_TRANSCRIPT_STANDARD_GUTTER_COLUMNS: u16 = 1;
 
 /// Effective transcript bottom padding rows for a viewport, clamped so at
 /// least one content row stays visible. Single source of truth for the four

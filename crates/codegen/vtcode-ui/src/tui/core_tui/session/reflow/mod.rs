@@ -489,20 +489,23 @@ impl Session {
             text
         };
         let first_line_prefix_width = UnicodeWidthStr::width(first_line_prefix_text.as_str());
+        let continuation_prefix = " ".repeat(first_line_prefix_width);
         let mut lines = Vec::with_capacity(wrapped.len());
         for (index, (mut line, mut line_links)) in wrapped.into_iter().zip(explicit_links).enumerate() {
             let mut spans = Vec::new();
-            // Continuation rows start at column 0: agent prose (no bullet),
-            // tool, and PTY rows share one left edge; tool/PTY headers keep
-            // their own `•` markers while agent text reads as plain prose.
+            // Keep wrapped prose aligned under its body when a role label or
+            // other first-line prefix is present. The default empty prefix
+            // keeps ordinary assistant prose flush with the transcript edge.
             let (prefix_len, prefix_col_width) = if index == 0 {
                 (first_line_prefix_text.len(), first_line_prefix_width)
             } else {
-                (0, 0)
+                (continuation_prefix.len(), first_line_prefix_width)
             };
             if index == 0 {
                 spans.append(&mut prefix_spans);
                 spans.push(Span::raw(left_padding));
+            } else if !continuation_prefix.is_empty() {
+                spans.push(Span::raw(continuation_prefix.clone()));
             }
             spans.append(&mut line.spans);
             if spans.is_empty() {

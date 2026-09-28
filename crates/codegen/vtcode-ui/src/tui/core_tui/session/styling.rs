@@ -27,6 +27,7 @@ fn normalize_tool_name(tool_name: &str) -> &'static str {
         "list" | "ls" | "dir" | tools::LIST_FILES => "list",
         "read" | "cat" | "file" | tools::READ_FILE => "read",
         "write" | "edit" | "save" | "insert" | tools::EDIT_FILE => "write",
+        "git" | "version_control" => "git",
         "run" | "command" | "bash" | "sh" | "ran" => "run",
         _ => "other",
     }
@@ -39,12 +40,7 @@ pub(crate) fn tool_inline_style_for(tool_name: &str, theme: &InlineTheme) -> Inl
     let mut style = InlineTextStyle::default().bold();
 
     style.color = match normalized_name {
-        "read" => Some(AnsiColor::Cyan.into()),
-        "list" => Some(AnsiColor::Green.into()),
-        "search" => Some(AnsiColor::Cyan.into()),
-        "write" => Some(AnsiColor::Magenta.into()),
-        "run" => Some(AnsiColor::Red.into()),
-        "git" | "version_control" => Some(AnsiColor::Cyan.into()),
+        "read" | "list" | "search" | "git" => theme.primary.or(theme.tool_accent).or(theme.foreground),
         _ => theme.tool_accent.or(theme.primary).or(theme.foreground),
     };
 

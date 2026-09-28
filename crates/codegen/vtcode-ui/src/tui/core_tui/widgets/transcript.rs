@@ -61,11 +61,7 @@ impl<'a> Widget for TranscriptWidget<'a> {
             return;
         }
 
-        // No left gutter – transcript content is flush with the terminal edge.
-        // Previously a `Block` with a border added a 1-column inset on all sides,
-        // which produced the left-blank before bullets/warnings seen in the
-        // screenshot. Rendering without a border makes `inner == area`.
-        let inner = area;
+        let inner = transcript_content_area(area);
 
         if inner.height == 0 || inner.width == 0 {
             self.session.set_transcript_area(None);
@@ -132,11 +128,50 @@ impl<'a> Widget for TranscriptWidget<'a> {
         // first fills the whole area with `default_style` (terminal bg),
         // which would wipe a pre-painted band on cells past the line text.
         let default_bg = self.session.styles.default_style().bg;
+        let default_style = self.session.styles.default_style();
         let paragraph = Paragraph::new(visible_lines.clone())
-            .style(self.session.styles.default_style())
+            .style(default_style)
             .wrap(Wrap { trim: false });
         paragraph.render(scroll_area, buf);
         apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines, default_bg);
+        clear_transcript_gutters(area, inner, default_style, buf);
+    }
+}
+
+fn transcript_content_area(area: Rect) -> Rect {
+    let gutter = transcript_horizontal_gutter(area.width);
+    Rect::new(
+        area.x.saturating_add(gutter),
+        area.y,
+        area.width.saturating_sub(gutter.saturating_mul(2)),
+        area.height,
+    )
+}
+
+fn transcript_horizontal_gutter(width: u16) -> u16 {
+    if width >= ui::INLINE_TRANSCRIPT_WIDE_GUTTER_MIN_WIDTH {
+        ui::INLINE_TRANSCRIPT_WIDE_GUTTER_COLUMNS
+    } else if width >= ui::INLINE_TRANSCRIPT_STANDARD_GUTTER_MIN_WIDTH {
+        ui::INLINE_TRANSCRIPT_STANDARD_GUTTER_COLUMNS
+    } else {
+        0
+    }
+}
+
+fn clear_transcript_gutters(area: Rect, content_area: Rect, style: Style, buf: &mut Buffer) {
+    let left_width = content_area.x.saturating_sub(area.x);
+    if left_width > 0 {
+        let left = Rect::new(area.x, area.y, left_width, area.height);
+        Clear.render(left, buf);
+        buf.set_style(left, style);
+    }
+
+    let right_x = content_area.right();
+    let right_width = area.right().saturating_sub(right_x);
+    if right_width > 0 {
+        let right = Rect::new(right_x, area.y, right_width, area.height);
+        Clear.render(right, buf);
+        buf.set_style(right, style);
     }
 }
 
@@ -451,6 +486,84 @@ mod tests {
 
     fn row_text(buf: &Buffer, area: Rect, row: u16) -> String {
         (area.left()..area.right()).map(|x| buf[(x, row)].symbol()).collect::<String>()
+    }
+
+    #[test]
+    fn transcript_gutters_adapt_to_available_width() {
+        assert_eq!(
+            transcript_content_area(Rect::new(7, 3, 120, 12)),
+            Rect::new(9, 3, 116, 12),
+            "wide terminals get a modest two-column gutter",
+        );
+        assert_eq!(
+            transcript_content_area(Rect::new(7, 3, 80, 12)),
+            Rect::new(8, 3, 78, 12),
+            "standard terminals use a smaller gutter",
+        );
+        assert_eq!(
+            transcript_content_area(Rect::new(7, 3, 48, 12)),
+            Rect::new(7, 3, 48, 12),
+            "very narrow terminals keep the full width",
+        );
+
+        let area = Rect::new(0, 0, 120, 6);
+        let mut session = Session::new(InlineTheme::default(), None, 12);
+        session.push_line(InlineMessageKind::Agent, vec![segment("wide transcript")]);
+        let mut buf = Buffer::empty(area);
+        for x in [0, 1, 118, 119] {
+            buf[(x, 0)].set_symbol("X");
+        }
+
+        TranscriptWidget::new(&mut session).render(area, &mut buf);
+
+        assert_eq!(session.transcript_area(), Some(Rect::new(2, 0, 116, 6)));
+        assert_eq!(buf[(0, 0)].symbol(), " ", "left gutter must stay clear");
+        assert_eq!(buf[(1, 0)].symbol(), " ", "left gutter must stay clear");
+        assert_eq!(buf[(2, 0)].symbol(), "w", "message text starts inside the gutter");
+        assert_eq!(buf[(118, 0)].symbol(), " ", "right gutter must stay clear");
+        assert_eq!(buf[(119, 0)].symbol(), " ", "right gutter must stay clear");
+    }
+
+    #[test]
+    fn transcript_content_area_keeps_link_and_render_coordinates_aligned() {
+        let area = Rect::new(10, 2, 80, 8);
+        let content_area = transcript_content_area(area);
+        let url = "https://example.com/docs";
+        let mut session = Session::new(InlineTheme::default(), None, 12);
+        session.push_line(InlineMessageKind::Agent, vec![segment(&format!("Open {url}"))]);
+        let mut buf = Buffer::empty(area);
+
+        TranscriptWidget::new(&mut session).render(area, &mut buf);
+
+        assert_eq!(session.transcript_area(), Some(content_area));
+        let link_start = content_area.x + "Open ".len() as u16;
+        assert_eq!(buf[(link_start, area.y)].symbol(), "h");
+        assert!(
+            session.update_transcript_file_link_hover(link_start, area.y),
+            "the rendered URL cell should hit the matching transcript link target",
+        );
+        assert_eq!(row_text(&buf, area, area.y).chars().next(), Some(' '));
+    }
+
+    #[test]
+    fn very_narrow_transcript_keeps_wrapped_content_inside_the_viewport() {
+        let area = Rect::new(0, 0, 40, 6);
+        let mut session = Session::new(InlineTheme::default(), None, 12);
+        session.push_line(
+            InlineMessageKind::Agent,
+            vec![segment("alpha beta gamma delta epsilon zeta eta theta iota kappa")],
+        );
+        let mut buf = Buffer::empty(area);
+
+        TranscriptWidget::new(&mut session).render(area, &mut buf);
+
+        assert_eq!(session.transcript_area(), Some(area));
+        let rows: Vec<String> = (area.y..area.bottom())
+            .map(|row| row_text(&buf, area, row).trim_end().to_string())
+            .filter(|row| !row.is_empty())
+            .collect();
+        assert!(rows.len() >= 2, "narrow transcript should wrap into multiple rows: {rows:?}");
+        assert!(rows.iter().all(|row| row.chars().count() <= usize::from(area.width)));
     }
 
     #[test]
