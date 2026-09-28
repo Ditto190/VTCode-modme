@@ -1407,7 +1407,16 @@ pub fn resolve_compaction_threshold_with_reserve(
         return configured;
     }
     let prompt_budget = context_size.saturating_sub(reserved_output_tokens).max(1) as u64;
-    Some(configured.map_or(prompt_budget, |value| value.min(prompt_budget)))
+    // Default trigger is a ratio of the prompt budget so long runs compact
+    // before the expensive near-full zone (HarnessTax / session-efficiency).
+    // An explicit `auto_compaction_threshold_tokens` still wins, capped at the
+    // prompt budget so compaction never exceeds the usable window.
+    // Integer percent avoids f64→u64 cast lint; `default_compaction_trigger_uses_ratio_of_prompt_budget`
+    // pins this to `DEFAULT_COMPACTION_TRIGGER_RATIO`.
+    const TRIGGER_RATIO_PERCENT: u64 = 75;
+    let default_trigger = prompt_budget.saturating_mul(TRIGGER_RATIO_PERCENT) / 100;
+    let default_trigger = default_trigger.clamp(1, prompt_budget);
+    Some(configured.map_or(default_trigger, |value| value.min(prompt_budget)))
 }
 
 /// Explicit trigger overrides can reduce, but never bypass, the session ceiling.
@@ -1496,9 +1505,26 @@ mod tests {
     use super::extract_compaction_summary;
     use super::{
         SessionMemoryEnvelope, TaskTrackerSnapshot, build_session_memory_envelope, parse_task_tracker_snapshot,
+        resolve_compaction_threshold_with_reserve,
     };
     use crate::llm::provider::Message;
     use std::path::Path;
+
+    #[test]
+    fn default_compaction_trigger_uses_ratio_of_prompt_budget() {
+        // 100_000 context, 4_096 reserve → prompt budget 95_904.
+        // Default trigger is 75% of the prompt budget, not the full budget.
+        let threshold = resolve_compaction_threshold_with_reserve(None, 100_000, 4_096).expect("threshold");
+        let prompt_budget = 100_000u64 - 4_096;
+        let expected = prompt_budget * 75 / 100;
+        assert_eq!(threshold, expected);
+        // Keep the integer percent in sync with the shared ratio constant.
+        assert!((vtcode_config::constants::context::DEFAULT_COMPACTION_TRIGGER_RATIO - 0.75).abs() < f64::EPSILON);
+        assert!(threshold < prompt_budget, "default trigger must fire before the full prompt budget");
+        // Explicit config still wins and is capped at the prompt budget.
+        assert_eq!(resolve_compaction_threshold_with_reserve(Some(10_000), 100_000, 4_096), Some(10_000));
+        assert_eq!(resolve_compaction_threshold_with_reserve(Some(200_000), 100_000, 4_096), Some(prompt_budget));
+    }
 
     fn tracker_snapshot(summary: &str, objective: &str, todo: &[&str]) -> TaskTrackerSnapshot {
         let markdown = format!("# {objective}\n\n- [ ] {}\n", todo.join("\n- [ ] "));

@@ -23,11 +23,12 @@ pub const ENTERPRISE_CONTEXT_WINDOW: usize = 500_000;
 // Compaction Trigger Ratios
 // =========================================================================
 
-/// Legacy auto-compaction ratio retained for compatibility with older strategy
-/// configuration. Runtime threshold resolution is capacity- and reserve-driven.
-/// Fraction of the context window that triggers auto-compaction. 0.75 keeps
-/// long research turns from sitting in the expensive near-full zone (session
-/// data 2026-09-28: ~1M input tokens/turn) until 90% of the window is gone.
+/// Fraction of the prompt budget that triggers auto-compaction when
+/// `auto_compaction_threshold_tokens` is unset. Applied in
+/// `resolve_compaction_threshold_with_reserve` (capacity − output reserve).
+/// 0.75 keeps long research turns from sitting in the expensive near-full
+/// zone (session data 2026-09-28: ~1M input tokens/turn) until 90% of the
+/// window is gone.
 pub const DEFAULT_COMPACTION_TRIGGER_RATIO: f64 = 0.75;
 
 // =========================================================================

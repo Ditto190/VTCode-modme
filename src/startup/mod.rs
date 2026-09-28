@@ -89,6 +89,20 @@ pub(crate) enum StartupCommandKind {
     Conservative,
 }
 
+/// Whether provider auth may be missing for this invocation.
+///
+/// Interactive and ACP sessions resolve auth later. `--print` with empty text
+/// and a TTY stdin cannot call the model (no piped prompt), so auth is
+/// irrelevant and `build_print_prompt` fails with "No prompt provided".
+/// A real `--print` prompt (inline or piped) still requires credentials.
+fn allow_missing_provider_auth_for(print: Option<&str>, empty_print_on_tty: bool, command: Option<&Commands>) -> bool {
+    let no_command = command.is_none() || matches!(command, Some(Commands::AgentClientProtocol { .. }));
+    if !no_command {
+        return false;
+    }
+    print.is_none() || empty_print_on_tty
+}
+
 /// Central startup policy for one parsed CLI invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StartupPolicy {
@@ -158,13 +172,21 @@ impl StartupPolicy {
             }
         };
 
-        // `--print` with empty text cannot call the model: it will fail in
-        // `build_print_prompt` with "No prompt provided" before any LLM call.
-        // Requiring provider auth first turns that into a misleading
-        // "Authentication not found" (flaky `print_mode_requires_prompt_or_stdin`).
+        // `--print` with empty text and a TTY stdin cannot call the model (no
+        // piped prompt): it will fail in `build_print_prompt` with "No prompt
+        // provided" before any LLM call. Requiring provider auth first turns
+        // that into a misleading "Authentication not found". Piped stdin may
+        // still carry a prompt, so only the TTY case skips auth.
         let print_has_empty_prompt = args.print.as_ref().is_some_and(|prompt| prompt.trim().is_empty());
-        let allow_missing_provider_auth = (args.print.is_none() || print_has_empty_prompt)
-            && (args.command.is_none() || matches!(args.command, Some(Commands::AgentClientProtocol { .. })));
+        let stdin_is_tty = {
+            use vtcode_core::utils::tty::TtyExt;
+            std::io::stdin().is_tty_ext()
+        };
+        let allow_missing_provider_auth = allow_missing_provider_auth_for(
+            args.print.as_deref(),
+            print_has_empty_prompt && stdin_is_tty,
+            args.command.as_ref(),
+        );
 
         Self { kind, allow_missing_provider_auth }
     }
@@ -1071,17 +1093,17 @@ mod validation_tests {
 
     #[test]
     fn startup_policy_allows_missing_auth_for_empty_print_prompt() {
-        // `--print` with no text cannot call the model; requiring auth first
-        // turns "No prompt provided" into a misleading auth error.
-        let empty_print = command_startup_policy(&Cli::parse_from(["vtcode", "--print"]));
-        assert!(empty_print.allow_missing_provider_auth());
-
-        let blank_print = command_startup_policy(&Cli::parse_from(["vtcode", "--print", "   "]));
-        assert!(blank_print.allow_missing_provider_auth());
-
-        // A real `--print` prompt still needs credentials.
-        let print = command_startup_policy(&Cli::parse_from(["vtcode", "--print", "hello"]));
-        assert!(!print.allow_missing_provider_auth());
+        // Empty `--print` on a TTY cannot call the model: "No prompt provided"
+        // is the right error, not an auth failure.
+        assert!(allow_missing_provider_auth_for(Some(""), true, None));
+        assert!(allow_missing_provider_auth_for(Some("   "), true, None));
+        // Piped stdin may carry a prompt — require auth.
+        assert!(!allow_missing_provider_auth_for(Some(""), false, None));
+        // A real prompt always requires credentials (empty_print_on_tty is
+        // false whenever the inline text is non-empty).
+        assert!(!allow_missing_provider_auth_for(Some("hello"), false, None));
+        // Interactive (no --print) resolves auth later.
+        assert!(allow_missing_provider_auth_for(None, false, None));
     }
 
     #[test]

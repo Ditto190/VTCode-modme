@@ -12,14 +12,17 @@ mod support;
 
 use support::TestHarness;
 
-/// Builds a CLI command using OpenAI's default model and a synthetic API key.
+/// Builds a CLI command using OpenAI's default model and synthetic API keys.
 ///
 /// Pins the provider and model so startup does not depend on application defaults.
+/// Sets both `OPENAI_API_KEY` and `MERGE_GATEWAY_API_KEY` (the default OpenAI
+/// route's auth env) so the auth preflight accepts the synthetic key.
 fn base_command(harness: &TestHarness) -> Command {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("vtcode"));
     let _configured_command = cmd
         .args(["--provider", "openai", "--model", DEFAULT_MODEL])
         .env("OPENAI_API_KEY", "test-key")
+        .env("MERGE_GATEWAY_API_KEY", "test-key")
         .env("NO_COLOR", "1")
         .current_dir(harness.workspace());
     cmd

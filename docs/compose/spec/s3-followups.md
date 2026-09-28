@@ -39,9 +39,11 @@ commits: # leave empty while in progress; fill at delivery
 
 ### S2-auth: `--print` without prompt fails before auth
 
-- When `--print` is present with empty/whitespace prompt text, `StartupPolicy::allow_missing_provider_auth` is **true** (same as interactive): the command cannot call the model, so auth is irrelevant.
+- When `--print` is present with empty/whitespace prompt text **and stdin is a TTY** (no piped prompt possible), `StartupPolicy::allow_missing_provider_auth` is **true**: the command cannot call the model, so auth is irrelevant.
+- Piped stdin may still carry a prompt, so empty `--print` with non-TTY stdin still requires auth.
 - `build_print_prompt` still returns `No prompt provided…` when there is no piped stdin and no inline text.
 - `--print <text>` still requires provider auth (unchanged).
+- CLI tests set both `OPENAI_API_KEY` and `MERGE_GATEWAY_API_KEY` (the default OpenAI route's auth env) so the auth preflight accepts the synthetic key.
 
 ### S2-model-picker: no-op unless leftover
 
