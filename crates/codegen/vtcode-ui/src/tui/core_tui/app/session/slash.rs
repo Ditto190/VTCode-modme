@@ -49,8 +49,7 @@ pub(crate) fn render_slash_palette(session: &mut Session, frame: &mut Frame<'_>,
 
     let rows = slash_rows(session);
     let item_count = rows.len();
-    let default_style = session.core.styles.default_style();
-    let dim_style = default_style.add_modifier(Modifier::DIM);
+    let muted_style = session.core.styles.muted_text_style();
     let highlight_style = slash_highlight_style(session);
     let name_style = slash_name_style(session);
     let description_style = slash_description_style(session);
@@ -63,12 +62,8 @@ pub(crate) fn render_slash_palette(session: &mut Session, frame: &mut Frame<'_>,
         .map(|(idx, row)| {
             let is_selected = selected == Some(idx);
             let cursor = list_cursor(is_selected);
-            let cursor_style = if is_selected { highlight_style } else { dim_style };
-            let row_name_style = if is_selected {
-                highlight_style
-            } else {
-                name_style.add_modifier(Modifier::DIM)
-            };
+            let cursor_style = if is_selected { highlight_style } else { muted_style };
+            let row_name_style = if is_selected { highlight_style } else { name_style };
             let row_desc_style = if is_selected {
                 highlight_style
             } else {
@@ -82,7 +77,7 @@ pub(crate) fn render_slash_palette(session: &mut Session, frame: &mut Frame<'_>,
                         Span::raw(" "),
                         Span::styled(row.description, row_desc_style),
                     ]),
-                    dim_style,
+                    muted_style,
                 ),
                 1_u16,
             )
@@ -493,6 +488,10 @@ fn slash_highlight_style(session: &Session) -> Style {
 }
 
 fn slash_name_style(session: &Session) -> Style {
+    // Unselected command names stay bright (bold for hierarchy against the
+    // muted description) in the theme accent. No `Modifier::DIM`: SGR 2
+    // attenuation is terminal-dependent and made unselected rows hard to
+    // read; the selected row already pops via `slash_highlight_style`.
     let style = InlineTextStyle::default()
         .bold()
         .with_color(session.core.theme.primary.or(session.core.theme.foreground));
@@ -500,7 +499,7 @@ fn slash_name_style(session: &Session) -> Style {
 }
 
 fn slash_description_style(session: &Session) -> Style {
-    session.core.styles.default_style().add_modifier(Modifier::DIM)
+    session.core.styles.muted_text_style()
 }
 
 #[cfg(test)]

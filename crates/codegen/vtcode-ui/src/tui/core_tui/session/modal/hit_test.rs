@@ -85,6 +85,7 @@ mod tests {
             search_match: Style::default(),
             title: Style::default(),
             divider: Style::default(),
+            background: Style::default(),
             instruction_border: Style::default(),
             instruction_title: Style::default(),
             instruction_bullet: Style::default(),

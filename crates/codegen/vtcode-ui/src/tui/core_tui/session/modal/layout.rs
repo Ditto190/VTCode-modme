@@ -14,6 +14,11 @@ pub struct ModalRenderStyles {
     pub(crate) search_match: Style,
     pub(crate) title: Style,
     pub(crate) divider: Style,
+    /// Area background for the modal chrome. Must stay modifier-free: ratatui's
+    /// `Cell::set_style` only *inserts* `add_modifier`, so a DIM painted here
+    /// sticks to every glyph later drawn inside the modal and mutes
+    /// otherwise-bright text (see `render_modal_background`).
+    pub(crate) background: Style,
     pub(crate) instruction_border: Style,
     pub(crate) instruction_title: Style,
     pub(crate) instruction_bullet: Style,

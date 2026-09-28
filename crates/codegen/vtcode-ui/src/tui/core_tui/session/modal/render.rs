@@ -242,7 +242,7 @@ pub fn render_modal_list(
         area,
         sections,
         SharedListPanelStyles {
-            base_style: styles.selectable,
+            base_style: styles.background,
             selected_style: Some(styles.highlight),
             text_style: styles.detail,
             divider_style: Some(styles.border),
@@ -730,7 +730,7 @@ fn is_plan_overflow_row(trimmed: &str) -> bool {
 
 /// Split `Label: value` metadata rows (`Risk`, `Source`, the permission-popup
 /// agent goal, the approval sandbox posture, …) so the label can render
-/// dimmed and the value in body style. Returns the trimmed label and value;
+/// muted and the value in body style. Returns the trimmed label and value;
 /// `Tool:` stays a header and never matches here.
 fn split_context_row(trimmed: &str) -> Option<(&str, &str)> {
     const CONTEXT_LABELS: &[&str] = &[
@@ -1300,6 +1300,7 @@ mod tests {
             search_match: Style::default(),
             title: Style::default(),
             divider: Style::default(),
+            background: Style::default(),
             instruction_border: Style::default(),
             instruction_title: Style::default(),
             instruction_bullet: Style::default(),
@@ -1777,6 +1778,7 @@ mod tests {
             search_match: Style::default(),
             title: Style::default(),
             divider: Style::default(),
+            background: Style::default(),
             instruction_border: Style::default(),
             instruction_title: Style::default(),
             instruction_bullet: Style::default(),
@@ -1819,6 +1821,7 @@ mod tests {
             search_match: Style::default(),
             title: Style::default(),
             divider: Style::default(),
+            background: Style::default(),
             instruction_border: Style::default(),
             instruction_title: Style::default(),
             instruction_bullet: Style::default(),
@@ -1856,6 +1859,7 @@ mod tests {
             search_match: Style::default(),
             title: Style::default(),
             divider: Style::default(),
+            background: Style::default(),
             instruction_border: Style::default(),
             instruction_title: Style::default(),
             instruction_bullet: Style::default(),

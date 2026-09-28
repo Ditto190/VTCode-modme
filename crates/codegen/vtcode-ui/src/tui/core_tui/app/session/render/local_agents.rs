@@ -18,8 +18,11 @@ struct LocalAgentsPanelModel {
     selected: Option<usize>,
     offset: usize,
     visible_rows: usize,
-    base_style: Style,
     highlight_style: Style,
+    /// Muted-by-color row style (theme secondary), never `Modifier::DIM` —
+    /// ratatui's `Cell::set_style` only inserts modifiers, so a DIM painted
+    /// over the panel sticks to every glyph drawn on top of it.
+    muted_style: Style,
 }
 
 impl SharedListWidgetModel for LocalAgentsPanelModel {
@@ -29,15 +32,15 @@ impl SharedListWidgetModel for LocalAgentsPanelModel {
                 InlineListRow::single(
                     Line::from(Span::styled(
                         "No local agents yet".to_owned(),
-                        self.base_style.add_modifier(Modifier::DIM | Modifier::ITALIC),
+                        self.muted_style.add_modifier(Modifier::ITALIC),
                     )),
-                    self.base_style.add_modifier(Modifier::DIM),
+                    self.muted_style,
                 ),
                 1_u16,
             )];
         }
 
-        let dim_style = self.base_style.add_modifier(Modifier::DIM);
+        let muted_style = self.muted_style;
         let max_chars = width.saturating_sub(3) as usize;
         self.entries
             .iter()
@@ -49,12 +52,12 @@ impl SharedListWidgetModel for LocalAgentsPanelModel {
                     max_chars,
                 );
                 let cursor = list_cursor(is_selected);
-                let cursor_style = if is_selected { self.highlight_style } else { dim_style };
-                let text_style = if is_selected { self.highlight_style } else { dim_style };
+                let cursor_style = if is_selected { self.highlight_style } else { muted_style };
+                let text_style = if is_selected { self.highlight_style } else { muted_style };
                 (
                     InlineListRow::single(
                         Line::from(vec![Span::styled(cursor, cursor_style), Span::styled(row_text, text_style)]),
-                        dim_style,
+                        muted_style,
                     ),
                     1_u16,
                 )
@@ -118,7 +121,10 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, viewpor
     frame.render_widget(Clear, window);
 
     let default_style = default_style(session);
-    let dim_style = default_style.add_modifier(Modifier::DIM);
+    // Muted by explicit color (theme secondary), never `Modifier::DIM`: DIM
+    // doubles as a sticky area style in this pipeline and renders
+    // near-invisible on several terminals.
+    let muted_style = session.core.styles.muted_text_style();
     let highlight_style = modal_list_highlight_style(session);
     let (selected_index, scroll_offset, entries, live_count, finished_count) = {
         let state = &session.local_agents_state;
@@ -173,7 +179,7 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, viewpor
     );
     frame.render_widget(
         Paragraph::new(info_line)
-            .style(default_style.add_modifier(Modifier::DIM))
+            .style(session.core.styles.muted_text_style())
             .wrap(Wrap { trim: false }),
         info_area,
     );
@@ -187,8 +193,8 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, viewpor
         selected: selected_index,
         offset: scroll_offset,
         visible_rows: 0,
-        base_style: default_style,
         highlight_style,
+        muted_style,
     };
 
     render_shared_list_panel(
@@ -196,7 +202,7 @@ pub fn render_local_agents(session: &mut Session, frame: &mut Frame<'_>, viewpor
         list_area,
         SharedListPanelSections::default(),
         SharedListPanelStyles {
-            base_style: dim_style,
+            base_style: default_style,
             selected_style: Some(highlight_style),
             text_style: default_style,
             divider_style: None,
@@ -249,7 +255,7 @@ fn format_local_agent_preview(session: &Session, entry: &LocalAgentEntry) -> Vec
 
 fn local_agent_title_line(session: &Session, entry: &LocalAgentEntry) -> Line<'static> {
     let base = default_style(session);
-    let muted = base.add_modifier(Modifier::DIM);
+    let muted = session.core.styles.muted_text_style();
     let mut spans = vec![
         Span::styled(entry.display_label.clone(), base),
         Span::styled(" · ".to_string(), muted),
@@ -260,18 +266,18 @@ fn local_agent_title_line(session: &Session, entry: &LocalAgentEntry) -> Line<'s
     if entry.is_loading() && session.core.appearance.should_animate_progress_status() {
         spans.extend(shimmer_spans_with_style_at_phase(
             &entry.status,
-            accent_style(session).add_modifier(Modifier::DIM),
+            accent_style(session),
             session.core.shimmer_state.phase(),
         ));
     } else {
-        spans.push(Span::styled(entry.status.clone(), accent_style(session).add_modifier(Modifier::DIM)));
+        spans.push(Span::styled(entry.status.clone(), accent_style(session)));
     }
 
     Line::from(spans)
 }
 
 fn local_agent_status_line(session: &Session, text: &str, shimmer: bool) -> Line<'static> {
-    let style = default_style(session).add_modifier(Modifier::DIM);
+    let style = session.core.styles.muted_text_style();
     if shimmer && session.core.appearance.should_animate_progress_status() {
         Line::from(shimmer_spans_with_style_at_phase(text, style, session.core.shimmer_state.phase()))
     } else {

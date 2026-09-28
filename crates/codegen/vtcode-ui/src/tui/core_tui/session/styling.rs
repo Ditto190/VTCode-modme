@@ -150,6 +150,25 @@ impl SessionStyles {
         self.dimmed_border_style(true)
     }
 
+    /// Muted foreground for secondary text (context labels, subtitles, hints).
+    ///
+    /// Deliberately an explicit color — theme `secondary` with a `Gray`
+    /// fallback, mirroring the `muted` slot of `input_styles_from_theme` —
+    /// instead of `Modifier::DIM`: DIM renders as SGR 2, which several
+    /// terminals attenuate to near-invisible, and ratatui's `Cell::set_style`
+    /// only ever *inserts* modifiers, so a DIM painted as an area background
+    /// sticks to every glyph drawn on top of it and mutes otherwise-bright
+    /// text. Same no-DIM rule the diff gutter styles follow.
+    pub(crate) fn muted_text_style(&self) -> Style {
+        let color = self
+            .theme
+            .secondary
+            .or(self.theme.foreground)
+            .map(ratatui_color_from_ansi)
+            .unwrap_or(Color::Gray);
+        self.default_style().fg(color)
+    }
+
     /// Get a border style with configurable boldness.
     /// When `suppress_bold` is true, the BOLD modifier is removed — useful for
     /// subtle block borders that should appear dimmed.

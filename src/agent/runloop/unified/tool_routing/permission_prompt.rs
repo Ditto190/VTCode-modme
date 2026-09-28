@@ -676,8 +676,11 @@ fn build_tool_permission_options(
             }
         };
         let subtitle = format!("Remember {short_label} in this workspace");
+        // No "policy cache" jargon: the subtitle already states the scope that
+        // gets remembered, and permanent persistence is what "Always" means to
+        // a user approving a command.
         options.push(InlineListItem {
-            title: "Always approve and save to policy cache".to_string(),
+            title: "Always approve".to_string(),
             subtitle: Some(subtitle),
             badge: Some("Permanent".to_string()),
             indent: 0,
@@ -1299,7 +1302,7 @@ mod tests {
         .into_iter()
         .map(|item| item.title)
         .collect::<Vec<_>>();
-        assert!(titles.iter().any(|title| title == "Always approve and save to policy cache"));
+        assert!(titles.iter().any(|title| title == "Always approve"));
         assert!(!titles.iter().any(|title| title == "Always Deny"));
     }
 
@@ -1460,7 +1463,7 @@ mod tests {
         );
         let permanent = items
             .iter()
-            .find(|item| item.title == "Always approve and save to policy cache")
+            .find(|item| item.title == "Always approve")
             .expect("permanent option");
         let subtitle = permanent.subtitle.as_deref().expect("subtitle");
         assert!(subtitle.contains('…'), "long label should be truncated, got: {subtitle}");

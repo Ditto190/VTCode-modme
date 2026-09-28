@@ -234,7 +234,7 @@ User requests: "Run the build and check for errors"
      Deny Once                  Ask again next time
 
 
-5. User selects "Always Allow"
+5. User selects "Always approve"
 6. Decision recorded:
    - exec_command: approve_count = 4, deny_count = 0
 7. Pattern saved to disk

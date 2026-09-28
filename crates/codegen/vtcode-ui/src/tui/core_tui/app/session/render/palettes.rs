@@ -70,7 +70,7 @@ pub fn render_agent_palette(session: &mut Session, frame: &mut Frame<'_>, area: 
     if !palette.has_agents() {
         let loading = Paragraph::new(Line::from(Span::styled(
             "Loading subagents...".to_owned(),
-            default_style(session).add_modifier(Modifier::DIM),
+            session.core.styles.muted_text_style(),
         )))
         .wrap(Wrap { trim: true });
         frame.render_widget(loading, area);
@@ -84,7 +84,10 @@ pub fn render_agent_palette(session: &mut Session, frame: &mut Frame<'_>, area: 
     }
 
     let base_style = default_style(session);
-    let dim_style = base_style.add_modifier(Modifier::DIM);
+    // Muted by explicit color (theme secondary), never `Modifier::DIM`:
+    // DIM doubles as a sticky area style in this pipeline and renders
+    // near-invisible on several terminals.
+    let muted_style = session.core.styles.muted_text_style();
     let highlight_style = modal_list_highlight_style(session);
 
     let selected = rows.iter().position(|row| row.selectable && row.selected);
@@ -96,19 +99,15 @@ pub fn render_agent_palette(session: &mut Session, frame: &mut Frame<'_>, area: 
             global_indices.push(row.global_index);
             let is_selected = selected == Some(idx);
             let cursor = list_cursor(is_selected);
-            let cursor_style = if is_selected { highlight_style } else { dim_style };
-            let name_style = if is_selected {
-                highlight_style
-            } else {
-                row.style.add_modifier(Modifier::DIM)
-            };
+            let cursor_style = if is_selected { highlight_style } else { muted_style };
+            let name_style = if is_selected { highlight_style } else { row.style };
             let mut spans = vec![
                 Span::styled(cursor, cursor_style),
                 Span::styled(" ", cursor_style),
                 Span::styled(row.text, name_style),
             ];
             if let Some(subtitle) = row.subtitle {
-                let sub_style = if is_selected { highlight_style } else { dim_style };
+                let sub_style = if is_selected { highlight_style } else { muted_style };
                 spans.push(Span::styled(format!("  {subtitle}"), sub_style));
             }
 
@@ -116,9 +115,9 @@ pub fn render_agent_palette(session: &mut Session, frame: &mut Frame<'_>, area: 
                 InlineListRow::single(
                     Line::from(spans),
                     if row.selectable {
-                        dim_style
+                        muted_style
                     } else {
-                        dim_style.add_modifier(Modifier::DIM)
+                        muted_style.add_modifier(Modifier::ITALIC)
                     },
                 ),
                 1_u16,
@@ -148,7 +147,7 @@ pub fn render_agent_palette(session: &mut Session, frame: &mut Frame<'_>, area: 
         area,
         sections,
         SharedListPanelStyles {
-            base_style: dim_style,
+            base_style,
             selected_style: Some(highlight_style),
             text_style: base_style,
             divider_style: None,
@@ -227,15 +226,17 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
         } else {
             "No files here".to_owned()
         };
-        let loading =
-            Paragraph::new(Line::from(Span::styled(message, default_style(session).add_modifier(Modifier::DIM))))
-                .wrap(Wrap { trim: true });
+        let loading = Paragraph::new(Line::from(Span::styled(message, session.core.styles.muted_text_style())))
+            .wrap(Wrap { trim: true });
         frame.render_widget(loading, area);
         return;
     }
 
     let base_style = default_style(session);
-    let dim_style = base_style.add_modifier(Modifier::DIM);
+    // Muted by explicit color (theme secondary), never `Modifier::DIM`: DIM
+    // doubles as a sticky area style in this pipeline and renders
+    // near-invisible on several terminals.
+    let muted_style = session.core.styles.muted_text_style();
     let highlight_style = modal_list_highlight_style(session);
     let accent = accent_style(session);
 
@@ -249,7 +250,7 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
         .map(|(idx, entry)| {
             let is_selected = selected == Some(idx);
             let cursor = list_cursor(is_selected);
-            let cursor_style = if is_selected { highlight_style } else { dim_style };
+            let cursor_style = if is_selected { highlight_style } else { muted_style };
 
             let broken = entry.symlink_broken;
             let name_style = if entry.is_parent {
@@ -269,7 +270,7 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
                 palette
                     .style_for_entry(entry)
                     .map(crate::tui::core_tui::style::ratatui_style_from_ansi)
-                    .unwrap_or(dim_style)
+                    .unwrap_or(muted_style)
             };
 
             // Glyph communicates row kind at a glance: `↑` ascends, `▸` opens a
@@ -292,7 +293,7 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
             // Browse rows already show a basename only.
             if search_mode && !entry.is_parent {
                 if let Some((dir, base)) = entry.display_name.rsplit_once('/') {
-                    spans.push(Span::styled(format!("{dir}/"), dim_style));
+                    spans.push(Span::styled(format!("{dir}/"), muted_style));
                     spans.push(Span::styled(base.to_owned(), name_style));
                 } else {
                     spans.push(Span::styled(entry.display_name.clone(), name_style));
@@ -302,14 +303,14 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
             }
 
             if let Some(target) = &entry.symlink_target {
-                let arrow_style = if broken { warning_style } else { dim_style };
+                let arrow_style = if broken { warning_style } else { muted_style };
                 spans.push(Span::styled(format!(" → {}", target.display()), arrow_style));
                 if broken {
                     spans.push(Span::styled(" (broken)".to_owned(), warning_style));
                 }
             }
 
-            (InlineListRow::single(Line::from(spans), dim_style), 1_u16)
+            (InlineListRow::single(Line::from(spans), muted_style), 1_u16)
         })
         .collect();
 
@@ -332,16 +333,16 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
         // only needs to label the panel — repeating `(search: '…')` here is clutter.
         let mut spans = vec![Span::styled("Files", highlight_style)];
         if let Some(suffix) = &overflow_suffix {
-            spans.push(Span::styled(suffix.clone(), dim_style));
+            spans.push(Span::styled(suffix.clone(), muted_style));
         }
         vec![Line::from(spans)]
     } else {
         let mut spans = vec![
             Span::styled("Files", highlight_style),
-            Span::styled(format!("  {}", palette.breadcrumb()), dim_style),
+            Span::styled(format!("  {}", palette.breadcrumb()), muted_style),
         ];
         if let Some(suffix) = &overflow_suffix {
-            spans.push(Span::styled(suffix.clone(), dim_style));
+            spans.push(Span::styled(suffix.clone(), muted_style));
         }
         vec![Line::from(spans)]
     };
@@ -368,7 +369,7 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
         area,
         sections,
         SharedListPanelStyles {
-            base_style: dim_style,
+            base_style,
             selected_style: Some(highlight_style),
             text_style: base_style,
             divider_style: Some(session.core.styles.border_style()),
@@ -388,6 +389,7 @@ pub fn render_file_palette(session: &mut Session, frame: &mut Frame<'_>, area: R
 fn build_agent_palette_rows(session: &Session, palette: &AgentPalette) -> Vec<AgentPaletteRenderRow> {
     let mut rows = Vec::new();
     let default = default_style(session);
+    let muted = session.core.styles.muted_text_style();
 
     for (global_idx, entry, selected) in palette.current_page_items() {
         rows.push(AgentPaletteRenderRow {
@@ -404,7 +406,7 @@ fn build_agent_palette_rows(session: &Session, palette: &AgentPalette) -> Vec<Ag
         rows.push(AgentPaletteRenderRow {
             text: "No matching agents".to_owned(),
             subtitle: None,
-            style: default.add_modifier(Modifier::DIM),
+            style: muted,
             selectable: false,
             selected: false,
             global_index: 0,
@@ -418,7 +420,7 @@ fn build_agent_palette_rows(session: &Session, palette: &AgentPalette) -> Vec<Ag
         rows.push(AgentPaletteRenderRow {
             text: format!("... ({remaining} more items)"),
             subtitle: None,
-            style: default.add_modifier(Modifier::DIM | Modifier::ITALIC),
+            style: muted.add_modifier(Modifier::ITALIC),
             selectable: false,
             selected: false,
             global_index: 0,

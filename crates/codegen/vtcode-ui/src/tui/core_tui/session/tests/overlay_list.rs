@@ -365,6 +365,107 @@ fn modal_section_header_uses_foreground_contrast_on_light_theme() {
 }
 
 #[test]
+fn floating_modal_renders_approval_text_without_dim_modifier() {
+    // Regression: the modal background used to be painted with
+    // `Modifier::DIM` (via `styles.selectable`). ratatui's `Cell::set_style`
+    // only *inserts* modifiers, so that DIM stuck to every glyph drawn on
+    // top of it — the whole HITL approval popup rendered dimmed and the
+    // command under review was hard to read. Popup text must recede only
+    // via explicit muted colors, never via DIM.
+    let theme = InlineTheme {
+        foreground: Some(AnsiColorEnum::Rgb(RgbColor(0xEE, 0xEE, 0xEE))),
+        background: Some(AnsiColorEnum::Rgb(RgbColor(0x10, 0x14, 0x1A))),
+        primary: Some(AnsiColorEnum::Rgb(RgbColor(0x12, 0x34, 0x56))),
+        secondary: Some(AnsiColorEnum::Rgb(RgbColor(0x8A, 0x93, 0xA3))),
+        ..InlineTheme::default()
+    };
+    let mut session = AppSession::new(theme, None, 30);
+    let approval = |title: &str, subtitle: &str, badge: &str, selection: InlineListSelection| InlineListItem {
+        title: title.to_string(),
+        subtitle: Some(subtitle.to_string()),
+        badge: Some(badge.to_string()),
+        indent: 0,
+        selection: Some(selection),
+        search_value: Some(title.to_string()),
+    };
+    session.handle_command(app_types::InlineCommand::ShowTransient {
+        request: Box::new(app_types::TransientRequest::List(app_types::ListOverlayRequest {
+            title: "Would you like to run the following command?".to_string(),
+            lines: vec![
+                "Environment: default policy".to_string(),
+                "`$ cargo nextest run`".to_string(),
+                "Choose how to handle this run:".to_string(),
+            ],
+            footer_hint: Some("Use ↑↓ or Tab to navigate • Enter to select • Esc to deny".to_string()),
+            items: vec![
+                approval("Approve Once", "Allow this time only", "Permanent", InlineListSelection::ToolApproval(true)),
+                approval(
+                    "Allow for Session",
+                    "For the current session",
+                    "Session",
+                    InlineListSelection::ToolApprovalSession,
+                ),
+                approval("Deny Once", "Ask again next time", "Persistent", InlineListSelection::ToolApprovalDenyOnce),
+            ],
+            selected: Some(InlineListSelection::ToolApproval(true)),
+            search: None,
+            hotkeys: Vec::new(),
+        })),
+    });
+
+    let terminal = render_session_to_terminal(&mut session, 30);
+    let buffer = terminal.backend().buffer();
+
+    let mut dimmed_popup_text = String::new();
+    for row in 15..30u16 {
+        for column in 0..VIEW_WIDTH {
+            let cell = buffer.cell((column, row)).expect("modal cell");
+            if cell.symbol() != " " && cell.style().add_modifier.contains(Modifier::DIM) {
+                dimmed_popup_text.push_str(cell.symbol());
+            }
+        }
+    }
+    assert!(
+        dimmed_popup_text.trim().is_empty(),
+        "approval popup text must not render dimmed, got: {dimmed_popup_text:?}"
+    );
+
+    // Emphasis stays intact: the selected row is bold and accent-colored,
+    // while unselected option titles keep the full theme foreground so every
+    // choice is readable.
+    let modal_area = session.core.modal_list_area().expect("modal list area");
+    let row_text = |row: u16| -> String {
+        (0..VIEW_WIDTH)
+            .filter_map(|column| buffer.cell((column, row)))
+            .map(|cell| cell.symbol().to_owned())
+            .collect::<String>()
+    };
+    let text_column =
+        |row: u16, needle: &str| -> u16 { row_text(row).find(needle).expect("approval text in row") as u16 };
+    let find_row = |needle: &str| -> u16 {
+        (modal_area.y..modal_area.y.saturating_add(modal_area.height))
+            .find(|row| row_text(*row).contains(needle))
+            .unwrap_or_else(|| panic!("{needle} row in modal area {modal_area:?}"))
+    };
+
+    let selected_row = find_row("Approve Once");
+    let selected_cell = buffer
+        .cell((text_column(selected_row, "Approve Once"), selected_row))
+        .expect("selected row title cell");
+    assert_eq!(selected_cell.style().fg, Some(Color::Rgb(0x12, 0x34, 0x56)));
+    assert!(selected_cell.style().add_modifier.contains(Modifier::BOLD));
+    assert!(!selected_cell.style().add_modifier.contains(Modifier::DIM));
+
+    let unselected_row = find_row("Allow for Session");
+    assert_ne!(selected_row, unselected_row, "selected and unselected rows must differ");
+    let unselected_cell = buffer
+        .cell((text_column(unselected_row, "Allow for Session"), unselected_row))
+        .expect("unselected row title cell");
+    assert_eq!(unselected_cell.style().fg, Some(Color::Rgb(0xEE, 0xEE, 0xEE)));
+    assert!(!unselected_cell.style().add_modifier.contains(Modifier::DIM));
+}
+
+#[test]
 fn untitled_floating_modal_skips_title_chrome_but_keeps_section_divider() {
     let mut session = AppSession::new(InlineTheme::default(), None, 30);
     show_list_modal(&mut session, "", vec!["Choose an option"], vec![make_list_item("Option A", "a")]);
