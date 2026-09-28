@@ -117,3 +117,13 @@ please document and make sure to remember this rule for future reference
   specific rule text.
   Please submit the complete fact directly in a new remember ... request.
 ```
+
+====
+
+check the human in the loop permission popup text and wording, it seems the text is too dimmed to read. also check and fix on common and shared popup dialogs to ensure readability and proper emphasis on important information.
+
+bug: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-28 at 16.02.24.png'
+
+====
+
+make the highlight bar icon bolder and 
