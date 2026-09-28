@@ -213,6 +213,73 @@ fn migrate_legacy_imports_history_and_trajectory() {
     assert_eq!(sessions.len(), 2);
 }
 
+fn sample_zero_turn_completion() -> Vec<ThreadEvent> {
+    vec![
+        ThreadEvent::ThreadStarted(ThreadStartedEvent { thread_id: "empty".to_string() }),
+        ThreadEvent::ThreadCompleted(Box::new(ThreadCompletedEvent {
+            thread_id: "empty".to_string(),
+            session_id: "session".to_string(),
+            subtype: ThreadCompletionSubtype::Cancelled,
+            outcome_code: "exit".to_string(),
+            result: None,
+            stop_reason: None,
+            usage: Usage::default(),
+            total_cost_usd: None,
+            num_turns: 0,
+        })),
+    ]
+}
+
+#[test]
+fn retention_evicts_zero_turn_completed_stores_immediately() {
+    let dir = TempDir::new().expect("tempdir");
+    // Empty shell: thread.started + thread.completed, never a turn.
+    let empty = open(dir.path(), "empty-shell", DEFAULT_MAX_EVENTS).expect("open empty");
+    for e in &sample_zero_turn_completion() {
+        empty.append(e).expect("append empty");
+    }
+    empty.complete().expect("complete empty");
+    drop(empty);
+
+    // Real work: has a turn, must survive.
+    let worked = open(dir.path(), "worked-session", DEFAULT_MAX_EVENTS).expect("open worked");
+    for e in &sample_turn() {
+        worked.append(e).expect("append");
+    }
+    worked.complete().expect("complete worked");
+    drop(worked);
+
+    // Generous age/count: only the empty shell is removed.
+    let removed = apply_retention(dir.path(), crate::retention::RetentionPolicy { max_sessions: 50, max_age_days: 30 })
+        .expect("retain");
+    assert!(removed >= 1, "empty shell must be evicted: {removed}");
+    assert!(!sessions_root(dir.path()).join("empty-shell").exists());
+    assert!(sessions_root(dir.path()).join("worked-session").exists());
+}
+
+#[test]
+fn evict_zero_turn_completed_store_is_a_noop_for_real_sessions() {
+    let dir = TempDir::new().expect("tempdir");
+    let worked = open(dir.path(), "worked", DEFAULT_MAX_EVENTS).expect("open");
+    for e in &sample_turn() {
+        worked.append(e).expect("append");
+    }
+    worked.complete().expect("complete");
+    drop(worked);
+
+    assert!(!crate::retention::evict_zero_turn_completed_store(dir.path(), "worked").expect("noop"));
+    assert!(sessions_root(dir.path()).join("worked").exists());
+
+    let empty = open(dir.path(), "empty", DEFAULT_MAX_EVENTS).expect("open empty");
+    for e in &sample_zero_turn_completion() {
+        empty.append(e).expect("append empty");
+    }
+    empty.complete().expect("complete empty");
+    drop(empty);
+    assert!(crate::retention::evict_zero_turn_completed_store(dir.path(), "empty").expect("evict"));
+    assert!(!sessions_root(dir.path()).join("empty").exists());
+}
+
 #[test]
 fn retention_removes_oldest_sessions() {
     let dir = TempDir::new().expect("tempdir");

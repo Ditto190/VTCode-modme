@@ -154,10 +154,17 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   within a small cap; new tools must consolidate, defer, or deliberately raise the
   cap. Builtin tool schemas in `progressive` mode fit in a **2,000-token**
   envelope (measured ~1,793 on the Codex-4 default profile).
-  The always-eager set is the Codex baseline (`exec_command`, `write_stdin`,
-  `apply_patch` when supported, `search_tools`); planner, skills, and agent tools
+  The always-eager set is the Codex baseline plus structured search
+  (`exec_command`, `write_stdin`, `apply_patch` when supported, `search_tools`,
+  `code_search`, `grep_file`). Deferred structured search pushed models to shell
+  out via `exec_command` and pay in huge tool outputs (session data 2026-09-28);
+  the extra schema tokens are cheaper. Planner, skills, and agent tools
   defer until `search_tools` surfaces them (planner tools stay eager while
   planning is active).
+- **Tool-result clearing defaults** (`agent.harness.tool_result_clearing`):
+  `trigger_tokens: 40000`, `keep_tool_uses: 2`. Research/audit turns were
+  observed at ~1M input tokens/turn with the old 100k trigger — tool results
+  piled up long before any clearing. Durable history is unchanged.
 - **Startup token-overhead warnings.** At session start (unless `--quiet`),
   VT Code logs non-fatal `tracing::warn!` messages when the config is likely to
   inflate per-request cost: more than 8 configured MCP servers,

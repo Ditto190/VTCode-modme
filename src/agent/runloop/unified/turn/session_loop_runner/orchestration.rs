@@ -2828,9 +2828,16 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             final_response: final_response.as_deref(),
             resume_identifier,
             budget_limit: session_stats.budget_limit(),
+            total_cost_usd: session_stats.total_cost_usd(),
             first_call_composition: session_stats.first_call_composition(),
             session_end_reason,
         });
+        // Empty shells (0 turns, terminal) are not worth keeping: they pollute
+        // `.vtcode/sessions/` and hide real sessions. Best-effort; failure is
+        // non-fatal and retention will catch it on the next harness open.
+        if let Err(error) = vtcode_memory::evict_zero_turn_completed_store(&config.workspace, &turn_run_id.0) {
+            tracing::debug!(target: "vtcode.harness", error = %error, "zero-turn session store cleanup failed");
+        }
         if matches!(session_end_reason, SessionEndReason::Error) {
             return Err(anyhow::anyhow!(
                 "{}",

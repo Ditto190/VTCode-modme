@@ -866,18 +866,18 @@ fn is_core_tool_entry(entry: &ToolCatalogEntry, config: &SessionToolsConfig) -> 
     // resume_agent/close_agent all route to the single `agent` registration),
     // so only the canonical name needs to be matched here.
     //
-    // Always-eager set is the Codex baseline (HarnessTax lean defaults):
-    // `exec_command`, `write_stdin`, `search_tools`, and `apply_patch` when the
-    // model supports it. Planner, skills, and agent tools defer until
-    // `search_tools` surfaces them, except while planning is active.
+    // Always-eager set is the Codex baseline plus structured search
+    // (HarnessTax lean defaults, revised 2026-09-28): `exec_command`,
+    // `write_stdin`, `search_tools`, `apply_patch` when supported, and
+    // `code_search`/`grep_file`. Session data showed deferred structured
+    // search is worse for cost than the extra schema tokens — models shell
+    // out via `rg`/`git` and feed huge outputs into the prompt.
     match entry.public_name.as_str() {
-        tools::EXEC_COMMAND | tools::WRITE_STDIN | tools::SEARCH_TOOLS => true,
-        // Planning keeps its workflow and read-only inspection surface on the
-        // wire even when MCP tools force deferral: session-20260923 lost
-        // GREP_FILE from the wire catalog and fell back to exec_command shell
-        // reads, blowing the preview budget with 26-38 KiB spooled previews.
+        tools::EXEC_COMMAND | tools::WRITE_STDIN | tools::SEARCH_TOOLS | tools::CODE_SEARCH | tools::GREP_FILE => true,
+        // Planning keeps its workflow surface on the wire even when MCP tools
+        // force deferral. Read-only inspection is always-eager (above).
         tools::TASK_TRACKER | tools::START_PLANNING if config.planning_active => true,
-        tools::READ_FILE | tools::LIST_FILES | tools::GREP_FILE | tools::CODE_SEARCH if config.planning_active => true,
+        tools::READ_FILE | tools::LIST_FILES if config.planning_active => true,
         tools::MCP_SEARCH_TOOLS | tools::MCP_GET_TOOL_DETAILS | tools::MCP_LIST_SERVERS => {
             config.deferred_tool_policy.is_client_local()
         }
@@ -2189,7 +2189,15 @@ mod tests {
             .find(|tool| tool.function_name() == tools::CODE_SEARCH)
             .expect("code_search should be present");
         assert_eq!(
-            search_tool.defer_loading,
+            search_tool.defer_loading, None,
+            "structured search stays eager even in large catalogs (session-efficiency)"
+        );
+        let extra_tool = definitions
+            .iter()
+            .find(|tool| tool.function_name() == "extra_builtin_0")
+            .expect("extra builtin should be present");
+        assert_eq!(
+            extra_tool.defer_loading,
             Some(true),
             "large builtin catalogs still defer non-core tools under client-local policy"
         );
@@ -2493,7 +2501,9 @@ mod tests {
             .iter()
             .find(|entry| entry.public_name == tools::GREP_FILE)
             .expect("missing grep catalog entry");
-        assert!(should_defer_tool_loading(grep_entry, &exec_config), "grep_file stays deferrable outside planning");
+        // Structured search is always-eager (session-efficiency 2026-09-28):
+        // deferred search pushed models to shell out via exec_command.
+        assert!(!should_defer_tool_loading(grep_entry, &exec_config), "grep_file stays eager outside planning");
 
         let interactive_planning_config = SessionToolsConfig::full_public(
             SessionSurface::Interactive,
@@ -2523,6 +2533,8 @@ mod tests {
             tools::WRITE_STDIN,
             tools::SEARCH_TOOLS,
             tools::APPLY_PATCH,
+            tools::CODE_SEARCH,
+            tools::GREP_FILE,
         ];
         let deferrable = [
             tools::TASK_TRACKER,
