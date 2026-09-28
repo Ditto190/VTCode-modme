@@ -528,7 +528,11 @@ async fn resolve_remember_plan(
             respond_to_memory_prompt(ctx, input, "Cancelled memory save.")?;
             return Ok(None);
         };
-        supplemental = Some(answer);
+        if is_empty_memory_answer(&answer) {
+            respond_to_memory_prompt(ctx, input, "Cancelled memory save.")?;
+            return Ok(None);
+        }
+        supplemental = Some(format_supplemental_for_missing(supplemental.take(), &missing.field, &answer));
     }
 
     let Some(missing) = final_missing else {
@@ -562,8 +566,20 @@ fn exhausted_missing_details_message(missing: &MemoryMissingField) -> String {
     let field = normalize_whitespace(&missing.field);
     let prompt = normalize_whitespace(&missing.prompt);
     format!(
-        "Couldn't save memory yet. The planner still needs `{field}`: {prompt}\nPlease submit the complete fact directly in a new `remember ...` request."
+        "Couldn't save memory yet. The planner still needs `{field}`: {prompt}\nPlease submit the complete fact directly in a new `remember ...` request, e.g. `remember that <your complete fact here>`."
     )
+}
+
+fn is_empty_memory_answer(answer: &str) -> bool {
+    answer.trim().is_empty()
+}
+
+fn format_supplemental_for_missing(previous: Option<String>, field: &str, answer: &str) -> String {
+    let labeled = format!("For missing field '{}': {}", field.trim(), answer.trim());
+    match previous {
+        Some(prev) => format!("{prev}\n{labeled}"),
+        None => labeled,
+    }
 }
 
 async fn load_memory_candidates(ctx: &InteractionLoopContext<'_>) -> Result<Vec<MemoryOpCandidate>> {
@@ -1045,7 +1061,49 @@ mod tests {
         assert!(message.contains("alias"));
         assert!(message.contains("What alias should VT Code remember?"));
         assert!(message.contains("submit the complete fact directly"));
+        assert!(message.contains("remember that"));
         assert!(!message.contains("still needs more information."));
+    }
+
+    #[test]
+    fn exhausted_message_normalizes_rule_field_and_prompt() {
+        let missing = MemoryMissingField {
+            field: "  rule  ".to_string(),
+            prompt: "  What rule should VT Code remember?  ".to_string(),
+        };
+
+        let message = exhausted_missing_details_message(&missing);
+        assert!(message.contains("`rule`"));
+        assert!(message.contains("What rule should VT Code remember?"));
+        assert!(!message.contains("  rule  "));
+    }
+
+    #[test]
+    fn empty_memory_answers_cancel_instead_of_looping() {
+        assert!(is_empty_memory_answer(""));
+        assert!(is_empty_memory_answer("   "));
+        assert!(is_empty_memory_answer("\n\t "));
+        assert!(!is_empty_memory_answer("Use pnpm"));
+        assert!(!is_empty_memory_answer("  valid rule  "));
+    }
+
+    #[test]
+    fn supplemental_labels_missing_field_for_planner_retry() {
+        let first = format_supplemental_for_missing(None, "rule", "Always run cargo nextest");
+        assert_eq!(first, "For missing field 'rule': Always run cargo nextest");
+
+        let second = format_supplemental_for_missing(Some(first), "alias", "srivera");
+        assert!(second.contains("For missing field 'rule': Always run cargo nextest"));
+        assert!(second.contains("For missing field 'alias': srivera"));
+        assert!(second.find("rule").unwrap() < second.find("alias").unwrap());
+    }
+
+    #[test]
+    fn supplemental_trims_field_and_answer_whitespace_asymmetrically() {
+        let labeled =
+            format_supplemental_for_missing(None, "  repository_fact  ", "  Tests live under vtcode-core/tests  ");
+        assert_eq!(labeled, "For missing field 'repository_fact': Tests live under vtcode-core/tests");
+        assert!(!labeled.contains("  "));
     }
 
     #[test]
