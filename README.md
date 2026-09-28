@@ -24,7 +24,6 @@
 <summary><strong>Contents</strong></summary>
 
 - [Overview](#overview)
-- [Spotlight](#spotlight)
 - [Quick start](#quick-start)
   - [1. Install](#1-install)
   - [2. Configure](#2-configure)
@@ -68,18 +67,6 @@ review changes before they land.
 > OAuth login for ChatGPT and GitHub Copilot reuses the Codex CLI's public
 > client identity (unofficial); prefer your own API key for supported paths.
 > See [OAuth authentication](./docs/guides/oauth-authentication.md).
-
-### Spotlight
-
-- Memcode wrote up how VT Code's memory works across threads:
-  [read the post](https://memcode.in/blogs/vt-code-memory-across-threads).
-  The setup it walks through is documented in the
-  [Memcode MCP guide](./docs/guides/memcode-mcp.md)
-  ([PR #763](https://github.com/vinhnx/VTCode/pull/763)).
-  > "Memory is what creates that compounding loop: each finished task can
-  > leave behind a little less uncertainty for the next one, while the
-  > developer stays in control of what is saved and when it is used."
-  > — Vivek Gupta, Memcode
 
 ## Quick start
 
@@ -144,6 +131,10 @@ For work that takes more than one prompt:
 - **Beyond the TUI.** Headless `vtcode exec`, scheduled prompts, MCP,
   Skills, and Plugins. [Full automation](./docs/guides/full-automation.md) ·
   [Providers](./docs/providers/PROVIDER_GUIDES.md)
+- **Memory across threads.** Finished tasks can leave behind context for
+  the next one, with the developer deciding what is saved and when it is
+  used. [Memcode MCP guide](./docs/guides/memcode-mcp.md) ·
+  [Memcode write-up](https://memcode.in/blogs/vt-code-memory-across-threads)
 
 For repeatable, environment-checked results, use the
 [eval framework](./docs/guides/eval.md); an agent's completion message alone
@@ -274,7 +265,10 @@ Pair the TUI with a browser editor for authenticated, bounded editing:
 /webmcp pair <origin>    # inside the TUI
 ```
 
-Hosts and deployment: [WebMCP user guide](./docs/user-guide/webmcp.md).
+The hosted app at [vtcode.vinhnx.chatgpt.site](https://vtcode.vinhnx.chatgpt.site/)
+([mirror](https://vinhnx.github.io/VTCode/)) pairs with this bridge. Hosts and
+deployment: [WebMCP user guide](./docs/user-guide/webmcp.md) ·
+[deployment reference](./docs/reference/webmcp.md).
 
 ## Documentation
 
@@ -292,10 +286,6 @@ Per-subcommand details are in the
 Can't find a topic? [Documentation Index](./docs/INDEX.md).
 
 Full docs catalog: [docs overview](./docs/README.md).
-
-The [WebMCP hosted app](https://vtcode.vinhnx.chatgpt.site/)
-([mirror](https://vinhnx.github.io/VTCode/)) pairs with the TUI bridge;
-deployment: [WebMCP deployment reference](./docs/reference/webmcp.md).
 
 ## Development
 
