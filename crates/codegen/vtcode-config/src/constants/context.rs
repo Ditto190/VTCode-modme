@@ -25,7 +25,10 @@ pub const ENTERPRISE_CONTEXT_WINDOW: usize = 500_000;
 
 /// Legacy auto-compaction ratio retained for compatibility with older strategy
 /// configuration. Runtime threshold resolution is capacity- and reserve-driven.
-pub const DEFAULT_COMPACTION_TRIGGER_RATIO: f64 = 0.90;
+/// Fraction of the context window that triggers auto-compaction. 0.75 keeps
+/// long research turns from sitting in the expensive near-full zone (session
+/// data 2026-09-28: ~1M input tokens/turn) until 90% of the window is gone.
+pub const DEFAULT_COMPACTION_TRIGGER_RATIO: f64 = 0.75;
 
 // =========================================================================
 // Extended Thinking Token Management

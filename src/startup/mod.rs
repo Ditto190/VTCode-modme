@@ -158,7 +158,12 @@ impl StartupPolicy {
             }
         };
 
-        let allow_missing_provider_auth = args.print.is_none()
+        // `--print` with empty text cannot call the model: it will fail in
+        // `build_print_prompt` with "No prompt provided" before any LLM call.
+        // Requiring provider auth first turns that into a misleading
+        // "Authentication not found" (flaky `print_mode_requires_prompt_or_stdin`).
+        let print_has_empty_prompt = args.print.as_ref().is_some_and(|prompt| prompt.trim().is_empty());
+        let allow_missing_provider_auth = (args.print.is_none() || print_has_empty_prompt)
             && (args.command.is_none() || matches!(args.command, Some(Commands::AgentClientProtocol { .. })));
 
         Self { kind, allow_missing_provider_auth }
@@ -1062,6 +1067,21 @@ mod validation_tests {
 
         let ask = command_startup_policy(&Cli::parse_from(["vtcode", "ask", "hello"]));
         assert!(!ask.allow_missing_provider_auth());
+    }
+
+    #[test]
+    fn startup_policy_allows_missing_auth_for_empty_print_prompt() {
+        // `--print` with no text cannot call the model; requiring auth first
+        // turns "No prompt provided" into a misleading auth error.
+        let empty_print = command_startup_policy(&Cli::parse_from(["vtcode", "--print"]));
+        assert!(empty_print.allow_missing_provider_auth());
+
+        let blank_print = command_startup_policy(&Cli::parse_from(["vtcode", "--print", "   "]));
+        assert!(blank_print.allow_missing_provider_auth());
+
+        // A real `--print` prompt still needs credentials.
+        let print = command_startup_policy(&Cli::parse_from(["vtcode", "--print", "hello"]));
+        assert!(!print.allow_missing_provider_auth());
     }
 
     #[test]

@@ -201,6 +201,9 @@ A first-request budget guard rail is enforced by tests (lean harness defaults):
 | First request (no MCP) | ≤ 6,000 |
 | First request (MCP growth ceiling) | ≤ 8,000 |
 
+These are **intentional lean caps** (HarnessTax). Do not raise them without new
+session/benchmark evidence that the headroom is insufficient.
+
 - `crates/codegen/vtcode-core/src/tools/registry/builtins.rs::emitted_model_tool_schema_fits_within_first_request_budget`
   asserts builtin tool schemas stay within the budget in `progressive` mode.
 - `first_request_total_token_budget_within_limit` asserts the effective-default

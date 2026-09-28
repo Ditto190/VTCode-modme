@@ -1063,6 +1063,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Risk-Audit Deferred Items?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/s3-followups.md`
+  - **Content**: S3 Follow-ups (session-efficiency out-of-scope)
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about S3 Follow-ups (session-efficiency out-of-scope)?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/compose/spec/session-audit-harness-fixes.md`
   - **Content**: Session Audit Harness Fixes
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
