@@ -533,6 +533,7 @@ impl Session {
         true
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn build_input_render(&self, width: u16, height: u16) -> InputRender {
         if width == 0 || height == 0 {
             return InputRender { text: Text::default(), cursor_x: 0, cursor_y: 0 };
@@ -888,6 +889,7 @@ impl Session {
     /// Status line plus column ranges (relative to the status area) of the
     /// clickable background indicator spans: the activity text and the
     /// `{key} background` hint only.
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn render_input_status_line_with_hit(&self, width: u16) -> Option<(Line<'static>, Vec<(u16, u16)>)> {
         if width == 0 {
             return None;

@@ -157,6 +157,10 @@ TUI invariants found via hotpath (keep these):
   clustering / `clip_line`); other lines keep the full wrapper.
 - Transcript lines are pre-wrapped to `content_width`; `TranscriptWidget` must
   not re-wrap in `Paragraph` every frame.
+- Common transcript frames (no queue overlay, no links, no indicator shimmer)
+  paint via `paint_pre_wrapped_lines` (`Buffer::set_span`) — do not clone
+  `Line`s into `Paragraph`. Bottom padding is empty space, not a reason to
+  clone/pad the line list.
 
 ## TUI frame metrics
 

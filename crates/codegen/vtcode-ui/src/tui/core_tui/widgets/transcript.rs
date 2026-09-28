@@ -104,13 +104,34 @@ impl<'a> Widget for TranscriptWidget<'a> {
             .session
             .collect_transcript_window_cached(content_width, visible_start, viewport_rows);
 
-        // Check if we need to mutate the lines (fill empty space or add overlays)
-        let fill_count = viewport_rows.saturating_sub(cached_lines.len());
-        let needs_mutation = fill_count > 0 || !self.session.queued_inputs.is_empty();
+        // Check if we need to mutate the lines (queue overlay). Bottom padding
+        // rows need no mutation — the buffer is already default-styled empty
+        // space, so padding the line list only forced a per-frame clone.
+        let needs_mutation = !self.session.queued_inputs.is_empty();
+
+        // Fast path: no queue overlay, no live indicator shimmer, and no
+        // explicit links — paint cached rows in place without cloning Lines
+        // into Paragraph (hotpath: that clone was ~15KB/frame).
+        let has_links = cached_lines.iter().any(|line| !line.explicit_links.is_empty());
+        let spinner_active = active_indicator_shimmer_phase(self.session).is_some();
+        if !needs_mutation && !has_links && !spinner_active {
+            self.session.clear_transcript_file_link_targets();
+            if self.session.transcript_clear_required {
+                Clear.render(scroll_area, buf);
+                self.session.transcript_clear_required = false;
+            }
+            let default_style = self.session.styles.default_style();
+            let default_bg = default_style.bg;
+            paint_pre_wrapped_lines(cached_lines.as_slice(), scroll_area, buf, default_style);
+            apply_borrowed_line_backgrounds(buf, scroll_area, cached_lines.as_slice(), default_bg);
+            return;
+        }
 
         let mut visible_lines = if needs_mutation {
-            // Need to mutate, so clone and modify
+            // Need to mutate (queue overlay), so clone, pad to the viewport
+            // (overlay paints at the bottom), and modify.
             let mut lines = cached_lines.to_vec();
+            let fill_count = viewport_rows.saturating_sub(lines.len());
             if fill_count > 0 {
                 let target_len = lines.len() + fill_count;
                 lines.resize_with(target_len, TranscriptLine::default);
@@ -142,6 +163,48 @@ impl<'a> Widget for TranscriptWidget<'a> {
         let paragraph = Paragraph::new(visible_lines).style(self.session.styles.default_style());
         paragraph.render(scroll_area, buf);
         apply_precomputed_line_backgrounds(buf, scroll_area, &row_tints, default_bg);
+    }
+}
+
+/// Paint pre-wrapped transcript rows by writing spans directly into the buffer.
+/// Avoids cloning `Line`s into `Paragraph` on the common no-link path.
+fn paint_pre_wrapped_lines(lines: &[TranscriptLine], area: Rect, buf: &mut Buffer, default_style: Style) {
+    buf.set_style(area, default_style);
+    let max_rows = usize::from(area.height).min(lines.len());
+    for (row, transcript_line) in lines.iter().take(max_rows).enumerate() {
+        let y = area.y + row as u16;
+        let mut x = area.x;
+        for span in &transcript_line.line.spans {
+            if x >= area.right() {
+                break;
+            }
+            let remaining = area.right().saturating_sub(x);
+            if remaining == 0 {
+                break;
+            }
+            let (end_x, _end_y) = buf.set_span(x, y, span, remaining);
+            x = end_x;
+        }
+    }
+}
+
+/// Fill untinted cells on a diff row using `line_background` from borrowed rows.
+fn apply_borrowed_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[TranscriptLine], default_bg: Option<Color>) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let max_rows = usize::from(area.height).min(lines.len());
+    for (row, transcript_line) in lines.iter().take(max_rows).enumerate() {
+        let Some(bg) = line_background(&transcript_line.line) else {
+            continue;
+        };
+        let y = area.y + row as u16;
+        for x in area.left()..area.right() {
+            let cell = &mut buf[(x, y)];
+            if cell.bg == Color::Reset || Some(cell.bg) == default_bg {
+                cell.bg = bg;
+            }
+        }
     }
 }
 
