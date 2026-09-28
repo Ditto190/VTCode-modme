@@ -11,7 +11,8 @@ use ratatui::{
 };
 
 /// Paint pre-wrapped lines into `area` without Paragraph wrapping.
-fn paint_pre_wrapped_text(text: &Text<'static>, area: Rect, buf: &mut Buffer) {
+/// `base` is the Paragraph base style; span styles patch on top.
+fn paint_pre_wrapped_text(text: &Text<'static>, area: Rect, buf: &mut Buffer, base: Style) {
     for (row, line) in text.lines.iter().take(usize::from(area.height)).enumerate() {
         let y = area.y + row as u16;
         let mut x = area.x;
@@ -19,13 +20,15 @@ fn paint_pre_wrapped_text(text: &Text<'static>, area: Rect, buf: &mut Buffer) {
             if x >= area.right() {
                 break;
             }
-            let (end_x, _) = buf.set_span(x, y, span, area.right().saturating_sub(x));
+            let merged = base.patch(span.style);
+            let merged_span = Span::styled(span.content.clone(), merged);
+            let (end_x, _) = buf.set_span(x, y, &merged_span, area.right().saturating_sub(x));
             x = end_x;
         }
     }
 }
 
-fn paint_pre_wrapped_line(line: &Line<'static>, area: Rect, buf: &mut Buffer) {
+fn paint_pre_wrapped_line(line: &Line<'static>, area: Rect, buf: &mut Buffer, base: Style) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -35,7 +38,9 @@ fn paint_pre_wrapped_line(line: &Line<'static>, area: Rect, buf: &mut Buffer) {
         if x >= area.right() {
             break;
         }
-        let (end_x, _) = buf.set_span(x, y, span, area.right().saturating_sub(x));
+        let merged = base.patch(span.style);
+        let merged_span = Span::styled(span.content.clone(), merged);
+        let (end_x, _) = buf.set_span(x, y, &merged_span, area.right().saturating_sub(x));
         x = end_x;
     }
 }
@@ -50,7 +55,7 @@ use vtcode_commons::fs::{is_image_path, trim_trailing_image_path_str, unescape_w
 use super::utils::line_truncation::truncate_line_with_ellipsis_if_overflow;
 
 pub(super) struct InputRender {
-    text: Text<'static>,
+    pub(super) text: Text<'static>,
     cursor_x: u16,
     cursor_y: u16,
 }
@@ -312,7 +317,7 @@ impl Session {
         {
             let buf = frame.buffer_mut();
             buf.set_style(inner, background_style);
-            paint_pre_wrapped_text(&input_render.text, inner, buf);
+            paint_pre_wrapped_text(&input_render.text, inner, buf, background_style);
         }
         self.apply_input_selection_highlight(frame.buffer_mut(), inner);
         // Auto-copy on select only when enabled; otherwise the selection stays
@@ -341,7 +346,7 @@ impl Session {
             {
                 let buf = frame.buffer_mut();
                 buf.set_style(status_area, self.styles.default_style());
-                paint_pre_wrapped_line(&status_line, status_area, buf);
+                paint_pre_wrapped_line(&status_line, status_area, buf, self.styles.default_style());
             }
             let hits = background_hits
                 .into_iter()
@@ -568,26 +573,37 @@ impl Session {
         true
     }
 
+    /// Test-only entry that exercises the fingerprint cache.
+    #[cfg(test)]
+    pub(crate) fn build_input_render_for_test(&mut self, width: u16, height: u16) -> InputRender {
+        self.build_input_render(width, height)
+    }
+
     /// Build (or reuse) the input paragraph model for the current input state.
     fn build_input_render(&mut self, width: u16, height: u16) -> InputRender {
         if width == 0 || height == 0 {
             return InputRender { text: Text::default(), cursor_x: 0, cursor_y: 0 };
         }
 
-        let content_len = self.input_manager.content().len();
+        // Hash content (not just length) so same-length edits cannot serve a
+        // stale cached paragraph. Cursor and flags cover layout/placeholder.
+        let mut hasher = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(self.input_manager.content(), &mut hasher);
+        std::hash::Hash::hash(&self.prompt_prefix, &mut hasher);
+        let content_hash = std::hash::Hasher::finish(&hasher);
         let cursor = self.input_manager.cursor();
         let compact = self.input_compact_mode;
         let suggested = self.suggested_prompt_state.active;
-        let key = (width, height, content_len, cursor, compact, suggested);
+        let key = (width, height, content_hash, cursor, compact, suggested);
 
-        if let Some((w, h, len, cur, cmp, sug, cached)) = self.input_render_cache.take() {
-            if (w, h, len, cur, cmp, sug) == key {
+        if let Some((w, h, hash, cur, cmp, sug, cached)) = self.input_render_cache.take() {
+            if (w, h, hash, cur, cmp, sug) == key {
                 let render = InputRender {
                     text: cached.text.clone(),
                     cursor_x: cached.cursor_x,
                     cursor_y: cached.cursor_y,
                 };
-                self.input_render_cache = Some((w, h, len, cur, cmp, sug, cached));
+                self.input_render_cache = Some((w, h, hash, cur, cmp, sug, cached));
                 return render;
             }
             // Stale — drop before rebuild.
@@ -597,7 +613,7 @@ impl Session {
         self.input_render_cache = Some((
             width,
             height,
-            content_len,
+            content_hash,
             cursor,
             compact,
             suggested,

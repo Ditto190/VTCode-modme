@@ -355,8 +355,8 @@ pub struct Session {
     pub(crate) queued_inputs_preview_cache: Option<Vec<String>>,
     subprocess_entries_preview_cache: Option<Vec<String>>,
     /// Fingerprint of the last `build_input_render` inputs (width, height,
-    /// content_len, cursor, compact, suggested) plus the built result.
-    input_render_cache: Option<(u16, u16, usize, usize, bool, bool, input::InputRender)>,
+    /// content_hash, cursor, compact, suggested) plus the built result.
+    input_render_cache: Option<(u16, u16, u64, usize, bool, bool, input::InputRender)>,
 
     // --- Terminal Title ---
     /// Product/app name used in terminal title branding

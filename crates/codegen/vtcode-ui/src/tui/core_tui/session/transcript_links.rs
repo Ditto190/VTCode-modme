@@ -508,15 +508,19 @@ fn may_contain_link_candidate(line: &Line<'_>, explicit_links: &[RenderedTranscr
 }
 
 pub(super) fn may_contain_link_candidate_text(text: &str) -> bool {
-    // `.` covers bare workspace filenames (Cargo.toml) that resolve without a
-    // path separator. Keep this conservative: false positives only cost a scan.
-    text.contains("://")
-        || text.contains('/')
-        || text.contains('\\')
-        || text.contains('.')
-        || text.contains("~/")
-        || text.contains("./")
-        || text.contains("../")
+    if text.contains("://") || text.contains('/') || text.contains('\\') {
+        return true;
+    }
+    // Bare workspace filenames (`Cargo.toml`) resolve without a path separator.
+    // Only treat `name.ext` tokens as candidates — not sentence periods (`end.`).
+    text.split_whitespace().any(looks_like_filename_token)
+}
+
+fn looks_like_filename_token(token: &str) -> bool {
+    let Some((stem, ext)) = token.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty() && !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// A wrapped display row anchored in the original unwrapped text.

@@ -444,7 +444,12 @@ fn wrap_ascii_word_boundaries(text: &str, style: Style, max_width: usize) -> Vec
 
         match break_at {
             Some(space) if space > line_start => {
-                rows.push(Line::from(Span::styled(text[line_start..space].to_owned(), style)));
+                // Match wrap_line_internal: drop trailing wrap whitespace.
+                let mut row = &text[line_start..space];
+                while row.ends_with(' ') {
+                    row = &row[..row.len() - 1];
+                }
+                rows.push(Line::from(Span::styled(row.to_owned(), style)));
                 line_start = space + 1; // drop the break space
             }
             _ => {

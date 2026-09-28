@@ -2142,3 +2142,22 @@ fn eviction_shifts_dirty_hint_to_appended_line() {
         "eviction must shift the dirty hint to the appended line, not invent dirty=0"
     );
 }
+
+#[test]
+fn input_render_cache_rejects_same_length_content_change() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    session.input_manager.set_content("aaa".to_string());
+    session.input_manager.set_cursor(3);
+    let _ = session.build_input_render_for_test(40, 3);
+    session.input_manager.set_content("bbb".to_string());
+    session.input_manager.set_cursor(3);
+    let rebuilt = session.build_input_render_for_test(40, 3);
+    let text: String = rebuilt
+        .text
+        .lines
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref().to_string()))
+        .collect();
+    assert!(text.contains("bbb"), "same-length edit must not serve cached glyphs: {text:?}");
+    assert!(!text.contains("aaa"), "stale cached glyphs leaked: {text:?}");
+}

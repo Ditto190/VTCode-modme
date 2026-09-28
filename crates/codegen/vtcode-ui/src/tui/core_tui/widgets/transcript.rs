@@ -2,7 +2,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Clear, Paragraph, Widget},
 };
 
@@ -168,6 +168,7 @@ impl<'a> Widget for TranscriptWidget<'a> {
 
 /// Paint pre-wrapped transcript rows by writing spans directly into the buffer.
 /// Avoids cloning `Line`s into `Paragraph` on the common no-link path.
+/// Span styles patch `default_style` (same merge order as Paragraph).
 fn paint_pre_wrapped_lines(lines: &[TranscriptLine], area: Rect, buf: &mut Buffer, default_style: Style) {
     buf.set_style(area, default_style);
     let max_rows = usize::from(area.height).min(lines.len());
@@ -182,7 +183,8 @@ fn paint_pre_wrapped_lines(lines: &[TranscriptLine], area: Rect, buf: &mut Buffe
             if remaining == 0 {
                 break;
             }
-            let (end_x, _end_y) = buf.set_span(x, y, span, remaining);
+            let merged = default_style.patch(span.style);
+            let (end_x, _end_y) = buf.set_span(x, y, &Span::styled(span.content.clone(), merged), remaining);
             x = end_x;
         }
     }

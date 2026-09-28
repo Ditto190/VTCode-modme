@@ -79,7 +79,10 @@ impl<'a> Widget for HeaderWidget<'a> {
                     if x >= area.right() {
                         break;
                     }
-                    let (end_x, _) = buf.set_span(x, y, span, area.right().saturating_sub(x));
+                    // Paragraph applied text_style as the base; span style patches it.
+                    let merged = text_style.patch(span.style);
+                    let merged_span = ratatui::text::Span::styled(span.content.clone(), merged);
+                    let (end_x, _) = buf.set_span(x, y, &merged_span, area.right().saturating_sub(x));
                     x = end_x;
                 }
             }
@@ -110,16 +113,14 @@ impl<'a> Widget for HeaderWidget<'a> {
         }
         for (y, line) in (inner.y..).zip(self.lines.iter().take(usize::from(inner.height))) {
             let mut x = inner.x;
-            // Apply the dimmed primary style to unpainted spans.
             for span in &line.spans {
                 if x >= inner.right() {
                     break;
                 }
-                let mut span = span.clone();
-                if span.style.fg.is_none() {
-                    span.style = span.style.patch(text_style);
-                }
-                let (end_x, _) = buf.set_span(x, y, &span, inner.right().saturating_sub(x));
+                // Paragraph: text_style is the base, span style patches on top.
+                let merged = text_style.patch(span.style);
+                let merged_span = ratatui::text::Span::styled(span.content.clone(), merged);
+                let (end_x, _) = buf.set_span(x, y, &merged_span, inner.right().saturating_sub(x));
                 x = end_x;
             }
         }

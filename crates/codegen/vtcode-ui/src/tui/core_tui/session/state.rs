@@ -164,6 +164,7 @@ impl Session {
         self.header_lines_cache = None;
         self.header_block_title_cache = None;
         self.header_height_cache.clear();
+        self.input_render_cache = None;
         self.queued_inputs_preview_cache = None;
         self.subprocess_entries_preview_cache = None;
     }
@@ -187,6 +188,7 @@ impl Session {
         self.header_lines_cache = None;
         self.header_block_title_cache = None;
         self.header_height_cache.clear();
+        self.input_render_cache = None;
         self.render_state.request_redraw();
     }
 
