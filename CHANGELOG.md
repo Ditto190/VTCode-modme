@@ -2,6 +2,64 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.169.6 - 2026-09-28
+
+### Highlights
+#### Bug Fixes
+
+- Exclude TODO churn from changelog generator (e127c090) 
+- Show jump hint after wheel scroll (562ac39c) 
+- Share fence/name helpers and fix Build↔Plan switch budgets (2a48c270) 
+- Add awk family pattern to stop repeated prompts (839d376a) 
+- Concise Info notice for unavailable prompt checkpoint (f5bed9f1) 
+- Clean up Ctrl+C exit handling and postamble alignment (1b6f3ba4) 
+- Tighten interrupt exit postamble to remove blank gap (556d0f18) 
+- Close review gaps on session-efficiency (1df97c14) 
+- S3 follow-ups — print auth gate and earlier compaction (9c6d8c55) 
+- Wire trigger ratio and close print auth hole (9ad76939) 
+- Revert iTerm2 tab-icon profile on exit (c21b6a9f) 
+- Reset the agent-wide api_key_env when the CLI switches provider (856a8963) 
+- Align threshold expectations with the default trigger ratio (c22a1a87) 
+- Build the diff empty state with DOM APIs instead of innerHTML (758775e8) 
+- Pin open-review captures and stop inventing eviction dirty state (29c500dd) 
+- Correct style merge, input cache keys, and link fast-reject (8bdd9036) 
+- Filename links with trailing punct, input cache invalidation (9b868a38) 
+- Emit the exit summary as one atomic write (513a8220) 
+- Anchor the exit summary to the viewport bottom (3be55be3) 
+#### Documentation
+
+- Record harness-fence-share-and-close-race delivery (38228d70) 
+- Deliver session-efficiency after review (f92e8b7f) 
+- Deliver s3-followups after review (d268df68) 
+- Record tui-fps-responsiveness delivery (a4bd0b8a) 
+- Note tui-fps review-fix pass (549a61b9) 
+- Add missing subcommands and refine architecture graph (18f75bf6) 
+- Drop nonexistent stats subcommand, add app-server and anthropic-api (4cfbb42a) 
+#### Features
+
+- Improve transcript readability and accessibility (bf0225d2) 
+- Improve model picker and settings palette hierarchy (8778f177) 
+- Rework file picker with kind-aware rows and ignore-aware listing (0683b2d5) 
+### Other Changes
+#### Build
+
+- Centralize shared dependency versions in workspace.dependencies (de53b7ad) 
+#### Performance
+
+- Cut session noise and long-run token tax (de6676c2) 
+- Cut frame-path allocs and cache thrash under streaming load (1bfbd0d7) 
+- Hotpath-driven reflow and wrap cuts (3ef4fbe3) 
+- ASCII wrap fast path and drop Paragraph re-wrap (bf591e2d) 
+- Paint transcript without cloning Lines into Paragraph (4a1921d2) 
+- Cache input render and paint header without Paragraph (981ee238) 
+- Skip line tint scan when no span has a background (f565fb9e) 
+- Paint input and status without Paragraph wrap (bad95240) 
+#### Refactors
+
+- Drop redundant carriage write and flatten postamble guard (28e10edd) 
+#### Tests
+
+- Avoid string indexing in the text_fence assertions (ace055d9) 
 ## 0.169.5 - 2026-09-27
 
 ### Highlights
