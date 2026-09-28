@@ -247,13 +247,7 @@ impl<'a> InlineEventContext<'a> {
                 }
             }
             InlineEvent::ExecSessionAction { id, action } => self.handle_exec_session_action(id, action).await?,
-            InlineEvent::LaunchEditor { draft } => {
-                if draft.is_empty() {
-                    self.input_processor().submit("/edit".into())
-                } else {
-                    InlineLoopAction::LaunchEditorWithDraft { draft }
-                }
-            }
+            InlineEvent::LaunchEditor { draft } => InlineLoopAction::LaunchEditorWithDraft { draft },
             InlineEvent::RequestInlinePromptSuggestion(draft) => {
                 self.state.reset_interrupt_state();
                 InlineLoopAction::RequestInlinePromptSuggestion(draft)
@@ -326,7 +320,7 @@ impl<'a> InlineEventContext<'a> {
     async fn submit_to_focused_exec_session(&mut self, input: SubmittedInput) -> Result<InlineLoopAction> {
         // Slash commands are application actions, not stdin for the focused
         // process. This also keeps keyboard-generated commands such as
-        // `/subprocesses` and `/model` usable while a session is focused.
+        // `/config subprocess` and `/model` usable while a session is focused.
         if input.text.trim_start().starts_with('/') {
             return Ok(self.input_processor().submit(input));
         }

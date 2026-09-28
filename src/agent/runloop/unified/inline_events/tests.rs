@@ -202,7 +202,7 @@ async fn focused_exec_session_does_not_capture_slash_commands() {
 }
 
 #[tokio::test]
-async fn launch_editor_event_submits_edit_command() {
+async fn launch_editor_event_opens_editor_directly() {
     let (handle, mut renderer) = renderer_with_handle();
     let (ctrl_c_state, ctrl_c_notify) = ctrl_c_handles();
     let interrupts = InlineInterruptCoordinator::new(ctrl_c_state.as_ref());
@@ -250,7 +250,7 @@ async fn launch_editor_event_submits_edit_command() {
         .expect("process launch editor");
     assert!(matches!(
         action,
-        InlineLoopAction::Submit(ref command) if command.text == "/edit"
+        InlineLoopAction::LaunchEditorWithDraft { ref draft } if draft.is_empty()
     ));
 }
 

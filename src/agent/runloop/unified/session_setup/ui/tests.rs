@@ -443,7 +443,7 @@ fn file_open_callback_defers_terminal_editors_to_idle_drain() {
 }
 
 #[test]
-fn busy_model_and_effort_steer_route_to_settings_events() {
+fn busy_model_steer_routes_to_settings_events() {
     use vtcode_core::core::agent::steering::SteeringMessage;
     let state = Arc::new(state::CtrlCState::new());
     let notify = Arc::new(Notify::new());
@@ -459,15 +459,9 @@ fn busy_model_and_effort_steer_route_to_settings_events() {
         test_exec_sessions(),
     );
 
-    for text in [
-        "/model",
-        "/model foo",
-        "/effort",
-        "/effort high",
-        "/effort --persist low",
-    ] {
+    for text in ["/model", "/model foo"] {
         callback(&InlineEvent::Steer(text.into()));
-        let forwarded = settings_rx.try_recv().expect("model/effort steer must reach settings task");
+        let forwarded = settings_rx.try_recv().expect("model steer must reach settings task");
         assert!(matches!(forwarded, InlineEvent::Steer(_)), "expected Steer for {text}");
         assert!(steering_rx.try_recv().is_err(), "{text} must not become follow-up steering");
     }

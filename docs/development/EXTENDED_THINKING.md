@@ -35,7 +35,7 @@ thinking_display = "summarized"  # optional: "summarized", "omitted", or "update
 
 ### Important defaults
 
-- `effort` is unset by default, so each model uses its own default (`medium` on Claude Opus 5.5, `high` on the others). An explicit `agent.reasoning_effort` or `/effort` takes precedence. A configured level the model does not support falls back to the model default.
+- `effort` is unset by default, so each model uses its own default (`medium` on Claude Opus 5.5, `high` on the others). An explicit `agent.reasoning_effort` or `/model` picker effort takes precedence. A configured level the model does not support falls back to the model default.
 - `task_budget_tokens` is only sent for Claude Fable 5/5.1, Opus 5, and Opus 5.5 (not Claude Sonnet 5).
 - `thinking_display` defaults to the model default when unset.
   - Claude Opus 5.5 requests `updates` (beta `thinking-display-updates-2026-08-18`, sent only when used), so the text it writes between tool calls stays visible while the reasoning itself stays hidden.
@@ -169,7 +169,7 @@ These apply only to the manual-budget path on Anthropic-compatible backends; Cla
 ## Reasoning Effort `xhigh` and `max` Across Providers
 
 VT Code exposes a portable effort ladder (`none`, `minimal`, `low`, `medium`,
-`high`, `xhigh`, `max`) via `agent.reasoning_effort`, `/effort`, and the
+`high`, `xhigh`, `max`) via `agent.reasoning_effort`, the `/model` picker, and the
 `/model` picker. `xhigh` and `max` are only offered for models that natively
 support them; other models hide those levels instead of aliasing silently.
 
@@ -194,7 +194,7 @@ support them; other models hide those levels instead of aliasing silently.
 reasoning_effort = "xhigh"  # or "max" where natively supported
 ```
 
-- `/effort xhigh` / `/effort max [--persist]` validates against the active
+- `/model` picker effort (`xhigh`/`max`) validates against the active
   model's preset; unsupported levels are rejected with the supported list. A
   configured effort the active route does not support (for example after
   switching models) is omitted for that request with a warning instead of

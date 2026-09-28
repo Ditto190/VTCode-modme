@@ -63,6 +63,7 @@ fn restore_prompt_input_and_report(
 }
 
 pub(crate) async fn handle_open_rewind_picker(mut ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
+    maybe_auto_recover_pending_rewind(&mut ctx).await?;
     if !ctx.renderer.supports_inline_ui() {
         ctx.renderer.line(
             MessageStyle::Info,
@@ -250,9 +251,10 @@ fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) 
 }
 
 pub(crate) async fn handle_rewind_latest(
-    ctx: SlashCommandContext<'_>,
+    mut ctx: SlashCommandContext<'_>,
     scope: RevertScope,
 ) -> Result<SlashCommandControl> {
+    maybe_auto_recover_pending_rewind(&mut ctx).await?;
     let Some(manager) = ctx.checkpoint_manager else {
         ctx.renderer
             .line(MessageStyle::Info, "In-chat rewind requires access to the checkpoint manager.")?;
@@ -281,10 +283,11 @@ pub(crate) async fn handle_rewind_latest(
 }
 
 pub(crate) async fn handle_rewind_to_turn(
-    ctx: SlashCommandContext<'_>,
+    mut ctx: SlashCommandContext<'_>,
     turn: usize,
     scope: RevertScope,
 ) -> Result<SlashCommandControl> {
+    maybe_auto_recover_pending_rewind(&mut ctx).await?;
     if let Some(manager) = ctx.checkpoint_manager {
         let supports_reasoning = model_supports_reasoning(&**ctx.provider_client, &ctx.config.model);
         let result = restore_rewind_from_checkpoint(
@@ -332,17 +335,24 @@ pub(crate) async fn handle_redo(ctx: SlashCommandContext<'_>) -> Result<SlashCom
     Ok(SlashCommandControl::Continue)
 }
 
-pub(crate) async fn handle_rewind_recover(ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
-    let manager = ctx.checkpoint_manager.context("No checkpoint manager available")?;
-    let restored = manager
-        .recover_pending_rewind(&ctx.tool_registry.harness_context_snapshot().session_id)
-        .await
-        .context("No interrupted rewind to recover; /rewind-recover only resumes an interrupted restore")?;
+/// Auto-recover an interrupted rewind before running the requested rewind.
+///
+/// Returns `Ok(true)` when a pending restore was resumed so callers can note
+/// it in the transcript. Absence of a pending restore is not an error.
+async fn maybe_auto_recover_pending_rewind(ctx: &mut SlashCommandContext<'_>) -> Result<bool> {
+    let Some(manager) = ctx.checkpoint_manager else {
+        return Ok(false);
+    };
+    let session_id = ctx.tool_registry.harness_context_snapshot().session_id;
+    let restored = match manager.recover_pending_rewind(&session_id).await {
+        Ok(restored) => restored,
+        Err(_) => return Ok(false),
+    };
     let supports_reasoning = model_supports_reasoning(&**ctx.provider_client, &ctx.config.model);
     render_redo_restore_success(ctx.renderer, ctx.handle, ctx.conversation_history, restored, supports_reasoning)?;
     ctx.renderer
-        .line(MessageStyle::Info, "Recovery complete; interrupted rewind has been resumed.")?;
-    Ok(SlashCommandControl::Continue)
+        .line(MessageStyle::Info, "Auto-recovered an interrupted rewind before continuing.")?;
+    Ok(true)
 }
 
 async fn restore_rewind_from_checkpoint(

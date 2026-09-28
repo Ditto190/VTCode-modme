@@ -17,9 +17,9 @@ const CHECKUP_ACTION_PREFIX: &str = "checkup.action.";
 const CHECKUP_ACTION_BACK: &str = "checkup.action.back";
 const CHECKUP_ACTION_OPTIMIZE_PREFIX: &str = "checkup.optimize.";
 
-/// Identifies an applicable `/checkup` optimization the user can apply.
+/// Identifies an applicable `/config checkup` optimization the user can apply.
 ///
-/// These are all reversible config mutations; `/checkup` confirms with the user
+/// These are all reversible config mutations; `/config checkup` confirms with the user
 /// (via the selection modal) before mutating anything.
 #[derive(Debug)]
 struct CheckupRemediation {
@@ -136,27 +136,12 @@ pub(crate) async fn handle_show_status(ctx: SlashCommandContext<'_>) -> Result<S
     Ok(SlashCommandControl::Continue)
 }
 
-pub(crate) async fn handle_show_memory(mut ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
-    if !ctx.renderer.supports_inline_ui() {
-        memory::render_memory_status_lines(&mut ctx, false).await?;
-        ctx.renderer
-            .line(MessageStyle::Info, "Next actions: `/memory` in inline UI, `/config memory`, or `/edit <target>`.")?;
-        return Ok(SlashCommandControl::Continue);
-    }
-
-    if !super::ui::ensure_selection_ui_available(&mut ctx, "opening memory controls")? {
-        return Ok(SlashCommandControl::Continue);
-    }
-
-    memory::run_memory_modal(&mut ctx, false).await
-}
-
 pub(crate) async fn handle_show_memory_config(mut ctx: SlashCommandContext<'_>) -> Result<SlashCommandControl> {
     if !ctx.renderer.supports_inline_ui() {
         memory::render_memory_config_lines(&mut ctx).await?;
         ctx.renderer.line(
             MessageStyle::Info,
-            "Use `/memory` in inline UI for quick actions or `/config agent.persistent_memory` for the raw section.",
+            "Use `/config memory` for quick actions or `/config agent.persistent_memory` for the raw section.",
         )?;
         return Ok(SlashCommandControl::Continue);
     }

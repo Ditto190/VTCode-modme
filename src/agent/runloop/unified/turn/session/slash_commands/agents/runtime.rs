@@ -861,11 +861,11 @@ pub(super) fn render_background_setup_guidance(ctx: &mut SlashCommandContext<'_>
     )?;
     ctx.renderer.line(
         MessageStyle::Output,
-        r#"Add `[subagents.background] enabled = true` and `default_agent = "<agent-name>"`, then use `Ctrl+B` or `/subprocesses toggle`."#,
+        r#"Add `[subagents.background] enabled = true` and `default_agent = "<agent-name>"`, then use `Ctrl+B` or `/config subprocess toggle`."#,
     )?;
     ctx.renderer.line(
         MessageStyle::Info,
-        "Use `/agent` to browse available agent names. `/subprocesses` opens the Local Agents drawer.",
+        "Use `/agent` to browse available agent names. `/config subprocess` opens the Local Agents drawer.",
     )?;
     Ok(())
 }

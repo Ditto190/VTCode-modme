@@ -206,7 +206,6 @@ async fn apply_skill_command_outcome(
                     Ok(SlashCommandControl::BreakWithReason(reason))
                 }
                 SlashCommandControl::SelectAgent(name) => Ok(SlashCommandControl::SelectAgent(name)),
-                SlashCommandControl::ResumeLatest { show_all } => Ok(SlashCommandControl::ResumeLatest { show_all }),
             }
         }
         SkillCommandOutcome::Error { message } => {

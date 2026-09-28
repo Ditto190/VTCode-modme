@@ -78,7 +78,7 @@ pub(super) fn render_common_memory_status(
     ctx.renderer.line(
         MessageStyle::Info,
         &format!(
-            "Open/edit targets: `/edit {}`, `/edit {}`, or `/edit {}`",
+            "Memory files: `{}`, `{}`, or `{}`",
             memory_status.summary_file.display(),
             memory_status.memory_file.display(),
             memory_status.directory.display()
@@ -466,12 +466,4 @@ pub(super) fn show_memory_actions_modal(
 
 fn toggle_title(label: &str, enabled: bool) -> String {
     format!("{label}: {}", if enabled { "On" } else { "Off" })
-}
-
-pub(super) fn format_path_list(paths: &[String]) -> String {
-    if paths.is_empty() {
-        "none".to_string()
-    } else {
-        paths.join(", ")
-    }
 }

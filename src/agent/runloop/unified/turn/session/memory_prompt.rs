@@ -92,7 +92,7 @@ pub(crate) async fn handle_memory_prompt(
                 respond_to_memory_prompt(
                     ctx,
                     input,
-                    "Persistent memory is disabled. Use `/memory` or `/config memory` to enable it.",
+                    "Persistent memory is disabled. Use `/config memory` or `/config memory` to enable it.",
                 )?;
                 return Ok(Some(InteractionOutcome::DirectToolHandled));
             }
@@ -127,7 +127,7 @@ pub(crate) async fn handle_memory_prompt(
                     respond_to_memory_prompt(
                         ctx,
                         input,
-                        "Memory updates require the inline confirmation UI. Open `/memory` in inline UI to continue.",
+                        "Memory updates require the inline confirmation UI. Open `/config memory` in inline UI to continue.",
                     )?;
                     return Ok(Some(InteractionOutcome::DirectToolHandled));
                 }
@@ -142,12 +142,12 @@ pub(crate) async fn handle_memory_prompt(
                         report.directory.display()
                     ),
                     Ok(false) => format!(
-                        "Saved {} normalized memory note(s) under {}, but verification failed. Open `/memory` to inspect the saved note.",
+                        "Saved {} normalized memory note(s) under {}, but verification failed. Open `/config memory` to inspect the saved note.",
                         report.added_facts,
                         report.directory.display()
                     ),
                     Err(err) => format!(
-                        "Saved {} normalized memory note(s) under {}, but verification failed: {err}. Open `/memory` to inspect the saved note.",
+                        "Saved {} normalized memory note(s) under {}, but verification failed: {err}. Open `/config memory` to inspect the saved note.",
                         report.added_facts,
                         report.directory.display()
                     ),
@@ -175,7 +175,7 @@ pub(crate) async fn handle_memory_prompt(
                 respond_to_memory_prompt(
                     ctx,
                     input,
-                    "Persistent memory is disabled. Use `/memory` or `/config memory` to enable it.",
+                    "Persistent memory is disabled. Use `/config memory` or `/config memory` to enable it.",
                 )?;
                 return Ok(Some(InteractionOutcome::DirectToolHandled));
             }
@@ -241,7 +241,7 @@ pub(crate) async fn handle_memory_prompt(
                     respond_to_memory_prompt(
                         ctx,
                         input,
-                        "Memory removals require the inline confirmation UI. Open `/memory` in inline UI to continue.",
+                        "Memory removals require the inline confirmation UI. Open `/config memory` in inline UI to continue.",
                     )?;
                     return Ok(Some(InteractionOutcome::DirectToolHandled));
                 }
@@ -274,7 +274,7 @@ async fn handle_show_memory_intent(
     state: &mut InteractionState<'_>,
 ) -> Result<Option<InteractionOutcome>> {
     let control = handle_outcome(
-        SlashCommandOutcome::ShowMemory,
+        SlashCommandOutcome::ShowMemoryConfig,
         SlashCommandContext {
             thread_id: ctx.thread_id,
             active_thread_label: ctx.active_thread_label,
@@ -335,18 +335,6 @@ async fn handle_show_memory_intent(
             super::interaction_loop_runner::handle_select_primary_agent(ctx, state, Some(name)).await?;
             Ok(Some(InteractionOutcome::DirectToolHandled))
         }
-        SlashCommandControl::ResumeLatest { show_all } => {
-            match super::interaction_loop_runner::try_resume_latest_session(
-                ctx.renderer,
-                &ctx.config.workspace,
-                show_all,
-            )
-            .await?
-            {
-                outcome @ Some(_) => Ok(outcome),
-                None => Ok(Some(InteractionOutcome::DirectToolHandled)),
-            }
-        }
     }
 }
 
@@ -375,7 +363,7 @@ async fn maybe_cleanup_before_memory_mutation(
         respond_to_memory_prompt(
             ctx,
             input,
-            "Persistent memory still needs one-time cleanup before VT Code can change it. Use `/memory` to run cleanup when you're ready.",
+            "Persistent memory still needs one-time cleanup before VT Code can change it. Use `/config memory` to run cleanup when you're ready.",
         )?;
         return Ok(false);
     }
@@ -393,7 +381,7 @@ async fn maybe_cleanup_before_memory_mutation(
             respond_to_memory_prompt(
                 ctx,
                 input,
-                "Persistent memory needs one-time cleanup before VT Code can change it. Use `/memory` to run cleanup when you're ready.",
+                "Persistent memory needs one-time cleanup before VT Code can change it. Use `/config memory` to run cleanup when you're ready.",
             )?;
             return Ok(false);
         }
@@ -401,7 +389,7 @@ async fn maybe_cleanup_before_memory_mutation(
             respond_to_memory_prompt(
                 ctx,
                 input,
-                "Persistent memory needs one-time cleanup. Open `/memory` in inline UI to confirm cleanup before changing memory.",
+                "Persistent memory needs one-time cleanup. Open `/config memory` in inline UI to confirm cleanup before changing memory.",
             )?;
             return Ok(false);
         }

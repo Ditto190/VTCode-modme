@@ -248,7 +248,7 @@ pub(crate) fn build_session_event_callback(
             }
         }
         InlineEvent::Steer(input) => {
-            if matches!(input.text.split_whitespace().next(), Some("/model" | "/effort")) {
+            if matches!(input.text.split_whitespace().next(), Some("/model")) {
                 let _ = settings_events.send(event.clone());
                 return;
             }

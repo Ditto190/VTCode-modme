@@ -17,7 +17,7 @@ Single source of truth for VT Code terminal keyboard shortcuts. Press `?` on an 
 | `Ctrl+Enter` or `Tab` | Submit draft; empty draft processes newest queued message. | Queue draft (`QueueSubmit`); plain text is batchable, slash stays one-per-turn. App handles `/stop`, `/pause`, `/resume` immediately. |
 | `Tab` (first) | Accept visible ghost suggestion. | Same accept-first priority. |
 | `Shift+Enter` / `Alt+Enter` / `\`+`Enter` / `Ctrl+J` | Insert newline. | Same. |
-| `Enter` on empty draft with active jobs | Submit `/jobs`. | Same. |
+| `Enter` on empty draft with active jobs | Submit `/config jobs`. | Same. |
 
 Palettes consume `Tab`/`Enter`/`Esc` first: agent/file palettes select best match on `Tab`, slash navigation autocompletes on `Tab`, history picker consumes navigation keys.
 

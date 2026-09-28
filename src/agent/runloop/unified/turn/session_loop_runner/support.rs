@@ -157,7 +157,7 @@ pub(super) fn checkpoint_unavailable_notice(err_text: &str) -> &'static str {
     if err_text.contains("Another turn or rewind is using this workspace") {
         "Prompt kept — workspace busy (safety lock prevents checkpoint corruption). Options: wait then retry, or use a separate worktree."
     } else if err_text.contains("Interrupted rewind") {
-        "Prompt kept — rewind interrupted. Run /rewind-recover, then retry."
+        "Prompt kept — rewind interrupted. Run /rewind again to auto-recover, then retry."
     } else {
         "Prompt kept — checkpoint unavailable. Wait a moment and retry."
     }
@@ -739,8 +739,8 @@ mod tests {
 
     #[test]
     fn checkpoint_unavailable_notice_routes_interrupted_rewind_to_recover() {
-        let notice = checkpoint_unavailable_notice("Interrupted rewind; run /rewind-recover before continuing");
-        assert_eq!(notice, "Prompt kept — rewind interrupted. Run /rewind-recover, then retry.");
+        let notice = checkpoint_unavailable_notice("Interrupted rewind; run again before continuing");
+        assert_eq!(notice, "Prompt kept — rewind interrupted. Run /rewind again to auto-recover, then retry.");
     }
 
     #[test]

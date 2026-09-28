@@ -207,7 +207,7 @@ pub(crate) async fn launch_editor_from_context(
             Some(target) => Some(target),
             None => {
                 ctx.renderer
-                    .line(MessageStyle::Error, &format!("Invalid file target for `/edit`: {value}"))?;
+                    .line(MessageStyle::Error, &format!("Invalid file target for editor: {value}"))?;
                 ctx.renderer.line_if_not_empty(MessageStyle::Output)?;
                 return Ok(SlashCommandControl::Continue);
             }
@@ -499,7 +499,7 @@ fn build_editor_config_steps(editor_config: &EditorToolConfig, current_preset: E
                 request_choice_item(
                     EDITOR_ENABLED_ID,
                     "Enabled",
-                    "Allow `/edit` and single-click file links to open in the configured editor.",
+                    "Allow external editor and single-click file links to open in the configured editor.",
                     WORKFLOW_ENABLED,
                 ),
                 request_choice_item(
