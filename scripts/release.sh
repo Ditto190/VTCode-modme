@@ -306,8 +306,13 @@ generate_structured_changelog() {
 		local clean_msg
 		clean_msg=$(clean_commit_message "$message")
 
-		# Skip excluded patterns
-		if [[ "$message" =~ (chore\(release\):|bump version|update version|version bump|release v[0-9]+\.[0-9]+\.[0-9]+|chore.*version|chore.*release|build.*version|update.*version.*number|bump.*version.*to|update homebrew|update changelog) ]]; then
+		# Skip excluded patterns (case-insensitive via lowercased copy).
+		# Covers owner-only TODO churn ("Update TODO", "Update TODOs",
+		# "docs: update project TODO", "docs(todo): ...") which only touches
+		# docs/project/TODO.md.
+		local lower_msg
+		lower_msg=$(echo "$message" | tr '[:upper:]' '[:lower:]')
+		if [[ "$lower_msg" =~ (chore\(release\):|bump version|update version|version bump|release v[0-9]+\.[0-9]+\.[0-9]+|chore.*version|chore.*release|build.*version|update.*version.*number|bump.*version.*to|update homebrew|update changelog|update.*todo|docs\(todo\)|docs\(project\).*todo|^update project$) ]]; then
 			continue
 		fi
 
