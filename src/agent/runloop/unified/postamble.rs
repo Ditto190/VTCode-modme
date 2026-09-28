@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::io::{self, Write as _};
 use std::time::Duration;
 use vtcode_commons::ansi_codes::{BOLD, DIM, RESET, fg_256};
 use vtcode_commons::color256_theme::rgb_to_ansi256_for_theme;
@@ -58,43 +59,90 @@ pub(crate) fn print_exit_summary(data: ExitData<'_>) {
     // failed (emergency path, partial init) output processing (`ONLCR`) stays
     // off and every `println!` staircases. Unlike `restore_tui()` this always
     // attempts the disable, so the postamble starts from a cooked tty.
-    // Every row below carries its own leading `\r`, so no bare carriage is
-    // needed here: with `ONLCR` off `\n` moves down without returning to
-    // column 0, and after `RestorePosition` the cursor may sit mid-line.
     vtcode_ui::tui::panic_hook::ensure_raw_mode_disabled();
-    render_exit_postamble(data, render_final_response, print_exit_metrics);
-}
-
-fn render_exit_postamble(
-    data: ExitData<'_>,
-    mut render_response: impl FnMut(&str),
-    mut render_metrics: impl FnMut(&ExitData<'_>),
-) {
-    // Ensure any echoed `^C` from the terminal line discipline starts on its
-    // own line: the canonical restore clears the current line, but a SIGINT
-    // delivered after restore (cooked-mode echo) can still prefix our first
-    // write. Each branch below opens with a `\r`-prefixed row so the postamble
-    // starts clean.
+    // Arm the graceful-exit window before the first write so a late double
+    // Ctrl+C during teardown cannot hard-exit between postamble writes.
+    crate::agent::runloop::unified::session_setup::mark_exit_postamble_armed();
+    // Completed sessions re-print the answer through the markdown renderer so
+    // it survives in the main scrollback after the inline frame is torn down.
     if matches!(data.session_end_reason, vtcode_core::hooks::SessionEndReason::Completed)
         && let Some(response) = data.final_response.filter(|response| !response.trim().is_empty())
     {
-        // Completed sessions preserve the answer for scrollback; the TUI
-        // already showed it, but the alternate buffer was cleared on exit.
-        println!("\r");
-        render_response(response);
-    } else if matches!(
+        render_final_response(response);
+    }
+    // One buffered write for the notice + metrics block: the shell sees the
+    // whole summary or nothing, never a truncated first line.
+    write_postamble(&build_exit_postamble(&data));
+}
+
+/// Builds the exit postamble (interrupt notice + metrics block) as a single
+/// string.
+///
+/// Every row carries a leading `\r` so the block starts at column 0 even when
+/// output processing (`ONLCR`) is off, and the block opens on a fresh row so
+/// it never overwrites the leftover inline TUI frame that the canonical
+/// restore left behind.
+fn build_exit_postamble(data: &ExitData<'_>) -> String {
+    let mut out = String::with_capacity(640);
+    // Fresh row below any leftover inline frame content.
+    out.push_str("\r\n");
+
+    if matches!(
         data.session_end_reason,
         vtcode_core::hooks::SessionEndReason::Exit | vtcode_core::hooks::SessionEndReason::Cancelled
     ) {
         // Interrupted exits get concise feedback, not a full transcript dump.
         // The in-TUI answer (if any) stays in the alternate buffer history;
         // re-printing it here is the fullscreen noise reported on Ctrl+C.
-        // No leading blank line: this row's own `\r` reuses the `^C` echo row,
-        // and the metrics block below opens with its own separator blank — an
-        // extra one here reads as a blank gap.
-        println!("\r{DIM}Interrupted — session exited. Transcript saved; resume to continue.{RESET}");
+        out.push_str(&format!("\r{DIM}Interrupted — session exited. Transcript saved; resume to continue.{RESET}\n"));
     }
-    render_metrics(&data);
+
+    out.push_str("\r\n");
+    out.push_str(&format!(
+        "\r{BOLD}{title_style}> {} ({}){RESET}\n",
+        data.app_name,
+        data.version,
+        title_style = fg_256(rgb_to_ansi256_for_theme(0xAE, 0xA4, 0x7F, is_light_theme()))
+    ));
+
+    let trust = build_trust_label(data.trust_label);
+    if !trust.is_empty() {
+        out.push_str(&format!("\r{DIM}{trust}{RESET}\n"));
+    }
+
+    let model_line = build_model_line(data);
+    if !model_line.is_empty() {
+        out.push_str(&format!("\r{DIM}{model_line}{RESET}\n"));
+    }
+
+    out.push_str(&format!("\r{DIM}{}{RESET}\n", build_stats_line(data)));
+
+    if let Some((max_budget_usd, actual_cost_usd)) = data.budget_limit {
+        out.push_str(&format!("\r{DIM}Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}{RESET}\n"));
+    }
+
+    if let Some(session_id) = data.resume_identifier {
+        out.push_str(&format!(
+            "\r{DIM}Resume: {resume_style}vtcode --resume {session_id}{RESET}\n",
+            resume_style = fg_256(rgb_to_ansi256_for_theme(0x98, 0xBB, 0x74, is_light_theme()))
+        ));
+    }
+
+    out.push_str("\r\n");
+    out
+}
+
+fn is_light_theme() -> bool {
+    theme::is_light_theme(&theme::active_theme_id())
+}
+
+/// Writes the postamble in one syscall so no concurrent exit path (emergency
+/// double-Ctrl+C cleanup) can interleave between rows.
+fn write_postamble(postamble: &str) {
+    let mut stdout = io::stdout().lock();
+    if let Err(error) = stdout.write_all(postamble.as_bytes()).and_then(|()| stdout.flush()) {
+        tracing::warn!(%error, "failed to write the exit postamble");
+    }
 }
 
 fn render_final_response(response: &str) {
@@ -102,44 +150,6 @@ fn render_final_response(response: &str) {
     if let Err(error) = renderer.line(MessageStyle::Response, response) {
         tracing::warn!(%error, "failed to render final response during session exit");
     }
-}
-
-fn print_exit_metrics(data: &ExitData<'_>) {
-    let is_light = theme::is_light_theme(&theme::active_theme_id());
-
-    const TITLE_RGB: (u8, u8, u8) = (0xAE, 0xA4, 0x7F);
-    const MODEL_RGB: (u8, u8, u8) = (0xCC, 0x8A, 0x3E);
-    const RESUME_RGB: (u8, u8, u8) = (0x98, 0xBB, 0x74);
-
-    let title_color = rgb_to_ansi256_for_theme(TITLE_RGB.0, TITLE_RGB.1, TITLE_RGB.2, is_light);
-    let model_color = rgb_to_ansi256_for_theme(MODEL_RGB.0, MODEL_RGB.1, MODEL_RGB.2, is_light);
-    let resume_color = rgb_to_ansi256_for_theme(RESUME_RGB.0, RESUME_RGB.1, RESUME_RGB.2, is_light);
-    let title_style = fg_256(title_color);
-    let model_style = fg_256(model_color);
-    let resume_style = fg_256(resume_color);
-
-    println!("\r");
-    println!("\r{BOLD}{title_style}> {} ({}){RESET}", data.app_name, data.version);
-
-    let trust = build_trust_label(data.trust_label);
-    if !trust.is_empty() {
-        println!("\r{DIM}{trust}{RESET}");
-    }
-
-    print_model_line(data.model, data.provider, data.reasoning, &model_style);
-
-    let stats_line = build_stats_line(data);
-    println!("\r{DIM}{stats_line}{RESET}");
-
-    if let Some((max_budget_usd, actual_cost_usd)) = data.budget_limit {
-        println!("\r{DIM}Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}{RESET}",);
-    }
-
-    if let Some(session_id) = data.resume_identifier {
-        println!("\r{DIM}Resume: {resume_style}vtcode --resume {session_id}{RESET}");
-    }
-
-    println!("\r");
 }
 
 /// Builds the pipe-delimited exit stats line (session duration, token
@@ -199,14 +209,18 @@ fn build_stats_line(data: &ExitData<'_>) -> String {
     stats.join(" | ")
 }
 
-fn print_model_line(model: &str, provider: &str, reasoning: &str, model_style: &str) {
-    let model = model.trim();
-    let provider = provider.trim();
-    let reasoning = reasoning.trim();
+/// Builds the model/provider/reasoning row (unstyled ends are supplied by the
+/// caller's DIM wrapper). Empty when neither model nor provider is known.
+fn build_model_line(data: &ExitData<'_>) -> String {
+    let model = data.model.trim();
+    let provider = data.provider.trim();
+    let reasoning = data.reasoning.trim();
 
     let show_model = !model.is_empty();
     let show_provider = !provider.is_empty();
     let show_reasoning = !reasoning.is_empty();
+
+    let model_style = fg_256(rgb_to_ansi256_for_theme(0xCC, 0x8A, 0x3E, is_light_theme()));
 
     let mut line = match (show_model, show_provider) {
         (true, true) => format!("Model: {BOLD}{model_style}{model}{RESET}{DIM} via {provider}"),
@@ -224,9 +238,7 @@ fn print_model_line(model: &str, provider: &str, reasoning: &str, model_style: &
         }
     }
 
-    if !line.is_empty() {
-        println!("\r{DIM}{line}{RESET}");
-    }
+    line
 }
 
 /// Returns a borrowed trust label — empty string if unknown, no allocation.
@@ -424,20 +436,69 @@ mod tests {
 
     #[test]
     fn final_response_is_rendered_before_exit_metrics() {
+        // Completed sessions re-print the answer through the markdown renderer
+        // (stdout writes), so only the block shape is assertable here: the
+        // metrics rows always follow the response branch.
         let data = ExitData {
             final_response: Some("final response"),
             session_end_reason: vtcode_core::hooks::SessionEndReason::Completed,
             ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
         };
-        let rendered = std::cell::RefCell::new(Vec::new());
+        let postamble = build_exit_postamble(&data);
 
-        render_exit_postamble(
-            data,
-            |response| rendered.borrow_mut().push(format!("response: {response}")),
-            |data| rendered.borrow_mut().push(format!("metrics: {}", build_stats_line(data))),
+        assert!(postamble.contains("> VT Code (0.0.0)"), "title row missing: {postamble:?}");
+        assert!(postamble.contains("Session 30s"), "stats row missing: {postamble:?}");
+        assert!(
+            !postamble.contains("Interrupted — session exited"),
+            "completed exits must not carry the interrupt notice: {postamble:?}"
         );
+    }
 
-        assert_eq!(rendered.into_inner(), ["response: final response", "metrics: Session 30s"]);
+    #[test]
+    fn interrupt_postamble_keeps_full_summary_block() {
+        // Regression: a late double Ctrl+C during teardown used to hard-exit
+        // between postamble writes, leaving only the notice on screen.
+        let data = ExitData {
+            final_response: Some("long transcript body that must not leak"),
+            session_end_reason: vtcode_core::hooks::SessionEndReason::Exit,
+            resume_identifier: Some("session-test-1234"),
+            ..stats_test_data(Duration::from_secs(95), 1_000, 200, 800, 50, Some(80.0), 10, 2)
+        };
+        let postamble = build_exit_postamble(&data);
+        let rows: Vec<&str> = postamble.split('\n').collect();
+
+        let notice_row = rows
+            .iter()
+            .position(|row| row.contains("Interrupted — session exited"))
+            .expect("interrupt notice row");
+        let title_row = rows.iter().position(|row| row.contains("> VT Code")).expect("title row");
+        let stats_row = rows.iter().position(|row| row.contains("Session 1m 35s")).expect("stats row");
+        let resume_row = rows
+            .iter()
+            .position(|row| row.contains("vtcode --resume session-test-1234"))
+            .expect("resume id row");
+
+        assert!(notice_row < title_row, "notice must precede the block: {postamble:?}");
+        assert!(title_row < stats_row, "block order broken: {postamble:?}");
+        assert!(stats_row < resume_row, "resume id must follow the stats row: {postamble:?}");
+        assert!(
+            !postamble.contains("long transcript body"),
+            "interrupt exits must suppress the final response dump: {postamble:?}"
+        );
+    }
+
+    #[test]
+    fn postamble_rows_are_carriage_prefixed_and_open_on_a_fresh_row() {
+        let data = ExitData {
+            session_end_reason: vtcode_core::hooks::SessionEndReason::Exit,
+            ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
+        };
+        let postamble = build_exit_postamble(&data);
+
+        assert!(postamble.starts_with("\r\n"), "postamble must open on a fresh row: {postamble:?}");
+        for row in postamble.split('\n').filter(|row| !row.is_empty()) {
+            assert!(row.starts_with('\r'), "every postamble row must return the carriage: {row:?}");
+        }
     }
 
     #[test]
@@ -454,23 +515,13 @@ mod tests {
                 session_end_reason: reason,
                 ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
             };
-            let rendered = std::cell::RefCell::new(Vec::new());
+            let postamble = build_exit_postamble(&data);
 
-            render_exit_postamble(
-                data,
-                |response| rendered.borrow_mut().push(format!("response: {response}")),
-                |data| rendered.borrow_mut().push(format!("metrics: {}", build_stats_line(data))),
-            );
-
-            let rendered = rendered.into_inner();
             assert!(
-                rendered.iter().all(|line| !line.contains("long transcript body")),
-                "exit reason {reason:?} must suppress final response dump: {rendered:?}"
+                !postamble.contains("long transcript body"),
+                "exit reason {reason:?} must suppress final response dump: {postamble:?}"
             );
-            assert!(
-                rendered.iter().any(|line| line.starts_with("metrics:")),
-                "exit metrics must still render for {reason:?}: {rendered:?}"
-            );
+            assert!(postamble.contains("Session 30s"), "exit metrics must still render for {reason:?}: {postamble:?}");
         }
     }
 }
