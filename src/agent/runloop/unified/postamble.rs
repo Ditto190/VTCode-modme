@@ -36,9 +36,27 @@ pub(crate) struct ExitData<'a> {
     /// First assembled request composition (harness-tax breakdown). When
     /// present, the stats line surfaces the per-call fixed overhead.
     pub first_call_composition: Option<FirstCallComposition>,
+    /// How the session ended. Controls exit feedback:
+    /// - `Completed` re-prints the final response so it survives in the main
+    ///   scrollback after the alternate buffer is cleared.
+    /// - `Exit`/`Cancelled`/`Error` suppress the full dump (it is already
+    ///   visible in the TUI transcript) and print a concise notice instead,
+    ///   avoiding fullscreen noise on Ctrl+C.
+    pub session_end_reason: vtcode_core::hooks::SessionEndReason,
 }
 
 pub(crate) fn print_exit_summary(data: ExitData<'_>) {
+    // Belt-and-braces before any stdout write: the canonical restore in
+    // `finalize_session` already disabled raw mode, but if it was skipped or
+    // failed (emergency path, partial init) output processing (`ONLCR`) stays
+    // off and every `println!` staircases. Unlike `restore_tui()` this always
+    // attempts the disable, so the postamble starts from a cooked tty.
+    vtcode_ui::tui::panic_hook::ensure_raw_mode_disabled();
+    // Return the carriage explicitly: with `ONLCR` off `\n` moves down without
+    // returning to column 0, and after `RestorePosition` the cursor may sit
+    // mid-line. A leading `\r` makes every postamble row start at column 0
+    // regardless of termios state; with `ONLCR` on it is a harmless no-op.
+    print!("\r");
     render_exit_postamble(data, render_final_response, print_exit_metrics);
 }
 
@@ -47,8 +65,28 @@ fn render_exit_postamble(
     mut render_response: impl FnMut(&str),
     mut render_metrics: impl FnMut(&ExitData<'_>),
 ) {
-    if let Some(response) = data.final_response.filter(|response| !response.trim().is_empty()) {
-        render_response(response);
+    // Ensure any echoed `^C` from the terminal line discipline starts on its
+    // own line: the canonical restore clears the current line, but a SIGINT
+    // delivered after restore (cooked-mode echo) can still prefix our first
+    // write. A leading newline guarantees the postamble starts clean.
+    if data.final_response.is_some_and(|response| !response.trim().is_empty())
+        && matches!(data.session_end_reason, vtcode_core::hooks::SessionEndReason::Completed)
+    {
+        // Completed sessions preserve the answer for scrollback; the TUI
+        // already showed it, but the alternate buffer was cleared on exit.
+        println!("\r");
+        if let Some(response) = data.final_response.filter(|response| !response.trim().is_empty()) {
+            render_response(response);
+        }
+    } else if matches!(
+        data.session_end_reason,
+        vtcode_core::hooks::SessionEndReason::Exit | vtcode_core::hooks::SessionEndReason::Cancelled
+    ) {
+        // Interrupted exits get concise feedback, not a full transcript dump.
+        // The in-TUI answer (if any) stays in the alternate buffer history;
+        // re-printing it here is the fullscreen noise reported on Ctrl+C.
+        println!("\r");
+        println!("\r{DIM}Interrupted — session exited. Transcript saved; resume to continue.{RESET}");
     }
     render_metrics(&data);
 }
@@ -74,28 +112,28 @@ fn print_exit_metrics(data: &ExitData<'_>) {
     let model_style = fg_256(model_color);
     let resume_style = fg_256(resume_color);
 
-    println!();
-    println!("{BOLD}{title_style}> {} ({}){RESET}", data.app_name, data.version);
+    println!("\r");
+    println!("\r{BOLD}{title_style}> {} ({}){RESET}", data.app_name, data.version);
 
     let trust = build_trust_label(data.trust_label);
     if !trust.is_empty() {
-        println!("{DIM}{trust}{RESET}");
+        println!("\r{DIM}{trust}{RESET}");
     }
 
     print_model_line(data.model, data.provider, data.reasoning, &model_style);
 
     let stats_line = build_stats_line(data);
-    println!("{DIM}{stats_line}{RESET}");
+    println!("\r{DIM}{stats_line}{RESET}");
 
     if let Some((max_budget_usd, actual_cost_usd)) = data.budget_limit {
-        println!("{DIM}Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}{RESET}",);
+        println!("\r{DIM}Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}{RESET}",);
     }
 
     if let Some(session_id) = data.resume_identifier {
-        println!("{DIM}Resume: {resume_style}vtcode --resume {session_id}{RESET}");
+        println!("\r{DIM}Resume: {resume_style}vtcode --resume {session_id}{RESET}");
     }
 
-    println!();
+    println!("\r");
 }
 
 /// Builds the pipe-delimited exit stats line (session duration, token
@@ -171,7 +209,7 @@ fn print_model_line(model: &str, provider: &str, reasoning: &str, model_style: &
     }
 
     if !line.is_empty() {
-        println!("{DIM}{line}{RESET}");
+        println!("\r{DIM}{line}{RESET}");
     }
 }
 
@@ -285,6 +323,7 @@ mod tests {
             resume_identifier: None,
             budget_limit: None,
             first_call_composition: None,
+            session_end_reason: vtcode_core::hooks::SessionEndReason::Completed,
         }
     }
 
@@ -349,6 +388,7 @@ mod tests {
     fn final_response_is_rendered_before_exit_metrics() {
         let data = ExitData {
             final_response: Some("final response"),
+            session_end_reason: vtcode_core::hooks::SessionEndReason::Completed,
             ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
         };
         let rendered = std::cell::RefCell::new(Vec::new());
@@ -360,5 +400,39 @@ mod tests {
         );
 
         assert_eq!(rendered.into_inner(), ["response: final response", "metrics: Session 30s"]);
+    }
+
+    #[test]
+    fn exit_suppresses_final_response_dump() {
+        // Ctrl+C exits must not re-print the full TUI transcript: that is the
+        // fullscreen noise reported on control+c handling.
+        for reason in [
+            vtcode_core::hooks::SessionEndReason::Exit,
+            vtcode_core::hooks::SessionEndReason::Cancelled,
+            vtcode_core::hooks::SessionEndReason::Error,
+        ] {
+            let data = ExitData {
+                final_response: Some("long transcript body that must not leak"),
+                session_end_reason: reason,
+                ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
+            };
+            let rendered = std::cell::RefCell::new(Vec::new());
+
+            render_exit_postamble(
+                data,
+                |response| rendered.borrow_mut().push(format!("response: {response}")),
+                |data| rendered.borrow_mut().push(format!("metrics: {}", build_stats_line(data))),
+            );
+
+            let rendered = rendered.into_inner();
+            assert!(
+                rendered.iter().all(|line| !line.contains("long transcript body")),
+                "exit reason {reason:?} must suppress final response dump: {rendered:?}"
+            );
+            assert!(
+                rendered.iter().any(|line| line.starts_with("metrics:")),
+                "exit metrics must still render for {reason:?}: {rendered:?}"
+            );
+        }
     }
 }

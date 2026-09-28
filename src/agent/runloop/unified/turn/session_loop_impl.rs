@@ -74,9 +74,12 @@ pub(crate) async fn run_single_agent_loop_unified(
     .await
 }
 
-/// Guard that ensures terminal is restored to a clean state when dropped
-/// This handles cases where the TUI doesn't shutdown cleanly or the session
-/// exits early (e.g., due to Ctrl+C or other signals)
+/// Guard that ensures terminal is restored to a clean state when dropped.
+/// Backstop for paths where the TUI doesn't shut down cleanly or the session
+/// exits early (Ctrl+C, SIGTERM, panic). Delegates to the canonical
+/// `restore_tui()` (idempotent via `RESTORE_DONE`) so fullscreen teardown
+/// emits each escape sequence once and never leaks alternate-buffer frames
+/// into the shell scrollback.
 struct TerminalCleanupGuard;
 
 impl TerminalCleanupGuard {

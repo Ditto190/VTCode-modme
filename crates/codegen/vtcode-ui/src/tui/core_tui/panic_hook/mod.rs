@@ -5,7 +5,7 @@ pub(crate) mod state;
 
 pub use self::error::{TuiPanicGuard, print_error_report};
 pub use self::hook::init_panic_hook;
-pub use self::restore::restore_tui;
+pub use self::restore::{ensure_raw_mode_disabled, restore_tui};
 pub use self::state::{set_app_metadata, set_color_eyre_enabled, set_debug_mode, set_show_diagnostics};
 
 pub(crate) use self::state::{

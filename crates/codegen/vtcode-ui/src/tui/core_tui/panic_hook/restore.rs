@@ -70,6 +70,10 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     if let Err(error) = execute!(stderr, SetCursorStyle::DefaultUserShape, Show, RestorePosition) {
         first_error.get_or_insert_with(|| io::Error::other(error.to_string()));
     }
+    // Clear the terminal title on the canonical stream as well: the emergency
+    // Ctrl+C/SIGTERM paths never reach `Session::clear_terminal_title()`, so
+    // without this the previous session title leaks into the shell.
+    let _ = write!(stderr, "\x1b]0;default\x07");
     let _ = stderr.flush();
     crate::tui::core_tui::runner::terminal_io::reset_mouse_pointer_shape();
 
@@ -78,10 +82,26 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
         let _ = execute!(tty, SetCursorStyle::DefaultUserShape, Show, RestorePosition);
         let _ = tty.flush();
         let _ = write!(tty, "\x1b]22;default\x07");
+        let _ = write!(tty, "\x1b]0;default\x07");
         let _ = tty.flush();
     }
 
+    // Stdout carries no escape sequences here, but flushing it guarantees any
+    // buffered postamble (exit summary) is ordered after the restore instead
+    // of interleaving with it on Ctrl+C exits.
+    let _ = io::stdout().flush();
+
     first_error
+}
+
+/// Best-effort raw-mode release for post-TUI stdout postambles.
+///
+/// Unlike [`restore_tui()`] (one-shot via `RESTORE_DONE`), this always
+/// attempts `disable_raw_mode()` so a late `println!` never staircases when
+/// output processing (`ONLCR`) is still off. Safe to call when raw mode was
+/// never enabled: crossterm's disable is a no-op in that case.
+pub fn ensure_raw_mode_disabled() {
+    let _ = disable_raw_mode();
 }
 
 /// Restore terminal to a usable state after a panic or error.
@@ -172,7 +192,9 @@ pub fn restore_tui() -> io::Result<()> {
     if let Some(mut tty) = open_tty_writer() {
         let _ = tty.flush();
     }
-    // Ensure stderr is flushed after raw mode restore
+    // Ensure both streams are flushed after raw mode restore so the shell
+    // prompt and any exit postamble are ordered after the restore sequences.
+    let _ = io::stdout().flush();
     let _ = io::stderr().flush();
     state::mark_raw_mode_was_enabled(false);
 

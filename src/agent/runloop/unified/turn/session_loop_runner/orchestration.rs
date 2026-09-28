@@ -2674,10 +2674,20 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
 
         // Capture the response before finalization shuts down the inline TUI
         // and clears its screen. The owned copy remains available for the
-        // plain stdout postamble after terminal restoration.
+        // plain stdout postamble after terminal restoration. On interrupt
+        // exits (Exit/Cancelled) the postamble suppresses this dump and
+        // prints a concise notice instead (see postamble::render_exit_postamble).
         let final_response = latest_assistant_result_text(&runtime.state.messages);
         if matches!(session_end_reason, SessionEndReason::NewSession) {
             next_session_primary_agent = Some(active_primary_agent.active().name().to_owned());
+        }
+        // Best-effort backstop: a Ctrl+C exit from idle (no turn running) can
+        // leave exec/PTY sessions alive because turn-level cancellation never
+        // ran. Terminate them before teardown so no child outlives the TUI.
+        if matches!(session_end_reason, SessionEndReason::Exit | SessionEndReason::Cancelled | SessionEndReason::Error)
+            && let Err(error) = tool_registry.terminate_all_exec_sessions_async().await
+        {
+            tracing::warn!(%error, "failed to terminate exec sessions during session exit");
         }
         let finalization_output = match finalize_session(
             &mut renderer,
@@ -2795,6 +2805,11 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             let _ = vtcode_ui::tui::panic_hook::restore_tui();
         }
         let session_total_usage = session_stats.total_usage();
+        // Shut down background work before the postamble so no late task can
+        // write after the terminal is restored and the summary is printed.
+        if let Some(controller) = tool_registry.subagent_controller() {
+            controller.signal_shutdown().await;
+        }
         print_exit_summary(ExitData {
             app_name: "VT Code",
             version: env!("CARGO_PKG_VERSION"),
@@ -2814,10 +2829,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             resume_identifier,
             budget_limit: session_stats.budget_limit(),
             first_call_composition: session_stats.first_call_composition(),
+            session_end_reason,
         });
-        if let Some(controller) = tool_registry.subagent_controller() {
-            controller.signal_shutdown().await;
-        }
         if matches!(session_end_reason, SessionEndReason::Error) {
             return Err(anyhow::anyhow!(
                 "{}",
