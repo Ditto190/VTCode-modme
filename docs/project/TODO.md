@@ -69,16 +69,6 @@ refine and rework file picker functionality and UI. Ensure it handles various fi
 
 ===
 
-add numbering keyboard shortcut for shared/common human in the loop modal to quickly select options. for example, pressing "1" selects the first option, "2" selects the second, and so on. ensure it works consistently across different terminals and respects the modal's current focus state. and provide visual feedback for the selected option. also reference the image attached for design and structure guidance.
-
-ref: '/Users/vinhnguyenxuan/Documents/vtcode-resources/Screenshot 2026-09-27 at 16.25.34.png'
-
-===
-
-add /config option to let user copy on click on TUI or copy manually from keyboard shortcuts.
-
-===
-
 implement /config options searchs functionality to allow users to quickly find and access specific configuration options within the TUI. Ensure the search is responsive and provides relevant results as the user types.
 
 ===
@@ -99,3 +89,31 @@ exec_1fd61528cc9a462b90b9819e' not found. Copy the exact `session_id` from the e
 ===
 
 the TUI fps and responsiveness should be monitored and optimized to ensure a smooth user experience, especially when handling large files or complex operations. Currently it seems janky and may suffer from frame drops or input lag under heavy load. Consider profiling the TUI rendering pipeline and input handling to identify bottlenecks and implement necessary optimizations. and check for any memory leaks or inefficient rendering patterns that could be contributing to the performance issues. Research ratatui.rs and crossterm for potential improvements and best practices.
+
+===
+
+refine and improve config, models modal UI/UX for better user experience and clarity. use text styles, spacing, and visual hierarchy effectively. bold, dimmed, and highlighted text should be used to guide the user's attention and emphasize important elements. revamp and revise the layout, interactions, and feedback mechanisms to ensure intuitive and efficient user workflows.
+
+currently it lacks a cohesive visual hierarchy and clear feedback mechanisms, making it harder for users to navigate and understand the available options. addressing these issues will significantly enhance the overall user experience and make the interface more intuitive and efficient.
+
+to address these issues, consider implementing consistent spacing, clear labeling, and immediate visual feedback for user actions. use color, typography, and layout strategically to create a clear hierarchy and guide users through complex interactions. additionally, ensure that error messages and success indicators are prominent and easy to understand, reducing cognitive load and enhancing overall usability.
+
+====
+
+check large inputs to the chat input text field in the TUI. currently it shows the full text instead of previous content being truncated or summarized. implement a mechanism to handle long inputs gracefully. including text, images and file tokens handling for large pasting messages within the input.
+
+====
+
+check messages queue handling doesn't work properly. investigate the root cause of the issue and implement a reliable mechanism to ensure messages are queued, processed, and displayed correctly in the TUI. consider edge cases such as rapid message influx, large message sizes, and potential race conditions. when the main agent is busy or temporarily unavailable, messages should still be queued and processed once the agent is ready.
+
+===
+
+fix memory recording flow not working
+
+```
+────────────────────────────────
+please document and make sure to remember this rule for future reference
+  Couldn't save memory yet. The planner still needs rule: What rule would you like me to remember? Please share the
+  specific rule text.
+  Please submit the complete fact directly in a new remember ... request.
+```
