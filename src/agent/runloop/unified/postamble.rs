@@ -51,12 +51,10 @@ pub(crate) fn print_exit_summary(data: ExitData<'_>) {
     // failed (emergency path, partial init) output processing (`ONLCR`) stays
     // off and every `println!` staircases. Unlike `restore_tui()` this always
     // attempts the disable, so the postamble starts from a cooked tty.
+    // Every row below carries its own leading `\r`, so no bare carriage is
+    // needed here: with `ONLCR` off `\n` moves down without returning to
+    // column 0, and after `RestorePosition` the cursor may sit mid-line.
     vtcode_ui::tui::panic_hook::ensure_raw_mode_disabled();
-    // Return the carriage explicitly: with `ONLCR` off `\n` moves down without
-    // returning to column 0, and after `RestorePosition` the cursor may sit
-    // mid-line. A leading `\r` makes every postamble row start at column 0
-    // regardless of termios state; with `ONLCR` on it is a harmless no-op.
-    print!("\r");
     render_exit_postamble(data, render_final_response, print_exit_metrics);
 }
 
@@ -68,16 +66,15 @@ fn render_exit_postamble(
     // Ensure any echoed `^C` from the terminal line discipline starts on its
     // own line: the canonical restore clears the current line, but a SIGINT
     // delivered after restore (cooked-mode echo) can still prefix our first
-    // write. A leading newline guarantees the postamble starts clean.
-    if data.final_response.is_some_and(|response| !response.trim().is_empty())
-        && matches!(data.session_end_reason, vtcode_core::hooks::SessionEndReason::Completed)
+    // write. Each branch below opens with a `\r`-prefixed row so the postamble
+    // starts clean.
+    if matches!(data.session_end_reason, vtcode_core::hooks::SessionEndReason::Completed)
+        && let Some(response) = data.final_response.filter(|response| !response.trim().is_empty())
     {
         // Completed sessions preserve the answer for scrollback; the TUI
         // already showed it, but the alternate buffer was cleared on exit.
         println!("\r");
-        if let Some(response) = data.final_response.filter(|response| !response.trim().is_empty()) {
-            render_response(response);
-        }
+        render_response(response);
     } else if matches!(
         data.session_end_reason,
         vtcode_core::hooks::SessionEndReason::Exit | vtcode_core::hooks::SessionEndReason::Cancelled
@@ -85,9 +82,9 @@ fn render_exit_postamble(
         // Interrupted exits get concise feedback, not a full transcript dump.
         // The in-TUI answer (if any) stays in the alternate buffer history;
         // re-printing it here is the fullscreen noise reported on Ctrl+C.
-        // No leading blank line: the bare `CR` in `print_exit_summary` already
-        // reuses the `^C` echo row, and the metrics block below opens with its
-        // own separator blank — an extra one here reads as a blank gap.
+        // No leading blank line: this row's own `\r` reuses the `^C` echo row,
+        // and the metrics block below opens with its own separator blank — an
+        // extra one here reads as a blank gap.
         println!("\r{DIM}Interrupted — session exited. Transcript saved; resume to continue.{RESET}");
     }
     render_metrics(&data);
