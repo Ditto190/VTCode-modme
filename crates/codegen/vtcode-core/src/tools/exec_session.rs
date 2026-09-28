@@ -3080,4 +3080,41 @@ mod tests {
         assert_eq!(total_bytes, chunk.len() as u64);
         assert!(truncated);
     }
+
+    /// Close must not deadlock or panic when a reader still holds
+    /// `output_read_lock` past `EXEC_SESSION_OUTPUT_READ_LOCK_TIMEOUT`.
+    /// Post-close reads must fail with a normal error, not a panic.
+    #[tokio::test]
+    async fn close_proceeds_cleanly_when_output_read_lock_is_held() -> anyhow::Result<()> {
+        let temp_dir = tempdir()?;
+        let workspace_root = canonicalize_workspace(temp_dir.path());
+        let pty_sessions = PtySessionManager::new(workspace_root.clone(), PtyConfig::default());
+        let manager = ExecSessionManager::new(workspace_root.clone(), pty_sessions);
+
+        manager
+            .create_pipe_session(
+                "lock-race".to_string().into(),
+                vec!["/bin/sh".to_string(), "-c".to_string(), "printf hello".to_string()],
+                workspace_root,
+                HashMap::new(),
+            )
+            .await?;
+
+        let record = manager.session_record("lock-race").await?;
+        let _held = record.output_read_lock.lock().await;
+
+        // Close waits at most EXEC_SESSION_OUTPUT_READ_LOCK_TIMEOUT (1s) for
+        // the lock, then proceeds; bound the whole call so a hang fails fast.
+        let closed = timeout(Duration::from_secs(5), manager.close_session("lock-race")).await;
+        let session = closed
+            .expect("close_session must finish while the read lock is held")
+            .expect("close_session must succeed after the lock acquire timeout");
+        assert_eq!(session.id.as_str(), "lock-race");
+
+        drop(_held);
+
+        let after = manager.read_session_output("lock-race", true).await;
+        assert!(after.is_err(), "post-close read must be a clean error, got {after:?}");
+        Ok(())
+    }
 }

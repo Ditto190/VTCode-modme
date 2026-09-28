@@ -407,13 +407,13 @@ fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
 
     let mut search_from = 0usize;
     loop {
-        let start = find_unfenced_from(text, TOOL_TAG, search_from)?;
+        let start = vtcode_commons::text_fence::find_unfenced_from(text, TOOL_TAG, search_from)?;
         let rest_initial = &text[start + TOOL_TAG.len()..];
         let name_end = rest_initial
             .find(|c: char| c == '<' || c == '{' || c.is_whitespace())
             .unwrap_or(rest_initial.len());
         let raw_name = rest_initial[..name_end].trim();
-        if !is_clean_skill_tool_name(raw_name) {
+        if !vtcode_commons::text_fence::is_clean_tool_name(raw_name) {
             search_from = start + TOOL_TAG.len();
             continue;
         }
@@ -435,94 +435,6 @@ fn parse_textual_skill_tool_call(text: &str) -> Option<(String, Value)> {
         }
         search_from = start + TOOL_TAG.len();
     }
-}
-
-/// Clean tool identifier: ASCII letter then alphanumerics/underscore, length <= 64.
-fn is_clean_skill_tool_name(raw: &str) -> bool {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.len() > 64 {
-        return false;
-    }
-    let mut chars = trimmed.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphabetic() {
-        return false;
-    }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-}
-
-/// Classify a line as a fenced-code-block delimiter.
-fn fence_delimiter_line(line: &str, open_char: Option<char>) -> Option<(char, bool)> {
-    let trimmed = line.trim();
-    let mut chars = trimmed.chars();
-    let first = chars.next()?;
-    if first != '`' && first != '~' {
-        return None;
-    }
-    let mut count = 1usize;
-    let mut closed_run = false;
-    for ch in chars {
-        if ch == first {
-            count += 1;
-        } else {
-            closed_run = true;
-            break;
-        }
-    }
-    if count < 3 {
-        return None;
-    }
-    if closed_run {
-        return Some((first, false));
-    }
-    let only_whitespace = trimmed.chars().skip(count).all(char::is_whitespace);
-    match open_char {
-        Some(open) if open == first && only_whitespace => Some((first, true)),
-        Some(_) => None,
-        None => Some((first, false)),
-    }
-}
-
-/// First byte offset of `needle` at or after `from`, outside fenced code blocks.
-fn find_unfenced_from(text: &str, needle: &str, from: usize) -> Option<usize> {
-    let mut open_char: Option<char> = None;
-    let mut segment_start = 0usize;
-    let mut cursor = 0usize;
-    let mut search_from = from;
-    for line in text.split_inclusive('\n') {
-        let line_start = cursor;
-        cursor += line.len();
-        let Some((fence_char, is_closing)) = fence_delimiter_line(line, open_char) else {
-            continue;
-        };
-        if is_closing {
-            // Fenced body stays excluded; only the region before the opener
-            // and after the closer are searchable.
-            open_char = None;
-        } else if open_char.is_none() {
-            if let Some(found) = find_in_span(text, needle, search_from.max(segment_start), line_start) {
-                return Some(found);
-            }
-            open_char = Some(fence_char);
-        }
-        segment_start = cursor;
-        search_from = search_from.max(segment_start);
-    }
-    if open_char.is_none() {
-        return find_in_span(text, needle, search_from.max(segment_start), text.len());
-    }
-    None
-}
-
-fn find_in_span(text: &str, needle: &str, start: usize, end: usize) -> Option<usize> {
-    if start >= end {
-        return None;
-    }
-    text.get(start..end)
-        .and_then(|slice| slice.find(needle))
-        .map(|index| start + index)
 }
 
 #[allow(
@@ -2318,6 +2230,7 @@ fn textual_skill_tool_call_skips_dirty_name_and_parses_clean_call() {
 
 #[test]
 fn is_clean_skill_tool_name_rejects_prose() {
+    use vtcode_commons::text_fence::is_clean_tool_name as is_clean_skill_tool_name;
     assert!(is_clean_skill_tool_name("exec_command"));
     assert!(is_clean_skill_tool_name("bash"));
     assert!(!is_clean_skill_tool_name(""));

@@ -132,6 +132,48 @@ pub(super) fn effective_max_tool_calls_for_approved_plan_execution(configured_li
     }
 }
 
+/// Remaining tool-call / tool-loop floor after a mid-turn Build↔Plan switch.
+///
+/// Mode floors (`max(limit, 120)`) only help when the turn is still empty. If
+/// Build already consumed most of the cap and the workflow auto-switches to
+/// Plan (or back to implementation), the new mode must get a full floor of
+/// *remaining* headroom from now — not a cap that is already nearly spent.
+pub(super) fn apply_mode_switch_remaining_tool_call_floor(
+    max_tool_calls: &mut usize,
+    used_tool_calls: usize,
+    planning_active: bool,
+) {
+    if *max_tool_calls == 0 {
+        return;
+    }
+    let floor = if planning_active {
+        PLANNING_WORKFLOW_MIN_TOOL_CALLS_PER_TURN
+    } else {
+        APPROVED_PLAN_MIN_TOOL_CALLS_PER_TURN
+    };
+    *max_tool_calls = (*max_tool_calls).max(used_tool_calls.saturating_add(floor));
+}
+
+/// Same remaining-headroom rule for tool-loop iterations (`step_count` is
+/// loops already taken this turn).
+pub(super) fn apply_mode_switch_remaining_tool_loop_floor(
+    current_max_tool_loops: &mut usize,
+    step_count: usize,
+    planning_active: bool,
+) {
+    if *current_max_tool_loops == UNLIMITED_TOOL_LOOPS {
+        return;
+    }
+    let floor = if planning_active {
+        PLANNING_WORKFLOW_MIN_TOOL_LOOPS
+    } else {
+        // Implementation after a plan still needs a full research-sized
+        // runway for edits + verification in the same turn.
+        PLANNING_WORKFLOW_MIN_TOOL_LOOPS.max(DEFAULT_MAX_TOOL_LOOPS)
+    };
+    *current_max_tool_loops = (*current_max_tool_loops).max(step_count.saturating_add(floor));
+}
+
 /// Detects a stale recovery status response that incorrectly carries the
 /// planning turn's tool-disabled state into the fresh approved-plan execution
 /// turn. This is intentionally narrow: ordinary blocker explanations remain
@@ -833,8 +875,9 @@ pub(super) async fn maybe_handle_tool_loop_limit(
 #[cfg(test)]
 mod tests {
     use super::{
-        TOOL_LOOP_LIMIT_RECOVERY_REASON, ToolLoopGrantSource, UNLIMITED_TOOL_LOOPS, arm_tool_loop_synthesis_recovery,
-        auto_tool_loop_grant_increment, clamp_tool_loop_increment,
+        TOOL_LOOP_LIMIT_RECOVERY_REASON, ToolLoopGrantSource, UNLIMITED_TOOL_LOOPS,
+        apply_mode_switch_remaining_tool_call_floor, apply_mode_switch_remaining_tool_loop_floor,
+        arm_tool_loop_synthesis_recovery, auto_tool_loop_grant_increment, clamp_tool_loop_increment,
         effective_max_tool_calls_for_approved_plan_execution, effective_max_tool_calls_for_turn, extract_turn_config,
         handle_steering_messages, initial_tool_loop_limit, is_internal_harness_follow_up,
         is_stale_approved_plan_pause_response, resolve_safety_tool_call_limits, resolve_tool_loop_limit,
@@ -847,6 +890,7 @@ mod tests {
     use crate::agent::runloop::unified::turn::context::TurnLoopResult;
     use crate::agent::runloop::unified::turn::turn_processing::test_support::TestTurnProcessingBacking;
     use std::time::Duration;
+    use vtcode_core::config::constants::tool_limits::PLANNING_WORKFLOW_MIN_TOOL_LOOPS;
     use vtcode_core::config::loader::VTCodeConfig;
     use vtcode_core::core::agent::steering::SteeringMessage;
     use vtcode_core::llm::provider::MessageRole;
@@ -1086,6 +1130,36 @@ mod tests {
     #[test]
     fn edit_mode_keeps_configured_tool_call_limit() {
         assert_eq!(effective_max_tool_calls_for_turn(32, false), 32);
+    }
+
+    #[test]
+    fn mode_switch_grants_remaining_tool_call_floor() {
+        // Build already spent most of a 120-cap; Plan entry must not inherit
+        // the leftover 20-call budget.
+        let mut max = 120usize;
+        apply_mode_switch_remaining_tool_call_floor(&mut max, 110, true);
+        assert_eq!(max, 110 + 120);
+        // Cap already larger than used+floor is preserved.
+        let mut max = 400usize;
+        apply_mode_switch_remaining_tool_call_floor(&mut max, 10, true);
+        assert_eq!(max, 400);
+        // Unlimited stays unlimited.
+        let mut max = 0usize;
+        apply_mode_switch_remaining_tool_call_floor(&mut max, 10, true);
+        assert_eq!(max, 0);
+    }
+
+    #[test]
+    fn mode_switch_grants_remaining_tool_loop_floor() {
+        let mut loops = 60usize;
+        apply_mode_switch_remaining_tool_loop_floor(&mut loops, 55, true);
+        assert_eq!(loops, 55 + PLANNING_WORKFLOW_MIN_TOOL_LOOPS);
+        let mut loops = 200usize;
+        apply_mode_switch_remaining_tool_loop_floor(&mut loops, 10, true);
+        assert_eq!(loops, 200);
+        let mut loops = usize::MAX;
+        apply_mode_switch_remaining_tool_loop_floor(&mut loops, 10, true);
+        assert_eq!(loops, usize::MAX);
     }
 
     #[test]
