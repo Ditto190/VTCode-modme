@@ -235,12 +235,13 @@ More: `vtcode config`, `vtcode dependencies`, `vtcode acp`, `vtcode a2a`,
 `vtcode webmcp`, `vtcode session-store`, `vtcode schema` (built-in tool
 schemas), `vtcode analyze` (workspace structure/security/performance),
 `vtcode check` (built-in repository checks), `vtcode pods` (run local
-models), `vtcode stats` (session metrics), `vtcode cleanup-snapshots`
-(prune old snapshots), `vtcode background-subagent` (manage background
-subagents), `vtcode update` (binary updates), `vtcode logout` (clear
-stored credentials), and `vtcode man` (man pages).
-Full list: `vtcode --help` or the
-[command reference](./docs/user-guide/commands.md).
+models), `vtcode app-server` (Codex app-server proxy),
+`vtcode anthropic-api` (Anthropic API compatibility server),
+`vtcode cleanup-snapshots` (prune old snapshots),
+`vtcode background-subagent` (manage background subagents),
+`vtcode update` (binary updates), `vtcode logout` (clear stored
+credentials), and `vtcode man` (man pages).
+Full list: `vtcode --help` or the [command reference](./docs/user-guide/commands.md).
 
 ### Everyday recipes
 
