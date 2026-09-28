@@ -84,6 +84,7 @@ impl Session {
         Some(self.build_frame_layout(viewport, metrics, extra_bottom_height))
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn render_base_frame(
         &mut self,
         frame: &mut Frame<'_>,

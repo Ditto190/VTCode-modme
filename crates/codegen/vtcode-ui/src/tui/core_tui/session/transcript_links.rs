@@ -72,6 +72,7 @@ impl Session {
         self.hovered_transcript_file_link = None;
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn decorate_borrowed_cached_transcript_links(
         &mut self,
         lines: &[TranscriptLine],
@@ -84,6 +85,7 @@ impl Session {
         self.decorate_borrowed_transcript_links_impl(lines, area, true)
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn decorate_borrowed_transcript_links_impl(
         &mut self,
         lines: &[TranscriptLine],
@@ -133,6 +135,7 @@ impl Session {
         self.decorate_visible_transcript_links_impl(lines, area, true)
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn decorate_visible_cached_transcript_links(
         &mut self,
         lines: Vec<TranscriptLine>,

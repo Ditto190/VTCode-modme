@@ -118,6 +118,7 @@ impl Session {
 }
 
 impl Session {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn rebuild_compact_activity_hit_regions(&mut self, buffer: &Buffer, area: Rect) {
         self.compact_activity_hit_regions.clear();
         if tool_output_viewer::compact_activity_hint_text(self).is_none() {

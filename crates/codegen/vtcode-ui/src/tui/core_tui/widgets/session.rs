@@ -179,6 +179,7 @@ struct SessionLayout {
 }
 
 impl Widget for &mut SessionWidget<'_> {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;

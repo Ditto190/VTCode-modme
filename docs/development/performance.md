@@ -153,6 +153,10 @@ TUI invariants found via hotpath (keep these):
 - Link projection fast-rejects when `may_contain_link_candidate_text` is false
   (no path chars and no `.`); bare workspace filenames still match via `.`.
 - Eviction uses `TranscriptReflowCache::evict_prefix`, never a full wipe.
+- Single-style ASCII prose uses `wrap_ascii_word_boundaries` (no grapheme
+  clustering / `clip_line`); other lines keep the full wrapper.
+- Transcript lines are pre-wrapped to `content_width`; `TranscriptWidget` must
+  not re-wrap in `Paragraph` every frame.
 
 ## TUI frame metrics
 

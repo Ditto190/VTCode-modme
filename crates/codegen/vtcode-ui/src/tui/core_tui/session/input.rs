@@ -236,6 +236,7 @@ const SHELL_MODE_BORDER_TITLE: &str = " ! Shell mode ";
 const SHELL_MODE_STATUS_HINT: &str = "Shell mode (!): direct command execution";
 
 impl Session {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn render_input(&mut self, frame: &mut Frame<'_>, area: Rect) {
         if area.height == 0 {
             self.set_input_area(None);

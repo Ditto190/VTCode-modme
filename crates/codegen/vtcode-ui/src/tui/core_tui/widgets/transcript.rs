@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::Line,
-    widgets::{Clear, Paragraph, Widget, Wrap},
+    widgets::{Clear, Paragraph, Widget},
 };
 
 use crate::tui::config::constants::ui;
@@ -54,6 +54,7 @@ impl<'a> TranscriptWidget<'a> {
 }
 
 impl<'a> Widget for TranscriptWidget<'a> {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
             self.session.set_transcript_area(None);
@@ -135,9 +136,10 @@ impl<'a> Widget for TranscriptWidget<'a> {
         // without a second clone.
         let default_bg = self.session.styles.default_style().bg;
         let row_tints: Vec<Option<Color>> = visible_lines.iter().map(line_background).collect();
-        let paragraph = Paragraph::new(visible_lines)
-            .style(self.session.styles.default_style())
-            .wrap(Wrap { trim: false });
+        // Lines are already wrapped to `content_width` == `scroll_area.width` in
+        // reflow. Re-wrapping in Paragraph every frame was the dominant
+        // steady-state render cost (hotpath: ~21KB/frame).
+        let paragraph = Paragraph::new(visible_lines).style(self.session.styles.default_style());
         paragraph.render(scroll_area, buf);
         apply_precomputed_line_backgrounds(buf, scroll_area, &row_tints, default_bg);
     }
