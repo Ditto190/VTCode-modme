@@ -46,7 +46,7 @@ escape sequence can set profile artwork. Coverage today:
 
 | Terminal | Graphical icon path | Status |
 | --- | --- | --- |
-| iTerm2 | `VT Code` dynamic profile (custom icon + auto-switch) | Automatic: installed on first iTerm2 TUI run and reinstalled whenever missing or stale (repair via `/terminal-setup install-iterm2-icon`); applied once at TUI startup while installed. No config opt-out — deleting the profile file lasts only until the next launch |
+| iTerm2 | `VT Code` dynamic profile (custom icon) | Automatic: installed on first iTerm2 TUI run and reinstalled whenever missing or stale (repair via `/terminal-setup install-iterm2-icon`); the session switches to it at TUI startup and reverts to its original profile on exit. No config opt-out — deleting the profile file lasts only until the next launch |
 | Windows Terminal | `settings.json` profile `"icon"` (`.png`) | Guided fragment in `/terminal-setup` output; assets in `resources/icons/` |
 | VS Code integrated terminal | Extension terminal `iconPath` | Automatic: bundled `media/vtcode-terminal.png` |
 | Kitty, Ghostty, WezTerm, Alacritty, Terminal.app, Warp, Zed, Hyper, Tabby | None per-session (app/window level only) | `OSC 1`/`OSC 2` text label |
@@ -55,12 +55,19 @@ Bundled assets live in `resources/icons/` (see its `README.md`):
 `vtcode-profile-32.png` for tabs, `vtcode-profile-120.png` for HiDPI
 profiles, and `vtcode-profile-180.png` for Windows Terminal.
 On iTerm2, `/terminal-setup install-iterm2-icon` installs a `VT Code`
-dynamic profile automatically; VT Code switches to it once at startup
-whenever the profile file exists. The installer also runs on every
-interactive iTerm2 launch and rewrites the profile file when it is
-missing or the bundled artwork changed, so deleting the file uninstalls
-the icon only until the next launch. There is no config key to disable
-the install; `--quiet` suppresses only the install notice.
+dynamic profile automatically. VT Code switches the session to that profile
+once at startup (via `OSC 1337;SetProfile=`) and switches back to the
+session's original profile on exit, so the tab icon is only shown while the
+TUI runs. Because `SetProfile` is a sticky change with no automatic
+reversion, the switch-back is emitted by the terminal teardown path rather
+than relying on iTerm2's Automatic Profile Switching (which requires Shell
+Integration). The installer also runs on every interactive iTerm2 launch and
+rewrites the profile file when it is missing or the bundled profile/artwork
+changed, so deleting the file uninstalls the icon only until the next launch.
+If a tab is already stuck showing the VT Code icon (from an older build),
+run `/terminal-setup reset-iterm2-icon` in it or open a new tab. There is no
+config key to disable the install; `--quiet` suppresses only the install
+notice.
 
 ## Line Break Options
 

@@ -463,8 +463,12 @@ fn handle_terminal_setup_command(args: &str, renderer: &mut AnsiRenderer) -> Res
             vtcode_core::terminal_setup::terminals::iterm2::run_profile_icon_install(renderer)?;
             Ok(SlashCommandOutcome::Handled)
         }
+        "reset-iterm2-icon" => {
+            vtcode_core::terminal_setup::terminals::iterm2::run_profile_icon_reset(renderer)?;
+            Ok(SlashCommandOutcome::Handled)
+        }
         _ => {
-            renderer.line(MessageStyle::Error, "Usage: /terminal-setup [install-iterm2-icon]")?;
+            renderer.line(MessageStyle::Error, "Usage: /terminal-setup [install-iterm2-icon|reset-iterm2-icon]")?;
             Ok(SlashCommandOutcome::Handled)
         }
     }

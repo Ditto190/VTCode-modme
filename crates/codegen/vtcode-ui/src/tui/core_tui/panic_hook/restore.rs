@@ -11,6 +11,17 @@ use ratatui::crossterm::{
 
 use super::state::{self, COLOR_SCHEME_REPORTS_ENABLED, KEYBOARD_ENHANCEMENTS_PUSHED};
 
+/// Emit the session's original iTerm2 profile switch-back, if one is pending.
+///
+/// VT Code switches to its `VT Code` icon profile at TUI startup; `OSC 1337;
+/// SetProfile=` is sticky, so the matching switch back to the session's
+/// original profile is emitted here (on normal exit, Ctrl+C, panic, and
+/// SIGTERM) rather than left to iTerm2's Automatic Profile Switching, which
+/// requires Shell Integration and is not reliably present.
+fn emit_iterm2_profile_restore(writer: &mut impl Write, original: &str) -> io::Result<()> {
+    writer.write_all(vtcode_commons::ansi_codes::set_iterm2_profile(original).as_bytes())
+}
+
 /// Emit the terminal-restoration escape sequence.
 ///
 /// When `clear_alternate` is true we are currently on the alternate screen
@@ -62,6 +73,7 @@ fn open_tty_writer() -> Option<std::fs::File> {
 
 fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     let mut first_error: Option<io::Error> = None;
+    let profile_restore = state::take_iterm2_profile_to_restore();
 
     let mut stderr = io::stderr();
     if let Err(error) = emit_restore_sequence(&mut stderr, clear_alternate) {
@@ -74,6 +86,9 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
     // Ctrl+C/SIGTERM paths never reach `Session::clear_terminal_title()`, so
     // without this the previous session title leaks into the shell.
     let _ = write!(stderr, "\x1b]0;default\x07");
+    if let Some(original) = profile_restore.as_deref() {
+        let _ = emit_iterm2_profile_restore(&mut stderr, original);
+    }
     let _ = stderr.flush();
     crate::tui::core_tui::runner::terminal_io::reset_mouse_pointer_shape();
 
@@ -83,6 +98,9 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
         let _ = tty.flush();
         let _ = write!(tty, "\x1b]22;default\x07");
         let _ = write!(tty, "\x1b]0;default\x07");
+        if let Some(original) = profile_restore.as_deref() {
+            let _ = emit_iterm2_profile_restore(&mut tty, original);
+        }
         let _ = tty.flush();
     }
 
@@ -298,5 +316,16 @@ mod tests {
         let result = restore_tui();
         assert!(result.is_ok() || result.is_err());
         assert!(!state::is_terminal_modified(), "restore must clear the modified flag");
+    }
+
+    #[test]
+    fn iterm2_profile_restore_emits_switch_back_sequence() {
+        let mut bytes: Vec<u8> = Vec::new();
+        emit_iterm2_profile_restore(&mut bytes, "Solarized Dark").unwrap();
+        assert_eq!(String::from_utf8(bytes).unwrap(), "\x1b]1337;SetProfile=Solarized Dark\x07");
+
+        let mut default_bytes: Vec<u8> = Vec::new();
+        emit_iterm2_profile_restore(&mut default_bytes, "Default").unwrap();
+        assert_eq!(String::from_utf8(default_bytes).unwrap(), "\x1b]1337;SetProfile=Default\x07");
     }
 }
