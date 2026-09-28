@@ -34,9 +34,9 @@ use super::plan_seed::load_active_plan_seed;
 use super::support::{
     ExecutionSummaryStatus, RefusedTurnRollback, append_transient_turn_notes, approved_plan_execution_summary,
     build_unrelated_dirty_worktree_note, build_withdrawn_turn_changes_note, checkpoint_session_archive_start,
-    force_reload_workspace_config_for_execution, format_workspace_relative_paths, latest_assistant_result_text,
-    prepare_resume_bootstrap_without_archive, prompt_startup_planning_workflow, remove_transient_system_notes,
-    take_pending_resumed_user_prompt,
+    checkpoint_unavailable_notice, force_reload_workspace_config_for_execution, format_workspace_relative_paths,
+    latest_assistant_result_text, prepare_resume_bootstrap_without_archive, prompt_startup_planning_workflow,
+    remove_transient_system_notes, take_pending_resumed_user_prompt,
 };
 use super::turn_tail::{TurnPersistenceTail, complete_turn_persistence_tail};
 use crate::agent::runloop::ResumeSession;
@@ -1440,10 +1440,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         Ok(lease) => lease,
                         Err(err) => {
                             tracing::warn!(error = %err, "Checkpoint unavailable; prompt retained in input");
-                            let _ = renderer.line(
-                                MessageStyle::Error,
-                                &format!("Prompt not sent; checkpoint unavailable: {err:#}"),
-                            );
+                            let message = checkpoint_unavailable_notice(&format!("{err:#}"));
+                            let _ = renderer.line(MessageStyle::Info, message);
                             // The prompt message was already appended to history by the
                             // interaction loop (or the approved-plan handoff). Remove it
                             // so a retry does not duplicate, and restore the text.
