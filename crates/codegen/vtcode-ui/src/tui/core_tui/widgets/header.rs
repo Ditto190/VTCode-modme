@@ -28,19 +28,23 @@ use crate::tui::ui::tui::session::Session;
 /// ```
 pub struct HeaderWidget<'a> {
     session: &'a Session,
-    lines: Vec<Line<'static>>,
+    lines: std::sync::Arc<Vec<Line<'static>>>,
     custom_style: Option<Style>,
 }
 
 impl<'a> HeaderWidget<'a> {
     /// Create a new HeaderWidget with required parameters
     pub(crate) fn new(session: &'a Session) -> Self {
-        Self { session, lines: Vec::new(), custom_style: None }
+        Self {
+            session,
+            lines: std::sync::Arc::new(Vec::new()),
+            custom_style: None,
+        }
     }
 
     /// Set the header lines to display
     #[must_use]
-    pub(crate) fn lines(mut self, lines: Vec<Line<'static>>) -> Self {
+    pub(crate) fn lines(mut self, lines: std::sync::Arc<Vec<Line<'static>>>) -> Self {
         self.lines = lines;
         self
     }
@@ -61,7 +65,7 @@ impl<'a> Widget for HeaderWidget<'a> {
             return;
         }
 
-        let paragraph = self.session.build_header_paragraph(&self.lines);
+        let paragraph = self.session.build_header_paragraph(self.lines.as_slice());
         paragraph.render(area, buf);
     }
 }

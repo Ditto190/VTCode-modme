@@ -196,9 +196,7 @@ impl Widget for &mut SessionWidget<'_> {
                 } else {
                     self.session.header_lines()
                 };
-                HeaderWidget::new(self.session)
-                    .lines((*header_lines).clone())
-                    .render(header_area, buf);
+                HeaderWidget::new(self.session).lines(header_lines).render(header_area, buf);
             }
 
             if transcript_area.width > 0 && transcript_area.height > 0 {
@@ -260,9 +258,7 @@ impl Widget for &mut SessionWidget<'_> {
         } else {
             self.session.header_lines()
         };
-        HeaderWidget::new(self.session)
-            .lines((*header_lines).clone())
-            .render(layout.header, buf);
+        HeaderWidget::new(self.session).lines(header_lines).render(layout.header, buf);
 
         // Render main content area (transcript + optional logs)
         let has_logs = self.session.show_logs && self.session.has_logs() && mode.show_logs_panel();

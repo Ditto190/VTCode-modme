@@ -2190,6 +2190,44 @@ mod tests {
     }
 
     #[test]
+    fn capture_fifo_keeps_open_viewer_blocks() {
+        let mut session = build_session();
+        session.record_tool_output_block(1, vec!["first-capture".to_string()]);
+        session.open_tool_output_viewer(40, 10, Some(1));
+        assert!(session.tool_output_viewer_state().is_some());
+
+        let overflow = ui::TUI_TOOL_OUTPUT_BLOCKS_MAX as u64 + 8;
+        for id in 2..=overflow {
+            session.record_tool_output_block(id, vec![format!("capture-{id}")]);
+        }
+
+        assert!(
+            session.tool_output_blocks.iter().any(|block| block.id == 1),
+            "open viewer's capture must stay pinned against FIFO eviction"
+        );
+        assert!(session.tool_output_blocks.len() <= ui::TUI_TOOL_OUTPUT_BLOCKS_MAX + 1);
+    }
+
+    #[test]
+    fn capture_fifo_keeps_newest_block_even_when_viewer_pins_cap() {
+        let mut session = build_session();
+        let cap = ui::TUI_TOOL_OUTPUT_BLOCKS_MAX as u64;
+        for id in 1..=cap {
+            session.record_tool_output_block(id, vec![format!("capture-{id}")]);
+        }
+        // Open a viewer that retains every existing capture.
+        session.open_tool_output_viewer(40, 10, None);
+        assert!(session.tool_output_viewer_state().is_some());
+
+        let newest_id = cap + 1;
+        session.record_tool_output_block(newest_id, vec!["newest".to_string()]);
+        assert!(
+            session.tool_output_blocks.iter().any(|block| block.id == newest_id),
+            "the just-recorded capture must never be FIFO-dropped"
+        );
+    }
+
+    #[test]
     fn transient_activity_signal_tracks_ui_owned_surface_lifecycle() {
         let signal = Arc::new(TransientActivitySignal::default());
         let mut session = build_session();

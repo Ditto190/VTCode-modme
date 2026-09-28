@@ -2123,3 +2123,22 @@ fn collapsed_paste_payload_is_tail_bounded() {
     assert_eq!(session.collapsed_pastes.len(), 1);
     assert!(session.collapsed_pastes[0].full_text.len() <= ui::TUI_COLLAPSED_PASTE_MAX_BYTES + 4);
 }
+
+#[test]
+fn eviction_shifts_dirty_hint_to_appended_line() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    // Agent lines are not info-grouped, so each line is its own dirty unit.
+    for idx in 0..ui::TUI_TRANSCRIPT_MAX_MSGS {
+        session.push_line(InlineMessageKind::Agent, vec![make_segment(&format!("row-{idx}"))]);
+    }
+    let _ = session.total_transcript_rows(80);
+    session.first_dirty_line = None;
+
+    // This push exceeds the cap, so it also triggers a front-eviction chunk.
+    session.push_line(InlineMessageKind::Agent, vec![make_segment("after-evict")]);
+    assert_eq!(
+        session.first_dirty_line,
+        Some(session.lines.len() - 1),
+        "eviction must shift the dirty hint to the appended line, not invent dirty=0"
+    );
+}

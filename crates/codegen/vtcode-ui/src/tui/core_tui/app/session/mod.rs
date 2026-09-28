@@ -599,14 +599,36 @@ impl AppSession {
             recorded_at_line: Some(recorded_at_line),
             lines,
         });
-        // FIFO bound on capture blocks (oldest dropped first).
-        let max_blocks = ui::TUI_TOOL_OUTPUT_BLOCKS_MAX;
-        if self.tool_output_blocks.len() > max_blocks {
-            let drop = self.tool_output_blocks.len() - max_blocks;
-            self.tool_output_blocks.drain(..drop);
-        }
+        self.trim_tool_output_blocks();
         self.tool_output_revision = self.tool_output_revision.wrapping_add(1);
         self.core.mark_dirty();
+    }
+
+    /// FIFO-bound capture blocks. Blocks shown in an open tool-output viewer
+    /// are pinned so review does not lose content mid-read; the newest block
+    /// is never dropped. Call again after the viewer closes to re-trim.
+    fn trim_tool_output_blocks(&mut self) {
+        let max_blocks = ui::TUI_TOOL_OUTPUT_BLOCKS_MAX;
+        if self.tool_output_blocks.len() <= max_blocks {
+            return;
+        }
+        let pinned = self
+            .tool_output_viewer_state
+            .as_ref()
+            .map(|viewer| viewer.retained_tool_ids())
+            .unwrap_or_default();
+        while self.tool_output_blocks.len() > max_blocks {
+            let newest = self.tool_output_blocks.len() - 1;
+            let Some(pos) = self
+                .tool_output_blocks
+                .iter()
+                .take(newest)
+                .position(|block| !pinned.contains(&block.id))
+            else {
+                break;
+            };
+            self.tool_output_blocks.remove(pos);
+        }
     }
 
     fn find_live_pty_anchor(&self, header: Option<&String>, search_start: usize) -> Option<usize> {
@@ -807,6 +829,8 @@ impl AppSession {
         }
         self.tool_output_viewer_state = None;
         self.close_transient_surface(TransientSurface::ToolOutputViewer);
+        // Unpin and drop any over-cap blocks that were held for the viewer.
+        self.trim_tool_output_blocks();
         self.core.mark_dirty();
     }
 

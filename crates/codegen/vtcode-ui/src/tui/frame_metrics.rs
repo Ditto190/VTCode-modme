@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 const ENV_FLAG: &str = "VTCODE_TUI_FRAME_METRICS";
 const RING_LEN: usize = 256;
@@ -83,21 +83,21 @@ struct Counters {
 }
 
 impl Counters {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             frames_drawn: 0,
             slow_draws: 0,
             slow_input_to_draw: 0,
             max_draw_us: 0,
             max_input_to_draw_us: 0,
-            draw_ring: Ring { samples_us: [0; RING_LEN], len: 0, next: 0 },
-            input_to_draw_ring: Ring { samples_us: [0; RING_LEN], len: 0, next: 0 },
+            draw_ring: Ring::default(),
+            input_to_draw_ring: Ring::default(),
             last_report: None,
         }
     }
 }
 
-static COUNTERS: Mutex<Counters> = Mutex::new(Counters::new());
+static COUNTERS: LazyLock<Mutex<Counters>> = LazyLock::new(|| Mutex::new(Counters::new()));
 static FRAMES_SKIPPED: AtomicU64 = AtomicU64::new(0);
 
 /// Record a completed draw. `input_to_draw` is the latency from the first input
@@ -183,12 +183,11 @@ mod tests {
     }
 
     #[test]
-    fn disabled_path_is_inert() {
-        // Env flag is unset in unit tests, so sampling must stay off and calls
-        // must not panic or require a lock on the hot path.
-        initialize_from_env();
-        assert!(!enabled(), "unit tests must not depend on VTCODE_TUI_FRAME_METRICS");
+    fn record_paths_are_inert_when_sampling_disabled() {
+        // Force-off so this test does not depend on the developer's env.
+        ENABLED.store(false, Ordering::Relaxed);
         record_draw(Duration::from_millis(50), Some(Duration::from_millis(80)));
         record_frame_skipped();
+        assert!(!enabled());
     }
 }

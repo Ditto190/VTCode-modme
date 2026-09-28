@@ -225,9 +225,9 @@ impl Session {
         }
         self.invalidate_transcript_viewport();
         self.request_transcript_clear();
-        if self.first_dirty_line.is_none() {
-            self.first_dirty_line = Some(0);
-        } else if let Some(first) = self.first_dirty_line.as_mut() {
+        // Shift a pending dirty hint; do NOT invent dirty state when none was
+        // pending — surviving cache entries stay valid after `evict_prefix`.
+        if let Some(first) = self.first_dirty_line.as_mut() {
             *first = first.saturating_sub(remove_count);
         }
         self.invalidate_scroll_metrics();
@@ -259,9 +259,9 @@ impl Session {
                 }],
             );
             // Bound the expand payload so paste floods cannot grow without limit.
-            let max_chars = ui::TUI_COLLAPSED_PASTE_MAX_BYTES;
-            let full_text = if text.len() > max_chars {
-                let mut start = text.len() - max_chars;
+            let max_bytes = ui::TUI_COLLAPSED_PASTE_MAX_BYTES;
+            let full_text = if text.len() > max_bytes {
+                let mut start = text.len() - max_bytes;
                 while start < text.len() && !text.is_char_boundary(start) {
                     start += 1;
                 }
@@ -711,7 +711,7 @@ impl Session {
         if should_remove {
             let index = self.lines.len() - 1;
             self.lines.pop();
-            self.mark_line_dirty(index);
+            self.mark_transcript_line_dirty(index);
         }
     }
 }
