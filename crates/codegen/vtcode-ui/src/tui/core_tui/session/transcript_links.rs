@@ -517,6 +517,9 @@ pub(super) fn may_contain_link_candidate_text(text: &str) -> bool {
 }
 
 fn looks_like_filename_token(token: &str) -> bool {
+    // Sentence punctuation trails filenames: `Cargo.toml.` `test.rs,`
+    let token = token.trim_end_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.');
+    let token = token.trim_end_matches('.');
     let Some((stem, ext)) = token.rsplit_once('.') else {
         return false;
     };
@@ -1058,6 +1061,15 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::tui::core_tui::types::InlineTheme;
+
+    #[test]
+    fn filename_candidates_ignore_sentence_punctuation() {
+        assert!(may_contain_link_candidate_text("see Cargo.toml."));
+        assert!(may_contain_link_candidate_text("open test.rs, then continue"));
+        assert!(!may_contain_link_candidate_text("the end."));
+        assert!(!may_contain_link_candidate_text("plain prose without names"));
+        assert!(may_contain_link_candidate_text("src/main.rs"));
+    }
 
     /// Walk up from `CARGO_MANIFEST_DIR` to the directory whose `Cargo.toml`
     /// contains `[workspace]`. Hardcoding `parent()` breaks when crates are

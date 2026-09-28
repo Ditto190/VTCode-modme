@@ -79,10 +79,12 @@ impl Session {
                 self.prompt_prefix = prefix;
                 self.prompt_style = style;
                 self.ensure_prompt_style_color();
+                self.input_render_cache = None;
             }
             InlineCommand::SetPlaceholder { hint, style } => {
                 self.placeholder = hint;
                 self.placeholder_style = style;
+                self.input_render_cache = None;
             }
             InlineCommand::SetMessageLabels { agent, user } => {
                 self.labels.agent = agent.filter(|label| !label.is_empty());

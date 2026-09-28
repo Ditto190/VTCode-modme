@@ -184,7 +184,7 @@ fn paint_pre_wrapped_lines(lines: &[TranscriptLine], area: Rect, buf: &mut Buffe
                 break;
             }
             let merged = default_style.patch(span.style);
-            let (end_x, _end_y) = buf.set_span(x, y, &Span::styled(span.content.clone(), merged), remaining);
+            let (end_x, _end_y) = buf.set_stringn(x, y, span.content.as_ref(), remaining as usize, merged);
             x = end_x;
         }
     }

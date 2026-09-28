@@ -72,17 +72,17 @@ impl<'a> Widget for HeaderWidget<'a> {
         let text_style = self.session.header_primary_style().add_modifier(Modifier::DIM);
 
         if hide_header {
-            buf.set_style(area, self.session.styles.default_style());
+            // Paragraph used text_style as the base for the whole area.
+            buf.set_style(area, text_style);
             for (y, line) in (area.y..).zip(self.lines.iter().take(usize::from(area.height))) {
                 let mut x = area.x;
                 for span in &line.spans {
                     if x >= area.right() {
                         break;
                     }
-                    // Paragraph applied text_style as the base; span style patches it.
                     let merged = text_style.patch(span.style);
-                    let merged_span = ratatui::text::Span::styled(span.content.clone(), merged);
-                    let (end_x, _) = buf.set_span(x, y, &merged_span, area.right().saturating_sub(x));
+                    let (end_x, _) =
+                        buf.set_stringn(x, y, span.content.as_ref(), area.right().saturating_sub(x) as usize, merged);
                     x = end_x;
                 }
             }
@@ -119,8 +119,8 @@ impl<'a> Widget for HeaderWidget<'a> {
                 }
                 // Paragraph: text_style is the base, span style patches on top.
                 let merged = text_style.patch(span.style);
-                let merged_span = ratatui::text::Span::styled(span.content.clone(), merged);
-                let (end_x, _) = buf.set_span(x, y, &merged_span, inner.right().saturating_sub(x));
+                let (end_x, _) =
+                    buf.set_stringn(x, y, span.content.as_ref(), inner.right().saturating_sub(x) as usize, merged);
                 x = end_x;
             }
         }

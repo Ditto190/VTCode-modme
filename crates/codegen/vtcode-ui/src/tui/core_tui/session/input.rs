@@ -21,8 +21,8 @@ fn paint_pre_wrapped_text(text: &Text<'static>, area: Rect, buf: &mut Buffer, ba
                 break;
             }
             let merged = base.patch(span.style);
-            let merged_span = Span::styled(span.content.clone(), merged);
-            let (end_x, _) = buf.set_span(x, y, &merged_span, area.right().saturating_sub(x));
+            let (end_x, _) =
+                buf.set_stringn(x, y, span.content.as_ref(), area.right().saturating_sub(x) as usize, merged);
             x = end_x;
         }
     }
@@ -39,8 +39,7 @@ fn paint_pre_wrapped_line(line: &Line<'static>, area: Rect, buf: &mut Buffer, ba
             break;
         }
         let merged = base.patch(span.style);
-        let merged_span = Span::styled(span.content.clone(), merged);
-        let (end_x, _) = buf.set_span(x, y, &merged_span, area.right().saturating_sub(x));
+        let (end_x, _) = buf.set_stringn(x, y, span.content.as_ref(), area.right().saturating_sub(x) as usize, merged);
         x = end_x;
     }
 }
@@ -575,7 +574,7 @@ impl Session {
 
     /// Test-only entry that exercises the fingerprint cache.
     #[cfg(test)]
-    pub(crate) fn build_input_render_for_test(&mut self, width: u16, height: u16) -> InputRender {
+    pub(super) fn build_input_render_for_test(&mut self, width: u16, height: u16) -> InputRender {
         self.build_input_render(width, height)
     }
 

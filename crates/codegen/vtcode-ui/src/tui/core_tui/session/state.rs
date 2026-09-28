@@ -288,6 +288,7 @@ impl Session {
             state.restore_input = enabled;
         }
         self.input_enabled = enabled && !self.has_active_overlay();
+        self.input_render_cache = None;
     }
 
     pub(crate) fn image_input_enabled(&self) -> bool {
@@ -300,6 +301,7 @@ impl Session {
 
     pub(crate) fn set_input_compact_mode(&mut self, enabled: bool) {
         self.input_compact_mode = enabled;
+        self.input_render_cache = None;
     }
 
     pub(crate) fn set_cursor_visible(&mut self, visible: bool) {

@@ -444,17 +444,14 @@ fn wrap_ascii_word_boundaries(text: &str, style: Style, max_width: usize) -> Vec
 
         match break_at {
             Some(space) if space > line_start => {
-                // Match wrap_line_internal: drop trailing wrap whitespace.
-                let mut row = &text[line_start..space];
-                while row.ends_with(' ') {
-                    row = &row[..row.len() - 1];
-                }
+                let row = text[line_start..space].trim_end_matches(char::is_whitespace);
                 rows.push(Line::from(Span::styled(row.to_owned(), style)));
                 line_start = space + 1; // drop the break space
             }
             _ => {
                 // Hard break a long word.
-                rows.push(Line::from(Span::styled(text[line_start..window_end].to_owned(), style)));
+                let row = text[line_start..window_end].trim_end_matches(char::is_whitespace);
+                rows.push(Line::from(Span::styled(row.to_owned(), style)));
                 line_start = window_end;
             }
         }
@@ -462,6 +459,13 @@ fn wrap_ascii_word_boundaries(text: &str, style: Style, max_width: usize) -> Vec
 
     if rows.is_empty() {
         rows.push(Line::default());
+    }
+    // Last row: match wrap_line_internal's flush trim.
+    if let Some(last) = rows.last_mut() {
+        if let Some(span) = last.spans.first_mut() {
+            let trimmed = span.content.as_ref().trim_end_matches(char::is_whitespace).to_owned();
+            span.content = trimmed.into();
+        }
     }
     rows
 }
