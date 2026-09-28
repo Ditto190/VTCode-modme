@@ -3,7 +3,7 @@ feature: harness-fence-share-and-close-race
 status: delivered
 updated: 2026-09-25
 branch: fix/harness-fence-share-and-close-race
-commits:
+commits: e127c0908..2a48c2705
 ---
 
 # Harness Fence Share and Close Race
