@@ -132,15 +132,17 @@ mod tests {
         let text = "before\n```sh\nINSIDE\n```\nafter\n";
         let ranges = unfenced_byte_ranges(text);
         assert_eq!(ranges.len(), 2);
-        assert!(text[ranges[0].clone()].contains("before"));
-        assert!(text[ranges[1].clone()].contains("after"));
+        let first = ranges.first().expect("first unfenced range");
+        let second = ranges.get(1).expect("second unfenced range");
+        assert!(text.get(first.clone()).is_some_and(|slice| slice.contains("before")));
+        assert!(text.get(second.clone()).is_some_and(|slice| slice.contains("after")));
     }
 
     #[test]
     fn find_unfenced_skips_matches_inside_fences() {
         let text = "docs\n```\nNEEDLE\n```\nok NEEDLE\n";
         let hit = find_unfenced_from(text, "NEEDLE", 0).expect("unfenced match");
-        assert_eq!(&text[hit..hit + 6], "NEEDLE");
+        assert_eq!(text.get(hit..hit + "NEEDLE".len()), Some("NEEDLE"));
     }
 
     #[test]
