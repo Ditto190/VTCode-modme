@@ -208,7 +208,7 @@ Run `vtcode` for the TUI; pick a subcommand for a specific task:
 vtcode ask "explain Rc vs Arc"    # one-shot answer, no session, no tools
 vtcode exec "refactor main.rs"    # headless task with the full tool loop
 vtcode review                     # agent review of uncommitted changes
-vtcode eval --suite suite.json    # verify behavior with pass@k metrics
+vtcode eval --suite suite.json    # verify behavior with pass@k / pass^k metrics
 ```
 
 Common commands, flags, and workflows: [command reference](./docs/user-guide/commands.md).
@@ -234,9 +234,11 @@ For session lifecycle and day-to-day operations:
 More: `vtcode config`, `vtcode dependencies`, `vtcode acp`, `vtcode a2a`,
 `vtcode webmcp`, `vtcode session-store`, `vtcode schema` (built-in tool
 schemas), `vtcode analyze` (workspace structure/security/performance),
-`vtcode check` (built-in repository checks), `vtcode update` (binary
-updates), `vtcode logout` (clear stored credentials), and `vtcode man`
-(man pages).
+`vtcode check` (built-in repository checks), `vtcode pods` (run local
+models), `vtcode stats` (session metrics), `vtcode cleanup-snapshots`
+(prune old snapshots), `vtcode background-subagent` (manage background
+subagents), `vtcode update` (binary updates), `vtcode logout` (clear
+stored credentials), and `vtcode man` (man pages).
 Full list: `vtcode --help` or the
 [command reference](./docs/user-guide/commands.md).
 
@@ -299,11 +301,16 @@ deployment: [WebMCP deployment reference](./docs/reference/webmcp.md).
 ```mermaid
 graph LR
     BIN[vtcode binary] --> CORE[vtcode-core harness]
+    BIN --> EVAL[vtcode-eval]
     CORE --> LLM[vtcode-llm]
     CORE --> SAFETY[vtcode-safety]
     CORE --> EVENTS[vtcode-exec-events]
+    CORE --> CONFIG[vtcode-config]
+    CORE --> MEMORY[vtcode-memory]
     CORE --> UI[vtcode-ui]
 ```
+
+Full 23-crate workspace map: [Architecture guide](./docs/ARCHITECTURE.md).
 
 Rust stable, edition 2024, MSRV 1.98.1. Clone and run the fast gate:
 
