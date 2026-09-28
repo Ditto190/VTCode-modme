@@ -504,10 +504,13 @@ fn may_contain_link_candidate(line: &Line<'_>, explicit_links: &[RenderedTranscr
             .any(|span| may_contain_link_candidate_text(span.content.as_ref()))
 }
 
-fn may_contain_link_candidate_text(text: &str) -> bool {
+pub(super) fn may_contain_link_candidate_text(text: &str) -> bool {
+    // `.` covers bare workspace filenames (Cargo.toml) that resolve without a
+    // path separator. Keep this conservative: false positives only cost a scan.
     text.contains("://")
         || text.contains('/')
         || text.contains('\\')
+        || text.contains('.')
         || text.contains("~/")
         || text.contains("./")
         || text.contains("../")
@@ -810,6 +813,11 @@ pub(crate) fn project_detected_links_onto_wrapped_lines(
     original_text: &str,
     workspace_root: Option<&Path>,
 ) -> Vec<Vec<RenderedTranscriptLink>> {
+    // Fast reject: plain prose never needs link projection. Skipping this was
+    // a per-row String + regex cost on every reflow (hotpath).
+    if !may_contain_link_candidate_text(original_text) {
+        return vec![Vec::new(); wrapped_lines.len()];
+    }
     let matches = detect_transcript_link_matches(original_text, workspace_root);
     let mut projected = Vec::with_capacity(wrapped_lines.len());
     // Rows are anchored by searching for their body text (see
@@ -842,6 +850,7 @@ pub(crate) fn project_detected_links_onto_wrapped_lines(
     projected
 }
 
+#[cfg_attr(feature = "profiling", hotpath::measure)]
 pub(crate) fn detect_rendered_transcript_links(
     line: &Line<'_>,
     workspace_root: Option<&Path>,

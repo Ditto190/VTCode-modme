@@ -8,6 +8,7 @@ use crate::tui::core_tui::session::{list_panel, message_renderer};
 use ratatui::{buffer::Buffer, style::Modifier};
 
 impl Session {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub fn render(&mut self, frame: &mut Frame<'_>) {
         let Some(viewport) = self.core.begin_frame(frame) else {
             return;

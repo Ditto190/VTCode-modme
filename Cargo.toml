@@ -350,7 +350,7 @@ vtcode-safety = { workspace = true }
 [features]
 default = ["tool-chat", "desktop-notifications"]
 tool-chat = []
-profiling = ["dep:hotpath", "hotpath/hotpath", "hotpath/hotpath-cpu", "hotpath/futures", "hotpath/tokio", "vtcode-core/profiling"]
+profiling = ["dep:hotpath", "hotpath/hotpath", "hotpath/hotpath-cpu", "hotpath/futures", "hotpath/tokio", "vtcode-core/profiling", "vtcode-ui/profiling"]
 hotpath = ["dep:hotpath", "hotpath/hotpath"]
 hotpath-alloc = ["dep:hotpath", "hotpath/hotpath-alloc"]
 hotpath-cpu = ["dep:hotpath", "hotpath/hotpath-cpu"]

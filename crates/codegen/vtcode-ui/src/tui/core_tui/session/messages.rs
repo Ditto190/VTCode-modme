@@ -201,7 +201,16 @@ impl Session {
         }
 
         let remove_count = excess.max(ui::TUI_TRANSCRIPT_EVICT_CHUNK);
-        let previous_max_offset = self.current_max_scroll_offset();
+        // Avoid forcing a full transcript reflow mid-append (hotpath: that was
+        // ~80% of TUI runtime under streaming). Bottom-follow (offset == 0)
+        // needs no view-stability adjust. Scrolled-up views must recompute.
+        let previous_max_offset = if self.scroll_manager.offset() == 0 {
+            None
+        } else if self.scroll_manager.metrics_valid() {
+            Some(self.scroll_manager.max_offset())
+        } else {
+            Some(self.current_max_scroll_offset())
+        };
 
         // Lines are evicted from the front (drain(..remove_count)), so pastes
         // pointing into the evicted prefix are dropped and surviving pastes
@@ -231,7 +240,9 @@ impl Session {
             *first = first.saturating_sub(remove_count);
         }
         self.invalidate_scroll_metrics();
-        self.adjust_scroll_after_change(previous_max_offset);
+        if let Some(previous_max_offset) = previous_max_offset {
+            self.adjust_scroll_after_change(previous_max_offset);
+        }
     }
 
     /// Append a large pasted message as a collapsible placeholder.

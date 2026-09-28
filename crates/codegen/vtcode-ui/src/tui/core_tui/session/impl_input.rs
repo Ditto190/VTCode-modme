@@ -18,6 +18,7 @@ impl Session {
         self.mark_dirty();
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn process_key(&mut self, key: KeyEvent) -> Option<InlineEvent> {
         events::process_key(self, key)
     }

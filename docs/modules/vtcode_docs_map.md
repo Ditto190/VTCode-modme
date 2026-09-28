@@ -155,7 +155,7 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/performance.md`
   - **Content**: Performance Optimization
-  - **Topics**: Goals, Performance & Simplicity Rules, Local Workflow, TUI frame metrics, Standalone startup benchmark
+  - **Topics**: Goals, Performance & Simplicity Rules, Local Workflow, TUI hotpath profiling, TUI frame metrics
   - **User Questions**: "What can you tell me about Performance Optimization?", "How does Goals work?", "How does Performance & Simplicity Rules work?"
 
 - **File**: `docs/development/preview-budget-blocked-replan.md`

@@ -131,6 +131,29 @@ measurements still work when `sccache` is configured but unavailable. Set
 
 Use this loop for any non-trivial performance change. Change one thing at a time so the comparison stays attributable.
 
+## TUI hotpath profiling
+
+The `vtcode-ui` crate is instrumented with [hotpath](https://hotpath.rs/) for
+function timing and allocation attribution. Profile the TUI hot paths with:
+
+```bash
+cargo run -p vtcode-ui --example tui_hotpath --features profiling
+```
+
+This prints a timing + alloc report on exit (reflow, wrap, render, input).
+Root `--features profiling` also forwards `vtcode-ui/profiling` so the full
+binary runloop and TUI can be profiled together.
+
+TUI invariants found via hotpath (keep these):
+
+- Bottom-follow (`offset == 0`) appends never force a transcript reflow for
+  scroll adjust; scrolled-up views still recompute to keep the view stable.
+- Predecessor reflow is limited to Tool/Pty block edges and Info/Warning/Error
+  group heads — plain Agent↔Agent streaming must not double-reflow.
+- Link projection fast-rejects when `may_contain_link_candidate_text` is false
+  (no path chars and no `.`); bare workspace filenames still match via `.`.
+- Eviction uses `TranscriptReflowCache::evict_prefix`, never a full wipe.
+
 ## TUI frame metrics
 
 Steady-state TUI jank (frame drops, input lag under streaming tool/PTY load) is

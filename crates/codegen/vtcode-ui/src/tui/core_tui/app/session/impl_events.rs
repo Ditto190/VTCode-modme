@@ -470,6 +470,7 @@ impl Session {
         true
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub fn handle_event(
         &mut self,
         event: CrosstermEvent,
