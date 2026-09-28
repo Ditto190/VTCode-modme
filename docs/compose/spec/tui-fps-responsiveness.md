@@ -3,7 +3,7 @@ feature: tui-fps-responsiveness
 status: delivered
 updated: 2026-09-28
 branch: perf/tui-fps-responsiveness
-commits: 998ca2a2d..1bfbd0d7c
+commits: 998ca2a2d..29c500dd1
 ---
 
 # TUI FPS and Responsiveness
@@ -14,7 +14,7 @@ commits: 998ca2a2d..1bfbd0d7c
 
 **Verification** — `cargo nextest run -p vtcode-ui --lib` PASS 1350/1350 (includes new regression tests for header-cache preservation, partial eviction, capture/paste bounds, frame-budget smoke). `cargo clippy -p vtcode-ui --locked -- -D warnings` PASS. `cargo fmt -p vtcode-ui -- --check` PASS. `large_transcript_render_stays_under_frame_budget`: 200 frames of an 800-line transcript on TestBackend 120×40 averaged **~170 µs/frame** (well under the 16 ms active-tick budget). Independent re-review confirmed the four critical findings resolved; residual notes (1–3-line header `Vec` clone into `HeaderWidget`, wall-clock assert loosened to 50 ms for CI) are non-blocking.
 
-**Journey log** — Browser Use/IAB was unavailable (`js`/`cua_repl` missing), so ratatui/crossterm research used pinned local crate sources plus project gotchas instead of open-web pages. First review caught that `mark_line_dirty` was still thrashing header caches on stream append and that eviction did a full cache wipe — both were the highest-leverage jank sources. Header “built once” needed `Arc` through the whole measure/layout/widget chain, not just a cache flag. `frame_metrics` percentile indexing used a floor formula that under-reported p99 on small rings; nearest-rank fixed it.
+**Journey log** — Browser Use/IAB was unavailable (`js`/`cua_repl` missing), so ratatui/crossterm research used pinned local crate sources plus project gotchas instead of open-web pages. First review caught that `mark_line_dirty` was still thrashing header caches on stream append and that eviction did a full cache wipe — both were the highest-leverage jank sources. Header “built once” needed `Arc` through the whole measure/layout/widget chain, not just a cache flag. `frame_metrics` percentile indexing used a floor formula that under-reported p99 on small rings; nearest-rank fixed it. Follow-up audit (29c500dd1): FIFO capture trim no longer drops the newest block or an open review’s captures (re-trim on viewer close); eviction no longer invents `first_dirty_line=0`.
 
 ## [S1] Problem
 
