@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::fmt::Write;
 
+use vtcode_commons::modal_hints::MODEL_PICKER_NAVIGATE_FILTER;
 use vtcode_core::config::constants::ui;
 use vtcode_core::config::models::{ModelId, Provider};
 use vtcode_core::config::types::ReasoningEffortLevel;
@@ -26,7 +27,7 @@ const STEP_THREE_TITLE: &str = "Service Tier";
 
 pub(super) const CUSTOM_PROVIDER_TITLE: &str = "Custom provider + model";
 pub(super) const CUSTOM_PROVIDER_SUBTITLE: &str = "Provide the provider name and model identifier manually.";
-const CUSTOM_PROVIDER_BADGE: &str = "Manual";
+const CUSTOM_PROVIDER_BADGE: &str = "Custom";
 const REASONING_OFF_BADGE: &str = "No reasoning";
 const CURRENT_BADGE: &str = "Current";
 const TOOLS_LABEL: &str = "Tools";
@@ -88,11 +89,11 @@ fn input_modalities_label(input_modalities: &[&str]) -> Option<String> {
 
 fn compact_context_window_label(context_window_size: usize) -> String {
     if context_window_size >= 1_000_000 {
-        format!("{}M", context_window_size / 1_000_000)
+        format!("{}M context", context_window_size / 1_000_000)
     } else if context_window_size >= 1_000 {
-        format!("{}K", context_window_size / 1_000)
+        format!("{}K context", context_window_size / 1_000)
     } else {
-        context_window_size.to_string()
+        format!("{context_window_size} context")
     }
 }
 
@@ -413,11 +414,11 @@ pub(super) fn render_step_one_inline(
         }
     }
 
+    items.push(divider_item());
+
     items.push(InlineListItem {
         title: "Refresh dynamic model lists".to_string(),
-        subtitle: Some(
-            "Re-query GitHub Copilot, LM Studio, and Ollama model lists without closing the picker.".to_string(),
-        ),
+        subtitle: Some("Re-query Copilot, LM Studio, and Ollama without closing the picker.".to_string()),
         badge: Some("Action".to_string()),
         indent: 0,
         selection: Some(InlineListSelection::RefreshDynamicModels),
@@ -440,7 +441,14 @@ pub(super) fn render_step_one_inline(
         placeholder: Some("provider, name, id, or capability".to_string()),
         fuzzy: false,
     };
-    renderer.show_list_modal(STEP_ONE_TITLE, lines, items, selected, Some(search));
+    renderer.show_list_modal_with_footer(
+        STEP_ONE_TITLE,
+        lines,
+        items,
+        selected,
+        Some(search),
+        Some(MODEL_PICKER_NAVIGATE_FILTER.to_string()),
+    );
 
     Ok(())
 }
@@ -565,6 +573,20 @@ pub(super) fn render_step_one_plain(
 }
 
 const HUGGINGFACE_DOCS_URL: &str = "https://huggingface.co/docs/inference-providers";
+
+/// Full-width, non-selectable separator between the provider list and the
+/// trailing action rows. An empty title is the canonical untitled divider:
+/// `is_divider_title` accepts it and the renderer expands it to content width.
+pub(super) fn divider_item() -> InlineListItem {
+    InlineListItem {
+        title: String::new(),
+        subtitle: None,
+        badge: None,
+        indent: 0,
+        selection: None,
+        search_value: None,
+    }
+}
 
 fn provider_group_divider_line() -> String {
     let modal_width = usize::from(ui::MODAL_MIN_WIDTH);

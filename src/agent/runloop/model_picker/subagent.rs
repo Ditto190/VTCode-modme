@@ -226,10 +226,10 @@ async fn select_subagent_model_target(
     items.push(InlineListItem {
         title: "Enter exact model id".to_string(),
         subtitle: Some("Provide a concrete VT Code model id such as `gpt-5.4` or `claude-sonnet-4-6`.".to_string()),
-        badge: Some("Manual".to_string()),
+        badge: Some("Custom".to_string()),
         indent: 0,
         selection: Some(InlineListSelection::CustomModel),
-        search_value: Some("manual exact model id".to_string()),
+        search_value: Some("custom manual exact model id".to_string()),
     });
 
     let selected = preferred_subagent_model_selection(options, dynamic_models, current_model)

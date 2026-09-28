@@ -259,22 +259,22 @@ fn short_display_path(path: &Path, workspace: &Path) -> String {
 }
 
 fn settings_header_lines(state: &SettingsPaletteState) -> Vec<String> {
-    let mut lines = vec![format!(
-        "Write target: {}.",
-        short_display_path(&state.source_path, &state.workspace)
-    )];
-    if let Some(label) = state.source_label.as_deref() {
-        lines.push(label.to_string());
-    }
+    let write_target = format!("Write target: {}.", short_display_path(&state.source_path, &state.workspace));
 
     if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
-        lines.push("Settings > Reset.".to_string());
-        lines.push("This clears every setting in the target layer. Credentials are preserved.".to_string());
+        let mut lines = vec![
+            "Settings > Reset.".to_string(),
+            "This clears every setting in the target layer. Credentials are preserved.".to_string(),
+            write_target,
+        ];
+        if let Some(label) = state.source_label.as_deref() {
+            lines.push(label.to_string());
+        }
         return lines;
     }
     if let Some(view_path) = state.view_path.as_deref() {
         let (breadcrumb, mut detail) = settings_breadcrumb_and_detail(view_path);
-        lines.push(format!("{breadcrumb}."));
+        let mut lines = vec![format!("{breadcrumb}.")];
         if view_path == "permissions" {
             let counts = format_permission_summary(&state.draft);
             if detail.is_empty() {
@@ -287,10 +287,16 @@ fn settings_header_lines(state: &SettingsPaletteState) -> Vec<String> {
         if !detail.is_empty() {
             lines.push(detail);
         }
+        lines.push(write_target);
+        if let Some(label) = state.source_label.as_deref() {
+            lines.push(label.to_string());
+        }
         return lines;
     }
-    lines.push("Settings.".to_string());
-    lines.push("Choose a settings group to edit.".to_string());
+    let mut lines = vec!["Choose a settings group to edit.".to_string(), write_target];
+    if let Some(label) = state.source_label.as_deref() {
+        lines.push(label.to_string());
+    }
     lines
 }
 
@@ -1684,7 +1690,7 @@ api_key_env = "TRUSTED_API_KEY"
             assert!(lines.iter().all(|line| !line.contains("Enter") && !line.contains("Esc")));
         }
         let root = settings_header_lines(&header_test_state(None));
-        assert_eq!(root.last().map(String::as_str), Some("Choose a settings group to edit."));
+        assert_eq!(root.first().map(String::as_str), Some("Choose a settings group to edit."));
         let advanced = settings_header_lines(&header_test_state(Some(SETTINGS_ADVANCED_VIEW_PATH)));
         assert!(advanced.iter().any(|line| line.contains("Advanced settings")));
     }
@@ -1694,8 +1700,9 @@ api_key_env = "TRUSTED_API_KEY"
         let mut state = header_test_state(None);
         state.source_label = None;
         let lines = settings_header_lines(&state);
-        assert_eq!(lines.len(), 3);
-        assert!(lines[0].starts_with("Write target: "));
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.first().map(String::as_str), Some("Choose a settings group to edit."));
+        assert!(lines[1].starts_with("Write target: "));
         assert!(lines.iter().all(|line| !line.contains("Configuration source")));
     }
 

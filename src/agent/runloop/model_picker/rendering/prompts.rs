@@ -11,6 +11,7 @@ use super::super::selection::{
     SelectionDetail, reasoning_level_description, reasoning_level_label, service_tier_label,
 };
 use super::{CURRENT_BADGE, KEEP_CURRENT_DESCRIPTION, REASONING_OFF_BADGE, STEP_THREE_TITLE, STEP_TWO_TITLE};
+use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
 
 pub(crate) fn render_reasoning_inline(
     renderer: &mut AnsiRenderer,
@@ -64,10 +65,7 @@ pub(crate) fn render_reasoning_inline(
             search_value: None,
         });
     }
-    let mut lines = vec![format!(
-        "Step 2 – select reasoning effort for {}.",
-        selection.model_display
-    )];
+    let mut lines = vec![format!("Selected model: {}.", selection.model_display)];
     if let Some(alternative) = selection.reasoning_off_model.as_ref() {
         lines.push(format!(
             "Select \"Use {} (reasoning off)\" to switch to {}.",
@@ -75,12 +73,13 @@ pub(crate) fn render_reasoning_inline(
             alternative.as_str()
         ));
     }
-    renderer.show_list_modal(
+    renderer.show_list_modal_with_footer(
         STEP_TWO_TITLE,
         lines,
         items,
         Some(InlineListSelection::Reasoning(reasoning_to_selection_string(current))),
         None,
+        Some(MODEL_PICKER_FOLLOW_UP_HINT.to_string()),
     );
     Ok(())
 }
@@ -238,11 +237,11 @@ pub(crate) fn render_service_tier_inline(
         },
     ];
 
-    renderer.show_list_modal(
+    renderer.show_list_modal_with_footer(
         STEP_THREE_TITLE,
         vec![
-            format!("Select a service tier for {}.", selection.model_display),
-            "Applies only to native OpenAI models that support OpenAI service tiers.".to_string(),
+            format!("Selected model: {}.", selection.model_display),
+            "Applies only to native OpenAI models that support service tiers.".to_string(),
         ],
         items,
         Some(InlineListSelection::OpenAIServiceTier(match current {
@@ -251,6 +250,7 @@ pub(crate) fn render_service_tier_inline(
             None => OpenAIServiceTierChoice::ProjectDefault,
         })),
         None,
+        Some(MODEL_PICKER_FOLLOW_UP_HINT.to_string()),
     );
     Ok(())
 }
@@ -278,18 +278,17 @@ pub(crate) fn show_secure_api_modal(
     selection: &SelectionDetail,
     _workspace: Option<&Path>,
 ) {
-    let storage_line = "Saved to secure storage (OS keyring or encrypted file).".to_string();
-    let mask_preview = "●●●●●●";
     let lines = vec![
+        "## Provider".to_string(),
         format!("Bring your own key (BYOK) for {}.", selection.provider_label),
         format!("Expected env: {}", selection.env_key),
-        format!("Secure display hint: {}", mask_preview),
-        storage_line,
-        "Key will NOT be stored in vtcode.toml.".to_string(),
+        "## Storage".to_string(),
+        "Saved to secure storage (OS keyring or encrypted file).".to_string(),
+        "**Key will NOT be stored in vtcode.toml.**".to_string(),
         "Paste the key — it will be auto-detected and saved securely.".to_string(),
     ];
     let prompt_label = format!("{} API key ({})", selection.provider_label, selection.env_key);
-    renderer.show_secure_prompt_modal("Secure API key setup", lines, prompt_label);
+    renderer.show_secure_prompt_modal("Secure API key • Final step", lines, prompt_label);
 }
 
 pub(crate) fn prompt_custom_model_entry(renderer: &mut AnsiRenderer) -> Result<()> {

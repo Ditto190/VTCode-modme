@@ -328,7 +328,7 @@ fn static_model_subtitle_formats_current_capabilities() {
 
     let subtitle = static_model_subtitle(option, "openai", "gpt-5.6-sol");
 
-    assert_eq!(subtitle, Some("Current • 1M • Reasoning • Tools • image".to_string()));
+    assert_eq!(subtitle, Some("Current • 1M context • Reasoning • Tools • image".to_string()));
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn dynamic_model_subtitle_stays_conservative_for_unknown_local_models() {
 #[test]
 fn current_model_line_shows_effective_anthropic_context_window() {
     let line = rendering::current_model_line("anthropic", "claude-sonnet-5");
-    assert_eq!(line, "Current: anthropic / claude-sonnet-5 • 1M");
+    assert_eq!(line, "Current: anthropic / claude-sonnet-5 • 1M context");
 }
 
 #[test]
@@ -717,4 +717,18 @@ fn filter_options_by_whitelist_empty_returns_all() {
 
     let filtered = filter_options_by_whitelist(Cow::Borrowed(MODEL_OPTIONS.as_slice()), &[]);
     assert_eq!(filtered.len(), MODEL_OPTIONS.len());
+}
+
+#[test]
+fn step_one_divider_item_is_unselectable_untitled_separator() {
+    let divider = rendering::divider_item();
+
+    assert!(divider.selection.is_none(), "divider must not be selectable");
+    assert!(divider.subtitle.is_none());
+    assert!(divider.badge.is_none());
+    assert!(
+        divider.title.is_empty(),
+        "divider must use the canonical untitled form so the renderer spans content width: {}",
+        divider.title
+    );
 }

@@ -1792,6 +1792,47 @@ mod tests {
     }
 
     #[test]
+    fn config_list_summary_ignores_explicit_footer_hint() {
+        // Regression: callers must not pass a footer to a list containing
+        // `ConfigAction` items. Such lists are `FixedComfortable` and render
+        // the shared navigation hint, so an explicit footer is silently
+        // dropped. Pin that behavior so dead footer copy cannot be reintroduced.
+        let list = ModalListState::new(
+            vec![InlineListItem {
+                title: "Permission default".to_string(),
+                subtitle: Some("permissions.default = ask".to_string()),
+                badge: Some("Toggle".to_string()),
+                indent: 0,
+                selection: Some(InlineListSelection::ConfigAction("permissions.default:cycle".to_string())),
+                search_value: None,
+            }],
+            None,
+        );
+
+        let styles = ModalRenderStyles {
+            border: Style::default(),
+            highlight: Style::default(),
+            badge: Style::default(),
+            header: Style::default(),
+            selectable: Style::default(),
+            detail: Style::default(),
+            search_match: Style::default(),
+            title: Style::default(),
+            divider: Style::default(),
+            instruction_border: Style::default(),
+            instruction_title: Style::default(),
+            instruction_bullet: Style::default(),
+            instruction_body: Style::default(),
+            hint: Style::default(),
+        };
+
+        let summary = modal_list_summary_line(&list, &styles, Some("Esc to go back")).expect("summary line");
+        let text = line_text(&summary);
+        assert!(text.contains("Navigation:"), "config lists render the shared navigation hint: {text}");
+        assert!(!text.contains("Esc to go back"), "explicit footer must be dropped for config lists: {text}");
+    }
+
+    #[test]
     fn non_config_list_summary_omits_density_hint() {
         let list = ModalListState::new(
             vec![InlineListItem {
