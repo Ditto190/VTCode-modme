@@ -85,7 +85,9 @@ fn render_exit_postamble(
         // Interrupted exits get concise feedback, not a full transcript dump.
         // The in-TUI answer (if any) stays in the alternate buffer history;
         // re-printing it here is the fullscreen noise reported on Ctrl+C.
-        println!("\r");
+        // No leading blank line: the bare `CR` in `print_exit_summary` already
+        // reuses the `^C` echo row, and the metrics block below opens with its
+        // own separator blank — an extra one here reads as a blank gap.
         println!("\r{DIM}Interrupted — session exited. Transcript saved; resume to continue.{RESET}");
     }
     render_metrics(&data);
