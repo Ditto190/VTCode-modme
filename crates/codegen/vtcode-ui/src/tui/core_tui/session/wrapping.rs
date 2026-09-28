@@ -91,15 +91,16 @@ pub(crate) fn wrap_line_preserving_urls(line: Line<'static>, max_width: usize) -
         return vec![Line::default()];
     }
 
+    // Fast path: check spans without joining text (hotpath: the join was a
+    // per-row String alloc on every reflow).
+    if !line.spans.iter().any(|span| contains_preserved_token(span.content.as_ref())) {
+        return super::text_utils::wrap_line(line, max_width);
+    }
+
     let text: Cow<'_, str> = match line.spans.as_slice() {
         [span] => span.content.clone(),
         _ => Cow::Owned(line.spans.iter().map(|s| s.content.as_ref()).collect()),
     };
-
-    // No URLs - use standard wrapping (delegates to text_utils)
-    if !contains_preserved_token(&text) {
-        return super::text_utils::wrap_line(line, max_width);
-    }
 
     // Find all preserved tokens in the text
     let urls: Vec<_> = PRESERVED_TOKEN_PATTERN

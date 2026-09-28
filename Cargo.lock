@@ -9019,6 +9019,7 @@ dependencies = [
  "crossterm",
  "futures",
  "hashbrown 0.17.1",
+ "hotpath",
  "human-panic",
  "humantime",
  "image",

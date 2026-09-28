@@ -9,6 +9,40 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Padding, Paragraph, Wrap},
 };
+
+/// Paint pre-wrapped lines into `area` without Paragraph wrapping.
+/// `base` is the Paragraph base style; span styles patch on top.
+fn paint_pre_wrapped_text(text: &Text<'static>, area: Rect, buf: &mut Buffer, base: Style) {
+    for (row, line) in text.lines.iter().take(usize::from(area.height)).enumerate() {
+        let y = area.y + row as u16;
+        let mut x = area.x;
+        for span in &line.spans {
+            if x >= area.right() {
+                break;
+            }
+            let merged = base.patch(span.style);
+            let (end_x, _) =
+                buf.set_stringn(x, y, span.content.as_ref(), area.right().saturating_sub(x) as usize, merged);
+            x = end_x;
+        }
+    }
+}
+
+fn paint_pre_wrapped_line(line: &Line<'static>, area: Rect, buf: &mut Buffer, base: Style) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let mut x = area.x;
+    let y = area.y;
+    for span in &line.spans {
+        if x >= area.right() {
+            break;
+        }
+        let merged = base.patch(span.style);
+        let (end_x, _) = buf.set_stringn(x, y, span.content.as_ref(), area.right().saturating_sub(x) as usize, merged);
+        x = end_x;
+    }
+}
 use regex::Regex;
 use std::fmt::Write;
 use std::path::Path;
@@ -19,8 +53,8 @@ use vtcode_commons::fs::{is_image_path, trim_trailing_image_path_str, unescape_w
 
 use super::utils::line_truncation::truncate_line_with_ellipsis_if_overflow;
 
-struct InputRender {
-    text: Text<'static>,
+pub(super) struct InputRender {
+    pub(super) text: Text<'static>,
     cursor_x: u16,
     cursor_y: u16,
 }
@@ -236,6 +270,7 @@ const SHELL_MODE_BORDER_TITLE: &str = " ! Shell mode ";
 const SHELL_MODE_STATUS_HINT: &str = "Shell mode (!): direct command execution";
 
 impl Session {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn render_input(&mut self, frame: &mut Frame<'_>, area: Rect) {
         if area.height == 0 {
             self.set_input_area(None);
@@ -275,10 +310,14 @@ impl Session {
         let inner = block.inner(input_area);
         self.set_input_area(Some(inner));
         let input_render = self.build_input_render(inner.width, inner.height);
-        let paragraph = Paragraph::new(input_render.text)
-            .style(background_style)
-            .wrap(Wrap { trim: false });
-        frame.render_widget(paragraph.block(block), input_area);
+        // Input rows are already soft-wrapped to `inner.width` by `input_layout`.
+        // Paint via set_span — avoid Paragraph wrap every frame (hotpath ~5KB).
+        frame.render_widget(block, input_area);
+        {
+            let buf = frame.buffer_mut();
+            buf.set_style(inner, background_style);
+            paint_pre_wrapped_text(&input_render.text, inner, buf, background_style);
+        }
         self.apply_input_selection_highlight(frame.buffer_mut(), inner);
         // Auto-copy on select only when enabled; otherwise the selection stays
         // until the user copies manually with Ctrl+C (or Cmd+C).
@@ -303,10 +342,11 @@ impl Session {
             let (status_line, background_hits) = self
                 .render_input_status_line_with_hit(status_area.width)
                 .unwrap_or((Line::default(), Vec::new()));
-            let status = Paragraph::new(status_line)
-                .style(self.styles.default_style())
-                .wrap(Wrap { trim: false });
-            frame.render_widget(status, status_area);
+            {
+                let buf = frame.buffer_mut();
+                buf.set_style(status_area, self.styles.default_style());
+                paint_pre_wrapped_line(&status_line, status_area, buf, self.styles.default_style());
+            }
             let hits = background_hits
                 .into_iter()
                 .map(|(start, end)| {
@@ -532,7 +572,61 @@ impl Session {
         true
     }
 
-    fn build_input_render(&self, width: u16, height: u16) -> InputRender {
+    /// Test-only entry that exercises the fingerprint cache.
+    #[cfg(test)]
+    pub(super) fn build_input_render_for_test(&mut self, width: u16, height: u16) -> InputRender {
+        self.build_input_render(width, height)
+    }
+
+    /// Build (or reuse) the input paragraph model for the current input state.
+    fn build_input_render(&mut self, width: u16, height: u16) -> InputRender {
+        if width == 0 || height == 0 {
+            return InputRender { text: Text::default(), cursor_x: 0, cursor_y: 0 };
+        }
+
+        // Hash content (not just length) so same-length edits cannot serve a
+        // stale cached paragraph. Cursor and flags cover layout/placeholder.
+        let mut hasher = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(self.input_manager.content(), &mut hasher);
+        std::hash::Hash::hash(&self.prompt_prefix, &mut hasher);
+        let content_hash = std::hash::Hasher::finish(&hasher);
+        let cursor = self.input_manager.cursor();
+        let compact = self.input_compact_mode;
+        let suggested = self.suggested_prompt_state.active;
+        let key = (width, height, content_hash, cursor, compact, suggested);
+
+        if let Some((w, h, hash, cur, cmp, sug, cached)) = self.input_render_cache.take() {
+            if (w, h, hash, cur, cmp, sug) == key {
+                let render = InputRender {
+                    text: cached.text.clone(),
+                    cursor_x: cached.cursor_x,
+                    cursor_y: cached.cursor_y,
+                };
+                self.input_render_cache = Some((w, h, hash, cur, cmp, sug, cached));
+                return render;
+            }
+            // Stale — drop before rebuild.
+        }
+
+        let render = self.build_input_render_uncached(width, height);
+        self.input_render_cache = Some((
+            width,
+            height,
+            content_hash,
+            cursor,
+            compact,
+            suggested,
+            InputRender {
+                text: render.text.clone(),
+                cursor_x: render.cursor_x,
+                cursor_y: render.cursor_y,
+            },
+        ));
+        render
+    }
+
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
+    fn build_input_render_uncached(&self, width: u16, height: u16) -> InputRender {
         if width == 0 || height == 0 {
             return InputRender { text: Text::default(), cursor_x: 0, cursor_y: 0 };
         }
@@ -887,6 +981,7 @@ impl Session {
     /// Status line plus column ranges (relative to the status area) of the
     /// clickable background indicator spans: the activity text and the
     /// `{key} background` hint only.
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(crate) fn render_input_status_line_with_hit(&self, width: u16) -> Option<(Line<'static>, Vec<(u16, u16)>)> {
         if width == 0 {
             return None;
@@ -1283,7 +1378,7 @@ impl Session {
 
     /// Build input render data for external widgets
     pub(crate) fn build_input_widget_data(&self, width: u16, height: u16) -> InputWidgetData {
-        let input_render = self.build_input_render(width, height);
+        let input_render = self.build_input_render_uncached(width, height);
         let background_style = self.styles.input_background_style();
 
         InputWidgetData {

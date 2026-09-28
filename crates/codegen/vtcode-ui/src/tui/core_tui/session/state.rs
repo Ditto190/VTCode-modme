@@ -162,7 +162,9 @@ impl Session {
     pub(crate) fn mark_dirty(&mut self) {
         self.render_state.request_redraw();
         self.header_lines_cache = None;
+        self.header_block_title_cache = None;
         self.header_height_cache.clear();
+        self.input_render_cache = None;
         self.queued_inputs_preview_cache = None;
         self.subprocess_entries_preview_cache = None;
     }
@@ -184,7 +186,9 @@ impl Session {
     /// Invalidate only the header cache (e.g. when provider/model changes)
     pub(crate) fn invalidate_header_cache(&mut self) {
         self.header_lines_cache = None;
+        self.header_block_title_cache = None;
         self.header_height_cache.clear();
+        self.input_render_cache = None;
         self.render_state.request_redraw();
     }
 
@@ -284,6 +288,7 @@ impl Session {
             state.restore_input = enabled;
         }
         self.input_enabled = enabled && !self.has_active_overlay();
+        self.input_render_cache = None;
     }
 
     pub(crate) fn image_input_enabled(&self) -> bool {
@@ -296,6 +301,7 @@ impl Session {
 
     pub(crate) fn set_input_compact_mode(&mut self, enabled: bool) {
         self.input_compact_mode = enabled;
+        self.input_render_cache = None;
     }
 
     pub(crate) fn set_cursor_visible(&mut self, visible: bool) {
@@ -1039,9 +1045,14 @@ impl Session {
         self.scroll_manager.max_offset()
     }
 
-    /// Enforce scroll bounds after viewport changes
+    /// Enforce scroll bounds after viewport changes.
+    /// Clamps against last-known metrics only — never forces a reflow. The next
+    /// `ensure_scroll_metrics` (on render) recomputes and clamps again.
     pub(crate) fn enforce_scroll_bounds(&mut self) {
-        let max_offset = self.current_max_scroll_offset();
+        if !self.scroll_manager.metrics_valid() {
+            return;
+        }
+        let max_offset = self.scroll_manager.max_offset();
         if self.scroll_manager.offset() > max_offset {
             self.scroll_manager.set_offset(max_offset);
         }
@@ -1087,10 +1098,14 @@ impl Session {
     /// When the viewport is at the bottom (offset 0), new content naturally stays
     /// in view without adjustment. Only when the user has scrolled up (offset > 0)
     /// do we adjust the offset to prevent the view from drifting.
+    ///
+    /// Bottom-follow returns immediately so appends never force a reflow.
     pub(crate) fn adjust_scroll_after_change(&mut self, previous_max_offset: usize) {
+        if self.scroll_manager.offset() == 0 {
+            return;
+        }
         let new_max_offset = self.current_max_scroll_offset();
-
-        if self.scroll_manager.offset() > 0 && new_max_offset > previous_max_offset {
+        if new_max_offset > previous_max_offset {
             // Keep content position stable when the user has scrolled away from bottom
             use std::cmp::min;
             let current_offset = self.scroll_manager.offset();

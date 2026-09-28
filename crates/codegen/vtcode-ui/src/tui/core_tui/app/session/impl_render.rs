@@ -8,6 +8,7 @@ use crate::tui::core_tui::session::{list_panel, message_renderer};
 use ratatui::{buffer::Buffer, style::Modifier};
 
 impl Session {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub fn render(&mut self, frame: &mut Frame<'_>) {
         let Some(viewport) = self.core.begin_frame(frame) else {
             return;
@@ -117,6 +118,7 @@ impl Session {
 }
 
 impl Session {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn rebuild_compact_activity_hit_regions(&mut self, buffer: &Buffer, area: Rect) {
         self.compact_activity_hit_regions.clear();
         if tool_output_viewer::compact_activity_hint_text(self).is_none() {
@@ -233,7 +235,13 @@ fn find_expand_action_text_region(buffer: &Buffer, area: Rect, row: u16) -> Vec<
     for start_column in area.x..=area.right().saturating_sub(phrase_width) {
         let matched = phrase_chars.iter().enumerate().all(|(offset, expected)| {
             let column = start_column + offset as u16;
-            column < area.right() && buffer[(column, row)].symbol() == expected.to_string()
+            if column >= area.right() {
+                return false;
+            }
+            // Compare against a stack-encoded UTF-8 buffer — no per-cell String.
+            let mut utf8 = [0u8; 4];
+            let expected_str = expected.encode_utf8(&mut utf8);
+            buffer[(column, row)].symbol() == expected_str
         });
         if matched {
             return vec![Rect::new(start_column, row, phrase_width, 1)];

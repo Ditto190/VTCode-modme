@@ -129,6 +129,21 @@ impl ToolOutputViewerState {
         state
     }
 
+    /// Tool capture ids currently held in this open viewer. Used to pin those
+    /// blocks against FIFO eviction so an open review does not lose content.
+    ///
+    /// Anchored captures key as `Tool(id)`; unanchored ones key as
+    /// `OrphanTool(index)` but still carry `block.id` in `revision`.
+    pub(crate) fn retained_tool_ids(&self) -> HashSet<u64> {
+        self.messages
+            .iter()
+            .filter_map(|message| match message.key {
+                ReviewBlockKey::Tool(_) | ReviewBlockKey::OrphanTool(_) => Some(message.revision),
+                ReviewBlockKey::Core(_) => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn refresh(&mut self, session: &Session, width: u16, height: u16) {
         let width = width.max(1);
         let height = height.max(1);

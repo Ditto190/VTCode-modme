@@ -349,10 +349,14 @@ pub struct Session {
     pub(crate) fullscreen: FullscreenSessionState,
 
     // --- Performance Caching ---
-    header_lines_cache: Option<Vec<Line<'static>>>,
+    header_lines_cache: Option<Arc<Vec<Line<'static>>>>,
+    header_block_title_cache: Option<Line<'static>>,
     header_height_cache: hashbrown::HashMap<u16, u16>,
     pub(crate) queued_inputs_preview_cache: Option<Vec<String>>,
     subprocess_entries_preview_cache: Option<Vec<String>>,
+    /// Fingerprint of the last `build_input_render` inputs (width, height,
+    /// content_hash, cursor, compact, suggested) plus the built result.
+    input_render_cache: Option<(u16, u16, u64, usize, bool, bool, input::InputRender)>,
 
     // --- Terminal Title ---
     /// Product/app name used in terminal title branding

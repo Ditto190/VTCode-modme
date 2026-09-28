@@ -2,8 +2,8 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    text::Line,
-    widgets::{Clear, Paragraph, Widget, Wrap},
+    text::{Line, Span},
+    widgets::{Clear, Paragraph, Widget},
 };
 
 use crate::tui::config::constants::ui;
@@ -54,6 +54,7 @@ impl<'a> TranscriptWidget<'a> {
 }
 
 impl<'a> Widget for TranscriptWidget<'a> {
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
             self.session.set_transcript_area(None);
@@ -99,13 +100,35 @@ impl<'a> Widget for TranscriptWidget<'a> {
             .session
             .collect_transcript_window_cached(content_width, visible_start, viewport_rows);
 
-        // Check if we need to mutate the lines (fill empty space or add overlays)
-        let fill_count = viewport_rows.saturating_sub(cached_lines.len());
-        let needs_mutation = fill_count > 0 || !self.session.queued_inputs.is_empty();
+        // Check if we need to mutate the lines (queue overlay). Bottom padding
+        // rows need no mutation — the buffer is already default-styled empty
+        // space, so padding the line list only forced a per-frame clone.
+        let needs_mutation = !self.session.queued_inputs.is_empty();
+
+        // Fast path: no queue overlay, no live indicator shimmer, and no
+        // explicit links — paint cached rows in place without cloning Lines
+        // into Paragraph (hotpath: that clone was ~15KB/frame).
+        let has_links = cached_lines.iter().any(|line| !line.explicit_links.is_empty());
+        let spinner_active = active_indicator_shimmer_phase(self.session).is_some();
+        if !needs_mutation && !has_links && !spinner_active {
+            self.session.clear_transcript_file_link_targets();
+            if self.session.transcript_clear_required {
+                Clear.render(scroll_area, buf);
+                self.session.transcript_clear_required = false;
+            }
+            let default_style = self.session.styles.default_style();
+            let default_bg = default_style.bg;
+            paint_pre_wrapped_lines(cached_lines.as_slice(), scroll_area, buf, default_style);
+            apply_borrowed_line_backgrounds(buf, scroll_area, cached_lines.as_slice(), default_bg);
+            clear_transcript_gutters(area, inner, default_style, buf);
+            return;
+        }
 
         let mut visible_lines = if needs_mutation {
-            // Need to mutate, so clone and modify
+            // Need to mutate (queue overlay), so clone, pad to the viewport
+            // (overlay paints at the bottom), and modify.
             let mut lines = cached_lines.to_vec();
+            let fill_count = viewport_rows.saturating_sub(lines.len());
             if fill_count > 0 {
                 let target_len = lines.len() + fill_count;
                 lines.resize_with(target_len, TranscriptLine::default);
@@ -127,13 +150,17 @@ impl<'a> Widget for TranscriptWidget<'a> {
         // Paint full-width line tints AFTER Paragraph. Paragraph::render
         // first fills the whole area with `default_style` (terminal bg),
         // which would wipe a pre-painted band on cells past the line text.
-        let default_bg = self.session.styles.default_style().bg;
+        // Precompute per-row tints so the owned lines can move into Paragraph
+        // without a second clone.
         let default_style = self.session.styles.default_style();
-        let paragraph = Paragraph::new(visible_lines.clone())
-            .style(default_style)
-            .wrap(Wrap { trim: false });
+        let default_bg = default_style.bg;
+        let row_tints: Vec<Option<Color>> = visible_lines.iter().map(line_background).collect();
+        // Lines are already wrapped to `content_width` == `scroll_area.width` in
+        // reflow. Re-wrapping in Paragraph every frame was the dominant
+        // steady-state render cost (hotpath: ~21KB/frame).
+        let paragraph = Paragraph::new(visible_lines).style(default_style);
         paragraph.render(scroll_area, buf);
-        apply_full_width_line_backgrounds(buf, scroll_area, &visible_lines, default_bg);
+        apply_precomputed_line_backgrounds(buf, scroll_area, &row_tints, default_bg);
         clear_transcript_gutters(area, inner, default_style, buf);
     }
 }
@@ -172,6 +199,50 @@ fn clear_transcript_gutters(area: Rect, content_area: Rect, style: Style, buf: &
         let right = Rect::new(right_x, area.y, right_width, area.height);
         Clear.render(right, buf);
         buf.set_style(right, style);
+    }
+}
+
+/// Paint pre-wrapped transcript rows by writing spans directly into the buffer.
+/// Avoids cloning `Line`s into `Paragraph` on the common no-link path.
+/// Span styles patch `default_style` (same merge order as Paragraph).
+fn paint_pre_wrapped_lines(lines: &[TranscriptLine], area: Rect, buf: &mut Buffer, default_style: Style) {
+    buf.set_style(area, default_style);
+    let max_rows = usize::from(area.height).min(lines.len());
+    for (row, transcript_line) in lines.iter().take(max_rows).enumerate() {
+        let y = area.y + row as u16;
+        let mut x = area.x;
+        for span in &transcript_line.line.spans {
+            if x >= area.right() {
+                break;
+            }
+            let remaining = area.right().saturating_sub(x);
+            if remaining == 0 {
+                break;
+            }
+            let merged = default_style.patch(span.style);
+            let (end_x, _end_y) = buf.set_stringn(x, y, span.content.as_ref(), remaining as usize, merged);
+            x = end_x;
+        }
+    }
+}
+
+/// Fill untinted cells on a diff row using `line_background` from borrowed rows.
+fn apply_borrowed_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[TranscriptLine], default_bg: Option<Color>) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let max_rows = usize::from(area.height).min(lines.len());
+    for (row, transcript_line) in lines.iter().take(max_rows).enumerate() {
+        let Some(bg) = line_background(&transcript_line.line) else {
+            continue;
+        };
+        let y = area.y + row as u16;
+        for x in area.left()..area.right() {
+            let cell = &mut buf[(x, y)];
+            if cell.bg == Color::Reset || Some(cell.bg) == default_bg {
+                cell.bg = bg;
+            }
+        }
     }
 }
 
@@ -259,6 +330,10 @@ fn is_file_operation_indicator_line(line: &Line<'_>) -> bool {
 /// uncoloured sibling (or two different colours), and full-width fill would
 /// paint the empty pane with the other side's tint.
 fn line_background(line: &Line<'_>) -> Option<Color> {
+    // Fast reject: plain prose has no tinted spans and no side-by-side divider.
+    if !line.spans.iter().any(|span| span.style.bg.is_some()) {
+        return None;
+    }
     let mut first_background = None;
     let mut marker_background = None;
     let mut has_uncolored_divider = false;
@@ -291,14 +366,19 @@ fn line_background(line: &Line<'_>) -> Option<Color> {
 /// Only cells still on the terminal default background are painted. Word-chip
 /// cells (stronger red/green) must keep their colour so the two-level band
 /// survives the full-width fill.
-fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line<'_>], default_bg: Option<Color>) {
+fn apply_precomputed_line_backgrounds(
+    buf: &mut Buffer,
+    area: Rect,
+    row_tints: &[Option<Color>],
+    default_bg: Option<Color>,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
 
-    let max_rows = usize::from(area.height).min(lines.len());
-    for (row, line) in lines.iter().take(max_rows).enumerate() {
-        let Some(bg) = line_background(line) else {
+    let max_rows = usize::from(area.height).min(row_tints.len());
+    for (row, bg) in row_tints.iter().take(max_rows).enumerate() {
+        let Some(bg) = bg else {
             continue;
         };
         let y = area.y + row as u16;
@@ -307,10 +387,17 @@ fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line
             // Reset / terminal default → line tint. Any explicit paint
             // (word chip, already-tinted span, etc.) is left alone.
             if cell.bg == Color::Reset || Some(cell.bg) == default_bg {
-                cell.bg = bg;
+                cell.bg = *bg;
             }
         }
     }
+}
+
+/// Fill untinted cells on a diff row with the line tint (test helper).
+#[cfg(test)]
+fn apply_full_width_line_backgrounds(buf: &mut Buffer, area: Rect, lines: &[Line<'_>], default_bg: Option<Color>) {
+    let row_tints: Vec<Option<Color>> = lines.iter().map(line_background).collect();
+    apply_precomputed_line_backgrounds(buf, area, &row_tints, default_bg);
 }
 
 #[cfg(test)]

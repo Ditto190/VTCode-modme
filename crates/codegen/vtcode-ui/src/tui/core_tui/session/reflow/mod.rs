@@ -103,6 +103,7 @@ impl Session {
     /// - Subtle dividers between conversation turns
     /// - Consistent spacing between message blocks
     /// - Tool output grouped with headers
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(super) fn reflow_message_lines(
         &self,
         index: usize,
@@ -399,10 +400,12 @@ impl Session {
     ///
     /// Uses URL-aware wrapping to preserve URL clickability across all views.
     /// URLs are treated as atomic units and never split across lines.
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     pub(super) fn wrap_line(&self, line: Line<'static>, max_width: usize) -> Vec<Line<'static>> {
         wrapping::wrap_line_preserving_urls(line, max_width)
     }
 
+    #[cfg_attr(feature = "profiling", hotpath::measure)]
     fn reflow_agent_message_lines(
         &self,
         message: &MessageLine,
@@ -420,7 +423,16 @@ impl Session {
 
         let content_width = max_width.saturating_sub(prefix_width);
         let fallback = self.text_fallback(message.kind).or(self.theme.foreground);
-        let content_text: String = message.segments.iter().map(|s| s.text.as_str()).collect();
+        // Only materialize joined text when a segment might contain a link.
+        let content_may_link = message
+            .segments
+            .iter()
+            .any(|segment| transcript_links::may_contain_link_candidate_text(&segment.text));
+        let content_text: String = if content_may_link {
+            message.segments.iter().map(|s| s.text.as_str()).collect()
+        } else {
+            String::new()
+        };
         let mut content_spans = Vec::with_capacity(message.segments.len());
         for segment in &message.segments {
             let style = ratatui_style_from_inline(&segment.style, fallback);
@@ -432,21 +444,21 @@ impl Session {
 
         let (mut wrapped, mut explicit_links) = if content_width == 0 {
             (vec![Line::default()], vec![Vec::new()])
-        } else if let Some(prefix) = code_continuation_prefix.as_deref() {
-            let wrapped = text_utils::wrap_line_with_hanging_prefix(content_line, content_width, prefix);
-            let explicit_links = transcript_links::project_detected_links_onto_wrapped_lines(
-                &wrapped,
-                &content_text,
-                self.workspace_root.as_deref(),
-            );
-            (wrapped, explicit_links)
         } else {
-            let wrapped = self.wrap_line(content_line, content_width);
-            let explicit_links = transcript_links::project_detected_links_onto_wrapped_lines(
-                &wrapped,
-                &content_text,
-                self.workspace_root.as_deref(),
-            );
+            let wrapped = if let Some(prefix) = code_continuation_prefix.as_deref() {
+                text_utils::wrap_line_with_hanging_prefix(content_line, content_width, prefix)
+            } else {
+                self.wrap_line(content_line, content_width)
+            };
+            let explicit_links = if content_may_link {
+                transcript_links::project_detected_links_onto_wrapped_lines(
+                    &wrapped,
+                    &content_text,
+                    self.workspace_root.as_deref(),
+                )
+            } else {
+                vec![Vec::new(); wrapped.len()]
+            };
             (wrapped, explicit_links)
         };
 
