@@ -9,6 +9,36 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Padding, Paragraph, Wrap},
 };
+
+/// Paint pre-wrapped lines into `area` without Paragraph wrapping.
+fn paint_pre_wrapped_text(text: &Text<'static>, area: Rect, buf: &mut Buffer) {
+    for (row, line) in text.lines.iter().take(usize::from(area.height)).enumerate() {
+        let y = area.y + row as u16;
+        let mut x = area.x;
+        for span in &line.spans {
+            if x >= area.right() {
+                break;
+            }
+            let (end_x, _) = buf.set_span(x, y, span, area.right().saturating_sub(x));
+            x = end_x;
+        }
+    }
+}
+
+fn paint_pre_wrapped_line(line: &Line<'static>, area: Rect, buf: &mut Buffer) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let mut x = area.x;
+    let y = area.y;
+    for span in &line.spans {
+        if x >= area.right() {
+            break;
+        }
+        let (end_x, _) = buf.set_span(x, y, span, area.right().saturating_sub(x));
+        x = end_x;
+    }
+}
 use regex::Regex;
 use std::fmt::Write;
 use std::path::Path;
@@ -276,10 +306,14 @@ impl Session {
         let inner = block.inner(input_area);
         self.set_input_area(Some(inner));
         let input_render = self.build_input_render(inner.width, inner.height);
-        let paragraph = Paragraph::new(input_render.text)
-            .style(background_style)
-            .wrap(Wrap { trim: false });
-        frame.render_widget(paragraph.block(block), input_area);
+        // Input rows are already soft-wrapped to `inner.width` by `input_layout`.
+        // Paint via set_span — avoid Paragraph wrap every frame (hotpath ~5KB).
+        frame.render_widget(block, input_area);
+        {
+            let buf = frame.buffer_mut();
+            buf.set_style(inner, background_style);
+            paint_pre_wrapped_text(&input_render.text, inner, buf);
+        }
         self.apply_input_selection_highlight(frame.buffer_mut(), inner);
         // Auto-copy on select only when enabled; otherwise the selection stays
         // until the user copies manually with Ctrl+C (or Cmd+C).
@@ -304,10 +338,11 @@ impl Session {
             let (status_line, background_hits) = self
                 .render_input_status_line_with_hit(status_area.width)
                 .unwrap_or((Line::default(), Vec::new()));
-            let status = Paragraph::new(status_line)
-                .style(self.styles.default_style())
-                .wrap(Wrap { trim: false });
-            frame.render_widget(status, status_area);
+            {
+                let buf = frame.buffer_mut();
+                buf.set_style(status_area, self.styles.default_style());
+                paint_pre_wrapped_line(&status_line, status_area, buf);
+            }
             let hits = background_hits
                 .into_iter()
                 .map(|(start, end)| {
