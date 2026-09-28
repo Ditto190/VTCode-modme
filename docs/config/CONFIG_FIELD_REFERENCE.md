@@ -78,8 +78,8 @@ python3 scripts/generate_config_field_reference.py
 | `agent.harness.tool_result_clearing.clear_at_least_tokens` | `integer` | no | `30000` | Native `clear_tool_uses` applies only when the request carries context edits (interactive Anthropic with a capable model); requests that will not (other providers, Anthropic models whose capability profile lacks context edits, and headless `vtcode exec` runs, which never attach context management) get a local request-only stub rewrite with the same bounds. |
 | `agent.harness.tool_result_clearing.clear_tool_inputs` | `boolean` | no | `false` | - |
 | `agent.harness.tool_result_clearing.enabled` | `boolean` | no | `true` | - |
-| `agent.harness.tool_result_clearing.keep_tool_uses` | `integer` | no | `3` | - |
-| `agent.harness.tool_result_clearing.trigger_tokens` | `integer` | no | `100000` | - |
+| `agent.harness.tool_result_clearing.keep_tool_uses` | `integer` | no | `2` | - |
+| `agent.harness.tool_result_clearing.trigger_tokens` | `integer` | no | `40000` | Lowered from 100000 so research/audit turns clear tool results before they dominate the prompt. |
 | `agent.harness.verification.auto_execute` | `boolean` | no | `true` | Run the detected project verifier through the normal tool pipeline when the model exhausts its directive retries without verifying. Set to `false` to restore directive-only recovery. |
 | `agent.harness.verification.cross_turn_turns` | `integer` | no | `2` | Autonomous cross-turn recovery turns scheduled after a verification-blocked turn before a manual blocked handoff is written. `0` disables this layer. |
 | `agent.harness.verification.default_verifier_override` | `null \| string` | no | `null` | Explicit verifier command overriding project-marker detection. Must be a standalone verifier or pure `&&` chain; anything else falls back to detection. |

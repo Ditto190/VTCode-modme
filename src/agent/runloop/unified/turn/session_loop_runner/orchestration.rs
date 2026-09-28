@@ -2603,6 +2603,13 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 return Err(error);
             }
         }
+        // Empty shells (0 turns, terminal) are not worth keeping: they pollute
+        // `.vtcode/sessions/` and hide real sessions. Runs on every close path
+        // (including NewSession / resume continues) after `emitter.finish()`
+        // has dropped the liveness lock. Best-effort; retention catches strays.
+        if let Err(error) = vtcode_memory::evict_zero_turn_completed_store(&config.workspace, &turn_run_id.0) {
+            tracing::debug!(target: "vtcode.harness", error = %error, "zero-turn session store cleanup failed");
+        }
         // Bound the finished session's rewind pins so completed threads cannot
         // keep their full turn history protected for the snapshot age window.
         // A fully-checked task tracker is archived so it cannot leak into the
@@ -2828,6 +2835,8 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             final_response: final_response.as_deref(),
             resume_identifier,
             budget_limit: session_stats.budget_limit(),
+            total_cost_usd: session_stats.total_cost_usd(),
+            end_reason_label: session_end_reason.as_str(),
             first_call_composition: session_stats.first_call_composition(),
             session_end_reason,
         });

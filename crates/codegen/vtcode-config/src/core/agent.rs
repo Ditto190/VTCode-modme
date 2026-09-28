@@ -1323,12 +1323,14 @@ const fn default_tool_result_clearing_enabled() -> bool {
 
 #[inline]
 const fn default_tool_result_clearing_trigger_tokens() -> u64 {
-    100_000
+    // 40k: research/audit turns were observed at ~1M input tokens/turn with
+    // the old 100k trigger — tool results piled up long before any clearing.
+    40_000
 }
 
 #[inline]
 const fn default_tool_result_clearing_keep_tool_uses() -> u32 {
-    3
+    2
 }
 
 #[inline]
@@ -2200,8 +2202,8 @@ budget_warning_threshold = 0.5
         let clearing = config.harness.tool_result_clearing;
 
         assert!(clearing.enabled);
-        assert_eq!(clearing.trigger_tokens, 100_000);
-        assert_eq!(clearing.keep_tool_uses, 3);
+        assert_eq!(clearing.trigger_tokens, 40_000);
+        assert_eq!(clearing.keep_tool_uses, 2);
         assert_eq!(clearing.clear_at_least_tokens, 30_000);
         assert!(!clearing.clear_tool_inputs);
     }

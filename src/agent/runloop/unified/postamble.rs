@@ -33,6 +33,13 @@ pub(crate) struct ExitData<'a> {
     pub final_response: Option<&'a str>,
     pub resume_identifier: Option<&'a str>,
     pub budget_limit: Option<(f64, f64)>,
+    /// Cache-aware estimated session spend when pricing is known. Shown even
+    /// without a configured USD budget so cancelled/failed runs still report
+    /// what they cost. `None` means unknown pricing, not free.
+    pub total_cost_usd: Option<f64>,
+    /// Terminal outcome label for the stats line (`completed` / `cancelled` /
+    /// `error` / …). Always shown so a cancelled or errored run is labeled.
+    pub end_reason_label: &'static str,
     /// First assembled request composition (harness-tax breakdown). When
     /// present, the stats line surfaces the per-call fixed overhead.
     pub first_call_composition: Option<FirstCallComposition>,
@@ -165,6 +172,16 @@ fn build_stats_line(data: &ExitData<'_>) -> String {
 
     if data.code_additions > 0 || data.code_deletions > 0 {
         stats.push(format!("Code +{} / -{}", data.code_additions, data.code_deletions));
+    }
+
+    // Always surface estimated spend when pricing is known, including
+    // cancelled runs — a 17M-token interrupt must not look free.
+    if let Some(cost) = data.total_cost_usd {
+        stats.push(format!("Cost ${cost:.2}"));
+    }
+
+    if !data.end_reason_label.is_empty() {
+        stats.push(format!("End {}", data.end_reason_label));
     }
 
     if let Some(overhead) = data.first_call_composition {
@@ -321,6 +338,8 @@ mod tests {
             final_response: None,
             resume_identifier: None,
             budget_limit: None,
+            total_cost_usd: None,
+            end_reason_label: "",
             first_call_composition: None,
             session_end_reason: vtcode_core::hooks::SessionEndReason::Completed,
         }
@@ -364,6 +383,26 @@ mod tests {
         };
         let line = build_stats_line(&data);
         assert_eq!(line, "Session 30s");
+    }
+
+    #[test]
+    fn stats_line_includes_cost_when_pricing_is_known() {
+        let data = ExitData {
+            total_cost_usd: Some(0.42),
+            end_reason_label: "cancelled",
+            ..stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0)
+        };
+        let line = build_stats_line(&data);
+        assert!(line.contains("Cost $0.42"), "missing cost: {line}");
+        assert!(line.contains("End cancelled"), "missing end reason: {line}");
+    }
+
+    #[test]
+    fn stats_line_omits_cost_when_pricing_is_unknown() {
+        // Unknown pricing must not render as free / $0.
+        let data = stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0);
+        let line = build_stats_line(&data);
+        assert!(!line.contains("Cost"), "unknown pricing must not show cost: {line}");
     }
 
     #[test]
