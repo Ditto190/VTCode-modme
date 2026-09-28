@@ -140,9 +140,34 @@ fn is_light_theme() -> bool {
 /// double-Ctrl+C cleanup) can interleave between rows.
 fn write_postamble(postamble: &str) {
     let mut stdout = io::stdout().lock();
-    if let Err(error) = stdout.write_all(postamble.as_bytes()).and_then(|()| stdout.flush()) {
+    // The canonical restore returns the cursor to wherever the inline frame
+    // happened to be painted. A real terminal can map that position into the
+    // scrollback, where output scrolls out of view and the summary silently
+    // disappears. Anchor the block to the last row of the viewport so every
+    // row lands on screen; a scroll-region reset keeps a leftover DECSTBM from
+    // confining it to a sub-region.
+    let payload = format!("{}{}", viewport_bottom_anchor(), postamble);
+    if let Err(error) = stdout.write_all(payload.as_bytes()).and_then(|()| stdout.flush()) {
         tracing::warn!(%error, "failed to write the exit postamble");
     }
+}
+
+/// Cursor anchor that guarantees the next row is visible: reset the scroll
+/// region, then move to the last row of the viewport.
+fn viewport_bottom_anchor() -> String {
+    match crossterm::terminal::size() {
+        Ok((_, rows)) => anchor_for_rows(rows),
+        // Unknown geometry: fall back to a fresh row at the current cursor.
+        _ => "\r\n".to_string(),
+    }
+}
+
+/// Pure anchor builder (testable without a live terminal).
+fn anchor_for_rows(rows: u16) -> String {
+    if rows == 0 {
+        return "\r\n".to_string();
+    }
+    format!("\x1b[r\x1b[{rows};1H")
 }
 
 fn render_final_response(response: &str) {
@@ -499,6 +524,17 @@ mod tests {
         for row in postamble.split('\n').filter(|row| !row.is_empty()) {
             assert!(row.starts_with('\r'), "every postamble row must return the carriage: {row:?}");
         }
+    }
+
+    #[test]
+    fn viewport_anchor_resets_scroll_region_and_targets_the_last_row() {
+        // A real terminal can map the restored inline-frame cursor into the
+        // scrollback, hiding the summary; the anchor pins it to the last row.
+        let anchor = anchor_for_rows(40);
+        assert_eq!(anchor, "\x1b[r\x1b[40;1H");
+        let anchor = anchor_for_rows(1);
+        assert_eq!(anchor, "\x1b[r\x1b[1;1H");
+        assert!(anchor_for_rows(0).starts_with("\r\n"), "unknown geometry must not emit a bad CUP");
     }
 
     #[test]
