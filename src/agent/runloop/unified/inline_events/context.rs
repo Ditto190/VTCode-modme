@@ -149,11 +149,18 @@ impl<'a> InlineEventContext<'a> {
                     )?;
                     self.modal.restore_input_draft(input);
                     InlineLoopAction::Continue
-                } else {
-                    // The queued intent is consumed via the steering channel
-                    // and applied to the live history at the next tool-call
-                    // boundary of the running turn (mid-turn steering).
+                } else if self.ctrl_c_state.take_steer_delivered() {
+                    // Callback already handed this steer to the live steering
+                    // channel (mid-turn injection). Stay passive so the message
+                    // is not queued twice.
                     self.input_processor().passive()
+                } else {
+                    // Steering was unavailable (no sender, closed channel, or
+                    // the callback never ran). Queue the message so it is
+                    // processed once the agent is ready instead of vanishing.
+                    self.state.reset_interrupt_state();
+                    let primary_agent = self.modal.active_primary_agent_name();
+                    self.input_processor().queue_submit(input, queue, primary_agent)
                 }
             }
             InlineEvent::Pause | InlineEvent::Resume => {

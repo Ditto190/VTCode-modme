@@ -252,10 +252,16 @@ pub(crate) fn build_session_event_callback(
                 let _ = settings_events.send(event.clone());
                 return;
             }
+            // Hand text-only steers to the live steering channel for mid-turn
+            // injection. When the channel is unavailable (no sender yet, or
+            // closed) leave the delivery latch clear so the runloop Steer
+            // handler queues the message for the next ready boundary instead
+            // of dropping it.
             if !input.has_attachments()
                 && let Some(sender) = steering_sender.as_ref()
+                && sender.send(SteeringMessage::FollowUpInput(input.text.clone())).is_ok()
             {
-                let _ = sender.send(SteeringMessage::FollowUpInput(input.text.clone()));
+                state.mark_steer_delivered();
             }
         }
         InlineEvent::Transient(

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn is_local_llm_provider(provider_name: &str) -> bool {
@@ -1221,6 +1221,16 @@ impl CtrlCPhase {
 pub(crate) struct CtrlCState {
     phase: AtomicU8,
     last_signal_time: AtomicU64,
+    /// Shared event-delivery counter: incremented by the UI event callback
+    /// each time a Steer input is accepted by the live steering channel,
+    /// decremented by the runloop Steer handler. Callback and handler run
+    /// sequentially per event (callback first, then the channel), so an
+    /// undelivered steer falls through to the durable queue instead of
+    /// vanishing when the agent is temporarily unavailable (no steering
+    /// sender, closed channel). A counter — not a flag — so a burst of
+    /// steers delivered before the runloop drains does not double-queue the
+    /// second and later messages.
+    steer_delivered: AtomicUsize,
 }
 
 const DOUBLE_CTRL_C_WINDOW: Duration = Duration::from_millis(1000);
@@ -1302,6 +1312,23 @@ impl CtrlCState {
     pub(crate) fn reset(&self) {
         self.set_phase(CtrlCPhase::Idle);
         self.last_signal_time.store(0, Ordering::SeqCst);
+    }
+
+    /// Record that the UI event callback accepted a Steer input on the live
+    /// steering channel. Called from the callback before the event reaches
+    /// the runloop. Safe to call once per delivered steer in a burst.
+    pub(crate) fn mark_steer_delivered(&self) {
+        self.steer_delivered.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Consume one steer-delivery credit. `true` means the matching Steer
+    /// event was already handed to the steering channel and must not be
+    /// queued again; `false` means it fell through and should be queued so
+    /// the message is processed once the agent is ready.
+    pub(crate) fn take_steer_delivered(&self) -> bool {
+        self.steer_delivered
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| Some(pending.saturating_sub(1)))
+            .is_ok_and(|prev| prev > 0)
     }
 
     pub(crate) fn mark_cancel_handled(&self) {

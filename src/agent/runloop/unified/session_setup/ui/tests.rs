@@ -475,7 +475,7 @@ fn ordinary_steer_still_routes_to_steering_channel() {
     let (steering_tx, mut steering_rx) = tokio::sync::mpsc::unbounded_channel::<SteeringMessage>();
     let (settings_events, mut settings_rx) = tokio::sync::mpsc::unbounded_channel();
     let callback = build_session_event_callback(
-        state,
+        state.clone(),
         notify,
         Some(steering_tx),
         settings_events,
@@ -487,6 +487,32 @@ fn ordinary_steer_still_routes_to_steering_channel() {
     callback(&InlineEvent::Steer("keep going".into()));
     assert!(matches!(steering_rx.try_recv(), Ok(SteeringMessage::FollowUpInput(_))));
     assert!(settings_rx.try_recv().is_err());
+    assert!(
+        state.take_steer_delivered(),
+        "successful steering delivery must latch so the runloop does not queue twice"
+    );
+}
+
+#[test]
+fn steer_without_steering_sender_leaves_delivery_latch_clear() {
+    let state = Arc::new(state::CtrlCState::new());
+    let notify = Arc::new(Notify::new());
+    let (settings_events, _settings_rx) = tokio::sync::mpsc::unbounded_channel();
+    let callback = build_session_event_callback(
+        state.clone(),
+        notify,
+        None,
+        settings_events,
+        Arc::new(EditorOpenDispatcher::new(true)),
+        PathBuf::from("/tmp"),
+        test_exec_sessions(),
+    );
+
+    callback(&InlineEvent::Steer("queue me".into()));
+    assert!(
+        !state.take_steer_delivered(),
+        "undelivered steer must leave the latch clear so the runloop queues it"
+    );
 }
 
 #[test]
