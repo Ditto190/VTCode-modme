@@ -24,7 +24,7 @@ use crate::agent::runloop::unified::tool_pipeline::{
     streams_pty_output,
 };
 use crate::agent::runloop::unified::tool_summary_helpers::{
-    COMPACT_PREVIEW_LEN, display_command_text, preview_command, relativize_command_paths,
+    COMPACT_PREVIEW_LEN, display_command_text, preview_command, preview_full_command, relativize_command_paths,
 };
 use vtcode_commons::canonicalize;
 
@@ -1114,10 +1114,14 @@ fn normalized_lines_contain_subsequence(container: &[String], candidate: &[Strin
 }
 
 fn command_output_header(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-    // `display_command_text` is already display-safe (bare `|`, `>`, `;`).
-    // Keep the viewer header to a single readable preview line, consistent
-    // with the compact `• Ran` row, instead of echoing a multi-line script.
-    compact_command_preview(args, workspace_root)
+    // Transcript Review shows the complete command: viewport-aware wrapping
+    // (TUI reflow) owns overflow instead of a `…` truncation, so long chained
+    // commands remain readable in full. Uses the same script-runner folding as
+    // compact previews but applies no length cap.
+    display_command_text(args)
+        .map(|command| relativize_command_paths(&command, workspace_root))
+        .map(|command| preview_full_command(&command))
+        .filter(|command| !command.is_empty())
         .map(|command| format!("• Ran {command}"))
         .unwrap_or_else(|| format!("• Ran {name}"))
 }
@@ -2439,6 +2443,19 @@ mod tests {
         assert!(!header.contains("tur…ool"), "mid-string ellipsis leaked: {header}");
         assert!(!header.contains("\\'"), "escaped quotes leaked: {header}");
         assert_ne!(header, "• Ran python3 -c \"");
+    }
+
+    #[test]
+    fn command_header_shows_full_command_without_truncation() {
+        // Transcript Review must show the complete command: a long chained
+        // `git add && git commit && git log` must survive in full instead of
+        // head-truncating at the 120-char compact preview budget.
+        let command = "git add README.md && git commit -m 'docs(readme): expand contributors and sponsors by default' && git log --oneline -1 && git status --short && git diff --stat";
+        assert!(command.chars().count() > COMPACT_PREVIEW_LEN, "fixture must overflow compact cap");
+        let args = serde_json::json!({ "command": command });
+        let header = command_output_header(tools::EXEC_COMMAND, &args, None);
+        assert_eq!(header, format!("• Ran {command}"), "got: {header:?}");
+        assert!(!header.contains('…'), "truncation ellipsis leaked: {header:?}");
     }
 
     #[test]

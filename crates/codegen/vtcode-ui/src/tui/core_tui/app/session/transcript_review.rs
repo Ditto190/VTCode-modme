@@ -1005,7 +1005,7 @@ fn transcript_review_shortcut_hint(session: &Session) -> Option<String> {
     if let Some(binding) = session.core.primary_binding_label(Action::ToggleTranscriptRenderMode) {
         hints.push(format!("{binding} rich/raw"));
     }
-    hints.extend(["Esc close", "/ search", "↑/↓ scroll"].map(str::to_string));
+    hints.extend(["q/Esc close", "/ search", "↑/↓ scroll"].map(str::to_string));
     Some(hints.join(" · "))
 }
 
