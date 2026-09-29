@@ -179,11 +179,13 @@ graph LR
 ```
 
 The TUI, headless `exec`/`ask`, cron schedules, and editors over ACP all
-drive the same loop. Layers map to workspace crates: entry points in
-`vtcode` and `vtcode-acp`; the harness in `vtcode-core` (policy and
-sandboxing in `vtcode-safety`); the `ThreadEvent` contract in
-`vtcode-exec-events`; extensions in `vtcode-mcp`, `vtcode-skills`, and
-`vtcode-agent-plugins`; provider clients in `vtcode-llm`.
+drive the same loop. Layers map to workspace crates:
+
+- **Entry points:** `vtcode` (binary), `vtcode-acp` (editors)
+- **Harness:** `vtcode-core`, with policy and sandboxing in `vtcode-safety`
+- **Event contract:** `vtcode-exec-events` (`ThreadEvent`)
+- **Extensions:** `vtcode-mcp`, `vtcode-skills`, `vtcode-agent-plugins`
+- **Providers:** `vtcode-llm`
 
 Layer-by-layer details: [Architecture guide](./docs/ARCHITECTURE.md).
 
@@ -312,7 +314,7 @@ Rust stable, edition 2024, MSRV 1.98.1. Clone and run the fast gate:
 
 ```bash
 git clone https://github.com/vinhnx/VTCode.git
-cd vtcode
+cd VTCode
 ./scripts/run-debug.sh     # build and launch a debug binary
 ./scripts/check-dev.sh     # fast gate: clippy, fmt, check (10-30s)
 cargo nextest run          # tests (never `cargo test`)
@@ -322,8 +324,7 @@ CI runs with `RUSTFLAGS="-D warnings"` and `--locked`; match locally with
 `cargo check --locked`. Details: [development overview](./docs/development/README.md)
 · [testing guide](./docs/development/testing.md).
 
-Release binaries and notes: [GitHub releases](https://github.com/vinhnx/VTCode/releases)
-(Windows artifacts may lag behind macOS/Linux).
+Release binaries and notes: [GitHub releases](https://github.com/vinhnx/VTCode/releases).
 
 ## Contributing
 
