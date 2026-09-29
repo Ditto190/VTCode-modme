@@ -14,6 +14,7 @@ use vtcode_core::core::decision_tracker::DecisionTracker;
 use vtcode_core::core::trajectory::TrajectoryLogger;
 use vtcode_core::llm::provider as uni;
 use vtcode_core::tools::{ApprovalRecorder, ToolRegistry, ToolResultCache};
+use vtcode_core::types::CompactStr;
 use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
@@ -502,6 +503,22 @@ pub(crate) struct StreamedToolCallItem {
     pub(crate) tool_name: String,
 }
 
+/// Identity of a failed tool call for the turn-local diagnosis memo.
+/// `evidence` can be large (bounded by the diagnosis evidence cap).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct DiagnosisMemoKey {
+    pub tool: CompactStr,
+    pub evidence: String,
+}
+
+/// Bounded diagnosis fields stored in the turn-local memo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiagnosisMemoEntry {
+    pub observed: CompactStr,
+    pub likely_cause: CompactStr,
+    pub next_action: CompactStr,
+}
+
 pub(crate) struct HarnessTurnState {
     pub run_id: TurnRunId,
     pub turn_id: TurnId,
@@ -591,11 +608,10 @@ pub(crate) struct HarnessTurnState {
     file_read_path_counts: HashMap<String, usize>,
     pub(crate) seen_successful_readonly_signatures: HashSet<String>,
     streamed_tool_call_item_ids: HashMap<String, StreamedToolCallItem>,
-    /// Turn-local memo of failure diagnoses keyed by `(tool, evidence)`.
-    /// Fix-verify loops re-hit the same failure shape; skip the extra
-    /// lightweight LLM round-trip after the first diagnosis. Values are
-    /// bounded `(observed, likely_cause, next_action)` triples.
-    failure_diagnosis_memo: HashMap<(String, String), (String, String, String)>,
+    /// Turn-local memo of failure diagnoses. Fix-verify loops re-hit the
+    /// same failure shape; skip the extra lightweight LLM round-trip after
+    /// the first diagnosis.
+    failure_diagnosis_memo: HashMap<DiagnosisMemoKey, DiagnosisMemoEntry>,
     /// Cap on model-backed diagnosis calls per turn. After this, deterministic
     /// fallbacks only — failure-heavy loops must not multiply model calls.
     failure_diagnosis_model_calls: u32,
@@ -913,19 +929,19 @@ impl HarnessTurnState {
             .saturating_add(u64::try_from(model_visible_output_bytes).unwrap_or(u64::MAX));
     }
 
-    /// Return a memoized failure-diagnosis triple for `(tool, evidence)`.
-    pub(crate) fn failure_diagnosis_memo_get(&self, key: &(String, String)) -> Option<(String, String, String)> {
+    /// Return a memoized failure-diagnosis entry for `key`.
+    pub(crate) fn failure_diagnosis_memo_get(&self, key: &DiagnosisMemoKey) -> Option<DiagnosisMemoEntry> {
         self.failure_diagnosis_memo.get(key).cloned()
     }
 
-    /// Store a failure-diagnosis triple. Memo is bounded so a pathological
+    /// Store a failure-diagnosis entry. Memo is bounded so a pathological
     /// failure storm cannot grow the turn state without limit.
-    pub(crate) fn failure_diagnosis_memo_put(&mut self, key: (String, String), triple: (String, String, String)) {
+    pub(crate) fn failure_diagnosis_memo_put(&mut self, key: DiagnosisMemoKey, entry: DiagnosisMemoEntry) {
         const MAX_MEMO: usize = 32;
         if self.failure_diagnosis_memo.len() >= MAX_MEMO {
             self.failure_diagnosis_memo.clear();
         }
-        self.failure_diagnosis_memo.insert(key, triple);
+        self.failure_diagnosis_memo.insert(key, entry);
     }
 
     /// Whether another model-backed diagnosis is allowed this turn.
@@ -2216,16 +2232,18 @@ mod tests {
     use hashbrown::HashSet;
 
     use super::{
-        CrossTurnTracker, HarnessTurnState, MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES, RecoveryMode,
-        SESSION_LIMIT_AUTO_GRANT_INCREMENT, TOOL_BUDGET_WARNING_THRESHOLD, TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES,
-        ToolBudgetExhaustion, ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion,
-        ToolWallClockExhaustionNotice, TurnExecutionPhase, TurnId, TurnPhase, TurnRunId, full_auto_loop_grants_enabled,
+        CrossTurnTracker, DiagnosisMemoEntry, DiagnosisMemoKey, HarnessTurnState,
+        MODEL_VISIBLE_TOOL_METADATA_BUDGET_BYTES, RecoveryMode, SESSION_LIMIT_AUTO_GRANT_INCREMENT,
+        TOOL_BUDGET_WARNING_THRESHOLD, TOOL_PREVIEW_METADATA_PARSE_LIMIT_BYTES, ToolBudgetExhaustion,
+        ToolBudgetExhaustionNotice, ToolBudgetWarning, ToolWallClockExhaustion, ToolWallClockExhaustionNotice,
+        TurnExecutionPhase, TurnId, TurnPhase, TurnRunId, full_auto_loop_grants_enabled,
     };
     use vtcode_config::constants::output_limits::{
         TINY_PREVIEW_BYPASS_BYTES, TURN_PREVIEW_BUDGET_BYTES, TURN_PREVIEW_BUDGET_BYTES_PLANNING,
         TURN_TINY_PREVIEW_BUDGET_BYTES,
     };
     use vtcode_core::config::loader::VTCodeConfig;
+    use vtcode_core::types::CompactStr;
 
     #[test]
     fn model_visible_tool_preview_budget_returns_bounded_metadata_after_exhaustion() {
@@ -3439,11 +3457,23 @@ mod tests {
     #[test]
     fn failure_diagnosis_memo_round_trips_and_caps_model_calls() {
         let mut state = HarnessTurnState::new(TurnRunId("r".into()), TurnId("t".into()), 4, 60, 1);
-        let key = ("exec_command".to_string(), "exit 1".to_string());
-        let lookup = ("exec_command".to_string(), "exit 1".to_string());
-        assert!(state.failure_diagnosis_memo_get(&lookup).is_none());
-        state.failure_diagnosis_memo_put(key, ("obs".into(), "cause".into(), "act".into()));
-        assert_eq!(state.failure_diagnosis_memo_get(&lookup), Some(("obs".into(), "cause".into(), "act".into())));
+        let key = DiagnosisMemoKey {
+            tool: CompactStr::from("exec_command"),
+            evidence: "exit 1".to_string(),
+        };
+        assert!(state.failure_diagnosis_memo_get(&key).is_none());
+        state.failure_diagnosis_memo_put(
+            key.clone(),
+            DiagnosisMemoEntry {
+                observed: CompactStr::from("obs"),
+                likely_cause: CompactStr::from("cause"),
+                next_action: CompactStr::from("act"),
+            },
+        );
+        let hit = state.failure_diagnosis_memo_get(&key).expect("memo hit");
+        assert_eq!(hit.observed.as_str(), "obs");
+        assert_eq!(hit.likely_cause.as_str(), "cause");
+        assert_eq!(hit.next_action.as_str(), "act");
 
         assert!(state.can_spend_failure_diagnosis_model_call());
         for _ in 0..3 {

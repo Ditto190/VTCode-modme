@@ -165,6 +165,12 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   `trigger_tokens: 40000`, `keep_tool_uses: 2`. Research/audit turns were
   observed at ~1M input tokens/turn with the old 100k trigger — tool results
   piled up long before any clearing. Durable history is unchanged.
+- **Tool-output economy.** Interactive and headless paths share
+  `reduce_tool_result` hard caps (32 KiB / 2000 lines on read/exec bodies).
+  `list_files` `mode=tree` emits at most 200 nodes and 50 children per
+  directory and sets `tree_truncated` when it stops. Failure diagnosis is
+  memoized per `(tool, evidence)` with at most three model-backed calls per
+  turn; repeats reuse the first diagnosis or the deterministic fallback.
 - **Startup token-overhead warnings.** At session start (unless `--quiet`),
   VT Code logs non-fatal `tracing::warn!` messages when the config is likely to
   inflate per-request cost: more than 8 configured MCP servers,

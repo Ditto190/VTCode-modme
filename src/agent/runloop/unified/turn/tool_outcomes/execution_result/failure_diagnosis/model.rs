@@ -15,7 +15,9 @@ use super::{
     DIAGNOSIS_MAX_FIELD_BYTES, DIAGNOSIS_MAX_MODEL_RESPONSE_BYTES, DIAGNOSIS_MAX_OUTPUT_TOKENS,
     DIAGNOSIS_SYSTEM_PROMPT, DIAGNOSIS_TIMEOUT, ToolFailureDiagnosis,
 };
+use crate::agent::runloop::unified::run_loop_context::{DiagnosisMemoEntry, DiagnosisMemoKey};
 use crate::agent::runloop::unified::turn::context::TurnProcessingContext;
+use vtcode_core::types::CompactStr;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,8 +27,11 @@ struct ModelDiagnosis {
     next_action: String,
 }
 
-fn diagnosis_memo_key(tool_name: &str, evidence: &str) -> (String, String) {
-    (tool_name.to_string(), evidence.to_string())
+fn diagnosis_memo_key(tool_name: &str, evidence: &str) -> DiagnosisMemoKey {
+    DiagnosisMemoKey {
+        tool: CompactStr::from(tool_name),
+        evidence: evidence.to_string(),
+    }
 }
 
 pub(super) async fn diagnose_with_optional_model(
@@ -44,8 +49,12 @@ pub(super) async fn diagnose_with_optional_model(
     // diagnosis and stop spending model calls once the per-turn budget is
     // gone — each failure otherwise adds 1-2 hidden LLM round-trips.
     let memo_key = diagnosis_memo_key(tool_name, evidence);
-    if let Some((observed, likely_cause, next_action)) = ctx.harness_state.failure_diagnosis_memo_get(&memo_key) {
-        return ToolFailureDiagnosis::new(observed, likely_cause, next_action);
+    if let Some(entry) = ctx.harness_state.failure_diagnosis_memo_get(&memo_key) {
+        return ToolFailureDiagnosis::new(
+            entry.observed.as_str(),
+            entry.likely_cause.as_str(),
+            entry.next_action.as_str(),
+        );
     }
     if !ctx.harness_state.can_spend_failure_diagnosis_model_call() {
         return fallback;
@@ -101,12 +110,16 @@ pub(super) async fn diagnose_with_optional_model(
 
 fn store_memoized(
     state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
-    memo_key: (String, String),
+    memo_key: DiagnosisMemoKey,
     diagnosis: ToolFailureDiagnosis,
 ) -> ToolFailureDiagnosis {
     state.failure_diagnosis_memo_put(
         memo_key,
-        (diagnosis.observed.clone(), diagnosis.likely_cause.clone(), diagnosis.next_action.clone()),
+        DiagnosisMemoEntry {
+            observed: CompactStr::from(diagnosis.observed.as_str()),
+            likely_cause: CompactStr::from(diagnosis.likely_cause.as_str()),
+            next_action: CompactStr::from(diagnosis.next_action.as_str()),
+        },
     );
     diagnosis
 }
