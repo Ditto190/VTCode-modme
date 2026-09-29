@@ -2,6 +2,25 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.170.0 - 2026-09-29
+
+### Highlights
+#### Bug Fixes
+
+- Keep popup dialogs readable without dimmed text (480d37c0) 
+- Combine supplemental answer with remember request in planner flow (c6d7d1d1) 
+- Keep TUI messages queued when the agent is busy or unavailable (5f91b37c) 
+#### Documentation
+
+- Merge Spotlight into Overview and dedupe WebMCP mentions (c3a880a7) 
+#### Features
+
+- Add Claude Sonnet 5.5 to Anthropic and Merge Gateway (ffe088d4) 
+### Other Changes
+#### Other
+
+- Cleanup commands (8cde11d9) 
+- Cleanup (2415bcfc) 
 ## 0.169.6 - 2026-09-28
 
 ### Highlights
