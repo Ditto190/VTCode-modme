@@ -27,7 +27,6 @@ const STEP_THREE_TITLE: &str = "Service Tier";
 
 pub(super) const CUSTOM_PROVIDER_TITLE: &str = "Custom provider + model";
 pub(super) const CUSTOM_PROVIDER_SUBTITLE: &str = "Provide the provider name and model identifier manually.";
-const REASONING_OFF_BADGE: &str = "No reasoning";
 const CURRENT_BADGE: &str = "Current";
 /// Selection action for the "← Back to model list" row on follow-up steps.
 pub(super) const PICKER_BACK_ACTION: &str = "model_picker:back";

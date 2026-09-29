@@ -95,8 +95,7 @@ enum ModalListDensityBehavior {
     FixedComfortable,
 }
 
-const CONFIG_LIST_NAVIGATION_HINT: &str =
-    "Navigation: ↑/↓ select • Enter/Space apply • ←/→ change value • type to filter • Esc back/close";
+const CONFIG_LIST_NAVIGATION_HINT: &str = "↑↓ select · Enter apply · ←→ value · type to filter · Esc back";
 
 #[derive(Clone)]
 pub struct ModalListItem {

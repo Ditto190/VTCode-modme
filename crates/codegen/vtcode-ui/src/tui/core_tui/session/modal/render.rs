@@ -1847,7 +1847,7 @@ mod tests {
             .next()
             .expect("expected summary line for config list");
         let text = line_text(&summary);
-        assert!(text.contains("Navigation:"));
+        assert!(text.contains("↑↓ select"), "hint: {text}");
         assert!(!text.contains("Alt+D"));
         assert!(!text.contains("Density:"));
     }
@@ -1898,7 +1898,7 @@ mod tests {
             .next()
             .expect("summary line");
         let text = line_text(&summary);
-        assert!(text.contains("Navigation:"), "config lists render the shared navigation hint: {text}");
+        assert!(text.contains("↑↓ select"), "config lists render the shared navigation hint: {text}");
         assert!(!text.contains("Esc to go back"), "explicit footer must be dropped for config lists: {text}");
     }
 

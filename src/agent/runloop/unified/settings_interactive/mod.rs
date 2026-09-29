@@ -153,9 +153,6 @@ pub(crate) fn apply_string_edit(
     })
 }
 
-pub(crate) const SETTINGS_LIST_FOOTER: &str =
-    "Navigation: ↑/↓ select • Enter/Space apply • ←/→ change value • type to filter • Esc back/close";
-
 pub(crate) fn show_settings_palette(
     renderer: &mut AnsiRenderer,
     state: &SettingsPaletteState,
@@ -171,13 +168,15 @@ pub(crate) fn show_settings_palette(
     }
 
     let selected = preferred_settings_selection(state, &items, selected);
+    // ConfigAction lists are FixedComfortable and render the shared
+    // navigation hint; an explicit footer is ignored.
     renderer.show_list_modal_with_status(
         SETTINGS_TITLE,
         lines,
         items,
         selected,
         Some(settings_search_config(state)),
-        Some(SETTINGS_LIST_FOOTER.to_string()),
+        None,
         state.status.clone(),
     );
 

@@ -10,8 +10,21 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use super::super::selection::{
     SelectionDetail, reasoning_level_description, reasoning_level_label, service_tier_label,
 };
-use super::{CURRENT_BADGE, KEEP_CURRENT_DESCRIPTION, REASONING_OFF_BADGE, STEP_THREE_TITLE, STEP_TWO_TITLE};
+use super::{CURRENT_BADGE, KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
 use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
+
+fn back_to_model_list_row() -> InlineListItem {
+    InlineListItem {
+        title: "← Back to model list".to_string(),
+        subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
+        badge: None,
+        indent: 0,
+        selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
+        search_value: Some("back model list".to_string()),
+        badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
+        ..Default::default()
+    }
+}
 
 pub(crate) fn render_reasoning_inline(
     renderer: &mut AnsiRenderer,
@@ -19,16 +32,7 @@ pub(crate) fn render_reasoning_inline(
     current: ReasoningEffortLevel,
 ) -> Result<()> {
     let mut items = Vec::new();
-    items.push(InlineListItem {
-        title: "← Back to model list".to_string(),
-        subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
-        badge: Some("Back".to_string()),
-        indent: 0,
-        selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
-        search_value: Some("back model list".to_string()),
-        badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
-        ..Default::default()
-    });
+    items.push(back_to_model_list_row());
     items.push(InlineListItem {
         title: format!("Keep current ({})", reasoning_level_label(current)),
         subtitle: Some(KEEP_CURRENT_DESCRIPTION.to_string()),
@@ -45,7 +49,7 @@ pub(crate) fn render_reasoning_inline(
         items.push(InlineListItem {
             title: reasoning_level_label(ReasoningEffortLevel::None).to_string(),
             subtitle: Some(reasoning_level_description(ReasoningEffortLevel::None).to_string()),
-            badge: Some("GPT-5.x".to_string()),
+            badge: None,
             indent: 0,
             selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(ReasoningEffortLevel::None))),
             search_value: None,
@@ -73,7 +77,7 @@ pub(crate) fn render_reasoning_inline(
                 alternative.display_name(),
                 alternative.as_str()
             )),
-            badge: Some(REASONING_OFF_BADGE.to_string()),
+            badge: None,
             indent: 0,
             selection: Some(InlineListSelection::DisableReasoning),
             search_value: None,
@@ -218,16 +222,7 @@ pub(crate) fn render_service_tier_inline(
     current: Option<OpenAIServiceTier>,
 ) -> Result<()> {
     let items = vec![
-        InlineListItem {
-            title: "← Back to model list".to_string(),
-            subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
-            badge: Some("Back".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
-            search_value: Some("back model list".to_string()),
-            badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
-            ..Default::default()
-        },
+        back_to_model_list_row(),
         InlineListItem {
             title: format!("Keep current ({})", service_tier_label(current)),
             subtitle: Some("Retain the existing service tier configuration.".to_string()),
@@ -254,7 +249,7 @@ pub(crate) fn render_service_tier_inline(
         InlineListItem {
             title: "Flex".to_string(),
             subtitle: Some("Send service_tier=flex for lower-cost, lower-priority processing.".to_string()),
-            badge: Some("OpenAI".to_string()),
+            badge: None,
             indent: 0,
             selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
             search_value: None,
@@ -263,7 +258,7 @@ pub(crate) fn render_service_tier_inline(
         InlineListItem {
             title: "Priority".to_string(),
             subtitle: Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
-            badge: Some("OpenAI".to_string()),
+            badge: None,
             indent: 0,
             selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
             search_value: None,

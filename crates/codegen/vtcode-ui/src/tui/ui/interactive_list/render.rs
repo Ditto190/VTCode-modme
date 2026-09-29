@@ -9,9 +9,9 @@ use ratatui::widgets::{Block, BorderType, List, ListDirection, ListItem, ListSta
 use super::{SelectionEntry, SelectionListState};
 use crate::tui::ui::search::ListSearchFilter;
 
-const CONTROLS_HINT: &str = "↑/↓ j/k to move  •  Home/End to jump  •  Enter/Tab confirm  •  Esc clear/cancel";
-const FILTER_HINT: &str = "Tip: Type to filter  •  number to jump when filter is empty";
-const NUMBER_JUMP_HINT: &str = "Tip: Type number to jump";
+const CONTROLS_HINT: &str = "↑↓/jk move · Home/End · Enter confirm · Esc clear/cancel";
+const FILTER_HINT: &str = "Type to filter · number jumps when filter is empty";
+const NUMBER_JUMP_HINT: &str = "Type a number to jump";
 const NO_MATCHES: &str = "No matching options";
 
 mod styles {
