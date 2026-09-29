@@ -9,6 +9,17 @@ use super::super::semantic::{resolve_semantic_match, semantic_anchor_term};
 use super::io::AtomicWriter;
 use super::{PatchChunk, PatchError};
 
+/// Bound model-facing error echoes of patch context/snippet text. The model
+/// already has the patch payload; re-echoing multi-KB chunks in the failure
+/// message doubles the tokens of the failed attempt.
+fn condense_error_echo(text: &str) -> String {
+    if text.len() > 500 {
+        vtcode_commons::preview::condense_text_bytes(text, 250, 250)
+    } else {
+        text.to_string()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LineEnding {
     LF,
@@ -120,7 +131,7 @@ pub(super) async fn compute_replacements(
             if !context_found && let Some(context) = chunk.change_context() {
                 return Err(PatchError::ContextNotFound {
                     path: path.to_string(),
-                    context: context.to_string(),
+                    context: condense_error_echo(context),
                 });
             }
             let insertion_idx = if chunk.change_context().is_some() {
@@ -172,13 +183,13 @@ pub(super) async fn compute_replacements(
             if !context_found && let Some(context) = chunk.change_context() {
                 return Err(PatchError::ContextNotFound {
                     path: path.to_string(),
-                    context: context.to_string(),
+                    context: condense_error_echo(context),
                 });
             }
             let snippet = if old_segment.is_empty() {
                 "<empty>".to_string()
             } else {
-                old_segment.join("\n")
+                condense_error_echo(&old_segment.join("\n"))
             };
             return Err(PatchError::SegmentNotFound { path: path.to_string(), snippet });
         }
