@@ -122,6 +122,19 @@ pub fn ensure_raw_mode_disabled() {
     let _ = disable_raw_mode();
 }
 
+/// Drains terminal input that arrived after the TUI stopped reading it.
+///
+/// Teardown takes seconds (MCP shutdown, session-end hooks, TUI join) and the
+/// event stream is cancelled long before that finishes. A late reply — most
+/// visibly the kitty-protocol key-*release* report for the Ctrl+C that
+/// triggered the exit (`CSI 99;5:3u`) — then sits in the tty input buffer, is
+/// echoed once the tty returns to cooked mode, and spills into the shell after
+/// the process exits. Draining after raw mode is restored (and once more just
+/// before process exit) consumes it. Idempotent and bounded (~10 ms).
+pub fn drain_pending_terminal_input() {
+    crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
+}
+
 /// Restore terminal to a usable state after a panic or error.
 ///
 /// This is the single canonical function for terminal restoration.
@@ -136,6 +149,91 @@ pub fn ensure_raw_mode_disabled() {
 /// - Resets cursor style and shows cursor
 /// - Restores raw mode to its state before the TUI started
 pub fn restore_tui() -> io::Result<()> {
+    // Force semantics: callers other than the runner's mode guard (panic hook,
+    // emergency exit, error report) always want the tty fully restored, so any
+    // pending deferral is cleared first.
+    state::mark_raw_mode_restore_deferred(false);
+    let error = restore_terminal_state(false);
+    drain_pending_terminal_input();
+    error
+}
+
+/// Restore every escape-sequence mode but deliberately **keep raw mode**.
+///
+/// Used by the graceful exit path while the runloop still has teardown work to
+/// do. Raw mode keeps the tty's echo off, so a late kitty-protocol reply (e.g.
+/// the key-release report for the exiting Ctrl+C) cannot be echoed onto the
+/// screen; the caller drains and then transitions to cooked mode as its final
+/// step, in [`finish_deferred_raw_mode_restore`].
+///
+/// The deferral is armed from session start (the TUI task's own restore fires
+/// before the runloop has finished teardown) and every non-runner caller of
+/// [`restore_tui`] clears it, so a panic or emergency exit still restores the
+/// tty immediately.
+pub fn restore_tui_keep_raw_mode() -> io::Result<()> {
+    state::mark_raw_mode_restore_deferred(true);
+    restore_terminal_state(true)
+}
+
+/// Restore raw mode to the state recorded before the TUI started.
+///
+/// If the terminal's current raw-mode can be queried we only toggle when needed;
+/// otherwise fall back to disabling raw mode to preserve a conservative and
+/// usable state.
+fn restore_raw_mode_state() -> Option<io::Error> {
+    let previous_raw = state::is_raw_mode_was_enabled();
+    let mut error = None;
+    match is_raw_mode_enabled() {
+        Ok(current_enabled) => {
+            if previous_raw && !current_enabled {
+                if let Err(err) = enable_raw_mode() {
+                    error = Some(err);
+                }
+            } else if !previous_raw && current_enabled {
+                if let Err(err) = disable_raw_mode() {
+                    error = Some(err);
+                }
+            }
+        }
+        Err(_) => {
+            if !previous_raw {
+                if let Err(err) = disable_raw_mode() {
+                    error = Some(err);
+                }
+            }
+        }
+    }
+    error
+}
+
+/// Ask every restore path that honors the deferral (currently only the runner's
+/// mode guard, which fires when the TUI task exits) to keep the tty in raw
+/// mode. The graceful exit path calls this before shutting the TUI down and
+/// clears it in [`finish_deferred_raw_mode_restore`].
+pub fn defer_raw_mode_restore() {
+    state::mark_raw_mode_restore_deferred(true);
+}
+
+/// Finish a deferred raw-mode restore as the last act of a graceful exit.
+///
+/// Drains pending input *before* leaving raw mode — echo is still off, so the
+/// bytes are consumed instead of echoed — then restores the tty's raw-mode
+/// state and drains once more so nothing spills into the shell.
+pub fn finish_deferred_raw_mode_restore() {
+    drain_pending_terminal_input();
+    if let Some(error) = restore_raw_mode_state() {
+        tracing::debug!(%error, "failed to finish the deferred raw-mode restore");
+    }
+    state::mark_raw_mode_restore_deferred(false);
+    state::mark_raw_mode_was_enabled(false);
+    let _ = io::stdout().flush();
+    let _ = io::stderr().flush();
+    drain_pending_terminal_input();
+}
+
+/// Shared restore body. With `keep_raw_mode` the tty is left in raw mode and
+/// the post-restore input drain is skipped (the caller owns that ordering).
+fn restore_terminal_state(keep_raw_mode: bool) -> io::Result<()> {
     if !state::try_claim_restore() {
         return Ok(());
     }
@@ -176,33 +274,19 @@ pub fn restore_tui() -> io::Result<()> {
     // Drain terminal responses from restore sequences while raw mode still active
     crate::tui::core_tui::runner::terminal_io::drain_terminal_events();
 
-    // Restore raw-mode to the state it had before the TUI started.
-    // If we can query the terminal's current raw-mode we only toggle when
-    // needed; otherwise fall back to disabling raw mode to preserve a
-    // conservative and usable state.
-    let previous_raw = state::is_raw_mode_was_enabled();
-    match is_raw_mode_enabled() {
-        Ok(current_enabled) => {
-            if previous_raw && !current_enabled {
-                if let Err(error) = enable_raw_mode() {
-                    first_error.get_or_insert(error);
-                }
-            } else if !previous_raw && current_enabled {
-                if let Err(error) = disable_raw_mode() {
-                    first_error.get_or_insert(error);
-                }
-            }
-        }
-        Err(_) => {
-            // Couldn't query — fall back to best-effort disable when the
-            // TUI had enabled raw mode (previous_raw == false) to avoid
-            // leaving the tty in a no-echo/no-stdin state.
-            if !previous_raw {
-                if let Err(error) = disable_raw_mode() {
-                    first_error.get_or_insert(error);
-                }
-            }
-        }
+    // A graceful exit may ask to keep raw mode past this point: the tty's echo
+    // stays off while the runloop finishes teardown, so late input (the kitty
+    // key-release report for the exiting Ctrl+C) cannot be echoed onto the
+    // screen. The caller finishes the transition as its final act.
+    if keep_raw_mode {
+        state::mark_raw_mode_restore_deferred(true);
+        let _ = io::stdout().flush();
+        let _ = io::stderr().flush();
+        return Ok(());
+    }
+
+    if let Some(error) = restore_raw_mode_state() {
+        first_error.get_or_insert(error);
     }
 
     // Best-effort stty sane equivalent for /dev/tty when raw-mode toggles

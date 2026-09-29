@@ -210,6 +210,14 @@ pub(super) fn enable_terminal_modes(
 /// Delegates to `restore_tui()` which handles all terminal restoration
 /// and is guarded by a `RESTORE_DONE` flag for idempotency.
 pub(super) fn restore_terminal_modes(_state: &TerminalModeState) -> Result<()> {
-    crate::tui::ui::tui::panic_hook::restore_tui()?;
+    // The TUI task can exit while the runloop still has teardown work to do
+    // (MCP shutdown, session-end hooks). On the graceful exit path the runloop
+    // defers the raw-mode transition until its final step, so late input cannot
+    // be echoed by the line discipline; every other path restores immediately.
+    if crate::tui::ui::tui::panic_hook::is_raw_mode_restore_deferred() {
+        crate::tui::ui::tui::panic_hook::restore_tui_keep_raw_mode()?;
+    } else {
+        crate::tui::ui::tui::panic_hook::restore_tui()?;
+    }
     Ok(())
 }

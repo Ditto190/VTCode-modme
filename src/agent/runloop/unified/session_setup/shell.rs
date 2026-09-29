@@ -152,6 +152,16 @@ pub(crate) async fn initialize_session_shell(
     // restore a no-op once crossterm owns the TTY.
     vtcode_core::utils::terminal_color_probe::note_crossterm_raw_mode();
 
+    // Keep the tty's raw mode (and therefore echo) off until the exit postamble
+    // runs. The TUI task restores the terminal the moment the session ends,
+    // which is before the runloop has finished teardown (archive write, MCP
+    // shutdown, TUI join); a cooked tty in that window echoes late input — most
+    // visibly the kitty-protocol key-release report for the exiting Ctrl+C —
+    // onto the screen and into the shell's input. The postamble finishes the
+    // transition; the panic hook, emergency exit, and error reports clear the
+    // deferral so those paths restore immediately.
+    vtcode_ui::tui::panic_hook::defer_raw_mode_restore();
+
     let mut session = spawn_session_with_options(
         theme_spec.clone(),
         SessionOptions {

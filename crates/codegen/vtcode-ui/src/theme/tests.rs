@@ -92,6 +92,31 @@ fn test_all_themes_have_readable_foreground_and_accents() {
 
 #[test]
 #[serial_test::serial(theme_runtime)]
+fn style_contrast_ratio_reports_the_theme_minimum_for_banner_copy() {
+    let original_theme = active_theme_id();
+    for id in available_themes() {
+        set_active_theme(id).expect("built-in theme");
+        let minimum = get_minimum_contrast();
+        let styles = active_styles();
+
+        for (name, style) in [
+            ("banner", banner_style()),
+            ("info", styles.info),
+            ("tool_detail", styles.tool_detail),
+            ("primary", styles.primary),
+        ] {
+            let ratio = style_contrast_ratio(&style).unwrap_or_else(|| panic!("{id}/{name} needs an RGB fg"));
+            assert!(ratio >= minimum, "theme={id} token={name} contrast {ratio:.2} below {minimum:.1}");
+        }
+
+        // A style without an explicit foreground has no theme-relative ratio.
+        assert_eq!(style_contrast_ratio(&Style::new()), None);
+    }
+    set_active_theme(&original_theme).expect("restore the previously active theme");
+}
+
+#[test]
+#[serial_test::serial(theme_runtime)]
 fn committed_and_cancelled_theme_changes_do_not_leave_a_preview() {
     let original_theme = active_theme_id();
     let committed_theme = if original_theme == "ciapre" { "mono" } else { "ciapre" };

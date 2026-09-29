@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep, timeout};
+use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 use vtcode_commons::ui_protocol::ActivityState;
 use vtcode_config::loader::SimpleConfigWatcher;
@@ -22,7 +22,7 @@ use vtcode_core::utils::session_archive;
 use vtcode_core::utils::session_archive::SessionMessage;
 use vtcode_ui::tui::app::ArchivedPromptEntry;
 
-use super::super::{CancelGuard, TerminalCleanupGuard, extract_idle_config};
+use super::super::{CancelGuard, TerminalCleanupGuard};
 use super::archive::{create_session_archive, refresh_runtime_debug_context_for_next_session, workspace_archive_label};
 use super::blocked_handoff::write_blocked_handoff_after_checkpoint;
 use super::handoff::{
@@ -234,8 +234,6 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
     let mut config = config.clone();
     let mut session_skip_confirmations = skip_confirmations;
     let mut resume_state = resume;
-    let mut _consecutive_idle_cycles = 0;
-    let mut last_activity_time: Option<Instant> = None;
     let mut config_watcher = SimpleConfigWatcher::new_with_user_config_paths(config.workspace.clone());
     config_watcher.set_check_interval(15);
     config_watcher.set_debounce_duration(500);
@@ -243,7 +241,6 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         config_watcher.set_last_known_config(initial_config.clone());
     }
     let mut vt_cfg = initial_vt_cfg.or_else(|| config_watcher.load_config());
-    let mut idle_config = extract_idle_config(vt_cfg.as_ref());
     let mut pending_session_start_trigger = None;
     let mut next_session_primary_agent: Option<String> = None;
 
@@ -2035,7 +2032,6 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                         ),
                     );
                 }
-                last_activity_time = Some(Instant::now());
                 vtcode_core::tools::cache::FILE_CACHE.check_pressure_and_evict().await;
                 tool_result_cache.write().await.check_pressure_and_evict();
                 let blocked_turn = matches!(&outcome_result, RunLoopTurnLoopResult::Blocked { .. });
@@ -2696,6 +2692,29 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
         {
             tracing::warn!(%error, "failed to terminate exec sessions during session exit");
         }
+        // Capture the end-of-session worktree state before teardown: finalize
+        // does not touch the worktree, so the snapshot is equivalent, and
+        // taking it here keeps the restore → summary window free of git
+        // subprocess work (the tty is already cooked and echoing by then).
+        let end_code_changes = capture_code_change_snapshot(&config.workspace, "end").await;
+        let code_change_delta =
+            compute_session_code_change_delta(start_code_changes.as_ref(), end_code_changes.as_ref());
+        // The config-reload check is polling bookkeeping that only matters for
+        // a continuing session; keep it ahead of teardown so nothing sits
+        // between the terminal restore and the exit summary.
+        if config_watcher.should_reload() {
+            if let Some(reloaded) = config_watcher.load_config() {
+                vt_cfg = Some(reloaded);
+                crate::agent::agents::apply_live_reload_overrides(vt_cfg.as_mut(), &config);
+                tracing::debug!("Configuration reloaded during idle period");
+            }
+            if let Some(error) = config_watcher.take_reload_error() {
+                renderer.line(
+                    MessageStyle::Warning,
+                    &format!("Configuration reload rejected; keeping the last valid configuration: {error}"),
+                )?;
+            }
+        }
         let finalization_output = match finalize_session(
             &mut renderer,
             lifecycle_hooks.as_ref(),
@@ -2730,7 +2749,6 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
                 if let Some(reloaded) = config_watcher.load_config() {
                     vt_cfg = Some(reloaded);
                     crate::agent::agents::apply_live_reload_overrides(vt_cfg.as_mut(), &config);
-                    idle_config = extract_idle_config(vt_cfg.as_ref());
                     tracing::debug!("Configuration reloaded due to file changes");
                 }
                 if let Some(error) = config_watcher.take_reload_error() {
@@ -2744,45 +2762,9 @@ pub(crate) async fn run_single_agent_loop_unified_impl(
             refresh_runtime_debug_context_for_next_session(config.workspace.as_path(), None).await?;
             resume_state = None;
             pending_session_start_trigger = Some(SessionStartTrigger::NewSession);
-            _consecutive_idle_cycles = 0;
             continue;
         }
-        if config_watcher.should_reload() {
-            if let Some(reloaded) = config_watcher.load_config() {
-                vt_cfg = Some(reloaded);
-                crate::agent::agents::apply_live_reload_overrides(vt_cfg.as_mut(), &config);
-                idle_config = extract_idle_config(vt_cfg.as_ref());
-                tracing::debug!("Configuration reloaded during idle period");
-            }
-            if let Some(error) = config_watcher.take_reload_error() {
-                renderer.line(
-                    MessageStyle::Warning,
-                    &format!("Configuration reload rejected; keeping the last valid configuration: {error}"),
-                )?;
-            }
-        }
-        if idle_config.enabled
-            && let Some(last_activity) = last_activity_time
-        {
-            let idle_duration = last_activity.elapsed().as_millis() as u64;
-            if idle_duration >= idle_config.timeout_ms {
-                _consecutive_idle_cycles += 1;
-                if idle_config.backoff_ms > 0 {
-                    if _consecutive_idle_cycles >= idle_config.max_cycles {
-                        sleep(Duration::from_millis(idle_config.backoff_ms * 2)).await;
-                        _consecutive_idle_cycles = 0;
-                    } else {
-                        sleep(Duration::from_millis(idle_config.backoff_ms)).await;
-                    }
-                }
-            } else {
-                _consecutive_idle_cycles = 0;
-            }
-        }
 
-        let end_code_changes = capture_code_change_snapshot(&config.workspace, "end").await;
-        let code_change_delta =
-            compute_session_code_change_delta(start_code_changes.as_ref(), end_code_changes.as_ref());
         let finalization_succeeded = finalization_output.is_some();
         let resume_identifier = finalization_output
             .as_ref()

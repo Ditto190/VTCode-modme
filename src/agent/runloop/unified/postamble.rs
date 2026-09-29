@@ -1,8 +1,8 @@
+use anstyle::{Reset, Style as AnsiStyle};
 use std::borrow::Cow;
 use std::io::{self, Write as _};
 use std::time::Duration;
-use vtcode_commons::ansi_codes::{BOLD, DIM, RESET, fg_256};
-use vtcode_commons::color256_theme::rgb_to_ansi256_for_theme;
+use vtcode_commons::color_policy::color_output_enabled;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use vtcode_ui::tui::ui::theme;
 
@@ -54,15 +54,17 @@ pub(crate) struct ExitData<'a> {
 }
 
 pub(crate) fn print_exit_summary(data: ExitData<'_>) {
-    // Belt-and-braces before any stdout write: the canonical restore in
-    // `finalize_session` already disabled raw mode, but if it was skipped or
-    // failed (emergency path, partial init) output processing (`ONLCR`) stays
-    // off and every `println!` staircases. Unlike `restore_tui()` this always
-    // attempts the disable, so the postamble starts from a cooked tty.
-    vtcode_ui::tui::panic_hook::ensure_raw_mode_disabled();
     // Arm the graceful-exit window before the first write so a late double
     // Ctrl+C during teardown cannot hard-exit between postamble writes.
     crate::agent::runloop::unified::session_setup::mark_exit_postamble_armed();
+    // Finish the deferred raw-mode transition: drain pending input while echo is
+    // still off (so late reports are consumed, not echoed), then return the tty
+    // to the cooked state the shell expects.
+    vtcode_ui::tui::panic_hook::finish_deferred_raw_mode_restore();
+    // Belt-and-braces for paths that never deferred (emergency exit, partial
+    // init): without a cooked tty the postamble would staircase with `ONLCR` off.
+    // crossterm's disable is a no-op when raw mode is already off.
+    vtcode_ui::tui::panic_hook::ensure_raw_mode_disabled();
     // Completed sessions re-print the answer through the markdown renderer so
     // it survives in the main scrollback after the inline frame is torn down.
     if matches!(data.session_end_reason, vtcode_core::hooks::SessionEndReason::Completed)
@@ -72,7 +74,7 @@ pub(crate) fn print_exit_summary(data: ExitData<'_>) {
     }
     // One buffered write for the notice + metrics block: the shell sees the
     // whole summary or nothing, never a truncated first line.
-    write_postamble(&build_exit_postamble(&data));
+    write_postamble(&build_exit_postamble(&data, color_output_enabled()));
 }
 
 /// Builds the exit postamble (interrupt notice + metrics block) as a single
@@ -82,7 +84,8 @@ pub(crate) fn print_exit_summary(data: ExitData<'_>) {
 /// output processing (`ONLCR`) is off, and the block opens on a fresh row so
 /// it never overwrites the leftover inline TUI frame that the canonical
 /// restore left behind.
-fn build_exit_postamble(data: &ExitData<'_>) -> String {
+fn build_exit_postamble(data: &ExitData<'_>, color_enabled: bool) -> String {
+    let styles = PostambleStyles::resolve(color_enabled);
     let mut out = String::with_capacity(640);
     // Fresh row below any leftover inline frame content.
     out.push_str("\r\n");
@@ -94,46 +97,111 @@ fn build_exit_postamble(data: &ExitData<'_>) -> String {
         // Interrupted exits get concise feedback, not a full transcript dump.
         // The in-TUI answer (if any) stays in the alternate buffer history;
         // re-printing it here is the fullscreen noise reported on Ctrl+C.
-        out.push_str(&format!("\r{DIM}Interrupted — session exited. Transcript saved; resume to continue.{RESET}\n"));
+        push_row(&mut out, styles.notice("Interrupted — session exited. Transcript saved; resume to continue."));
     }
 
     out.push_str("\r\n");
-    out.push_str(&format!(
-        "\r{BOLD}{title_style}> {} ({}){RESET}\n",
-        data.app_name,
-        data.version,
-        title_style = fg_256(rgb_to_ansi256_for_theme(0xAE, 0xA4, 0x7F, is_light_theme()))
-    ));
+    push_row(&mut out, styles.banner(&format!("> {} ({})", data.app_name, data.version)));
 
     let trust = build_trust_label(data.trust_label);
     if !trust.is_empty() {
-        out.push_str(&format!("\r{DIM}{trust}{RESET}\n"));
+        push_row(&mut out, styles.muted(&trust));
     }
 
-    let model_line = build_model_line(data);
+    let model_line = build_model_line(&styles, data);
     if !model_line.is_empty() {
-        out.push_str(&format!("\r{DIM}{model_line}{RESET}\n"));
+        push_row(&mut out, model_line);
     }
 
-    out.push_str(&format!("\r{DIM}{}{RESET}\n", build_stats_line(data)));
+    push_row(&mut out, styles.muted(&build_stats_line(data)));
 
     if let Some((max_budget_usd, actual_cost_usd)) = data.budget_limit {
-        out.push_str(&format!("\r{DIM}Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}{RESET}\n"));
+        push_row(&mut out, styles.muted(&format!("Budget at ${actual_cost_usd:.2} / ${max_budget_usd:.2}")));
     }
 
     if let Some(session_id) = data.resume_identifier {
-        out.push_str(&format!(
-            "\r{DIM}Resume: {resume_style}vtcode --resume {session_id}{RESET}\n",
-            resume_style = fg_256(rgb_to_ansi256_for_theme(0x98, 0xBB, 0x74, is_light_theme()))
-        ));
+        push_row(
+            &mut out,
+            format!("{} {}", styles.muted("Resume:"), styles.accent(&format!("vtcode --resume {session_id}")),),
+        );
     }
 
     out.push_str("\r\n");
     out
 }
 
-fn is_light_theme() -> bool {
-    theme::is_light_theme(&theme::active_theme_id())
+/// Theme-resolved styles for the exit postamble.
+///
+/// Resolved once per exit so the block reads as a single surface with a clear
+/// hierarchy: a bold banner title, one bold notice row, subdued metadata, and
+/// the theme accent on the values the user acts on (model, resume command).
+///
+/// Every color comes from the active theme — either its contrast-validated
+/// `ThemeStyles` tokens or its `banner_style()` — so no hand-picked palette
+/// value can fall below the configured WCAG minimum (4.5:1 by default) on a
+/// light or dark background. Faint (`SGR 2`) styling is deliberately unused:
+/// terminals render it by dimming the foreground, which pushes normal-size
+/// text under the same minimum. See `docs/guides/COLOR_GUIDELINES.md`.
+struct PostambleStyles {
+    /// Bold theme banner color for the `> VT Code (version)` row.
+    banner: AnsiStyle,
+    /// Bold secondary for the interrupt notice — the row that must be seen.
+    notice: AnsiStyle,
+    /// Subdued foreground for metadata rows and inline labels.
+    muted: AnsiStyle,
+    /// Theme accent for key values (model, resume command).
+    accent: AnsiStyle,
+    /// `NO_COLOR` / `--no-color` / `--color never` gate.
+    color_enabled: bool,
+}
+
+impl PostambleStyles {
+    fn resolve(color_enabled: bool) -> Self {
+        let styles = theme::active_styles();
+        Self {
+            banner: theme::banner_style(),
+            notice: styles.info,
+            muted: styles.tool_detail,
+            accent: styles.primary,
+            color_enabled,
+        }
+    }
+
+    /// Wrap `text` in `style`, or return it unstyled when color is disabled.
+    fn paint(&self, style: &AnsiStyle, text: &str) -> String {
+        if self.color_enabled {
+            format!("{style}{text}{Reset}")
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn banner(&self, text: &str) -> String {
+        self.paint(&self.banner, text)
+    }
+
+    fn notice(&self, text: &str) -> String {
+        self.paint(&self.notice, text)
+    }
+
+    fn muted(&self, text: &str) -> String {
+        self.paint(&self.muted, text)
+    }
+
+    fn accent(&self, text: &str) -> String {
+        self.paint(&self.accent, text)
+    }
+}
+
+/// Append one postamble row: carriage-first so the row starts at column 0 even
+/// when output processing (`ONLCR`) is off, newline-terminated.
+///
+/// `content` is pre-styled segment text; keeping the carriage outside the
+/// styling means a terminal that ignores `SGR` still lays the rows out.
+fn push_row(out: &mut String, content: String) {
+    out.push('\r');
+    out.push_str(&content);
+    out.push('\n');
 }
 
 /// Writes the postamble in one syscall so no concurrent exit path (emergency
@@ -150,6 +218,10 @@ fn write_postamble(postamble: &str) {
     if let Err(error) = stdout.write_all(payload.as_bytes()).and_then(|()| stdout.flush()) {
         tracing::warn!(%error, "failed to write the exit postamble");
     }
+    // Last defense before the process exits: anything that arrived while the
+    // remaining teardown (git snapshot, runtime drop) ran is consumed here so
+    // it cannot be echoed by the tty or read by the shell as stray input.
+    vtcode_ui::tui::panic_hook::drain_pending_terminal_input();
 }
 
 /// Cursor anchor that guarantees the next row is visible: reset the scroll
@@ -236,7 +308,7 @@ fn build_stats_line(data: &ExitData<'_>) -> String {
 
 /// Builds the model/provider/reasoning row (unstyled ends are supplied by the
 /// caller's DIM wrapper). Empty when neither model nor provider is known.
-fn build_model_line(data: &ExitData<'_>) -> String {
+fn build_model_line(styles: &PostambleStyles, data: &ExitData<'_>) -> String {
     let model = data.model.trim();
     let provider = data.provider.trim();
     let reasoning = data.reasoning.trim();
@@ -245,21 +317,23 @@ fn build_model_line(data: &ExitData<'_>) -> String {
     let show_provider = !provider.is_empty();
     let show_reasoning = !reasoning.is_empty();
 
-    let model_style = fg_256(rgb_to_ansi256_for_theme(0xCC, 0x8A, 0x3E, is_light_theme()));
-
+    // Each segment paints itself: a wrapping row style would be cancelled by
+    // the inner accent span's reset, leaving the trailing text unstyled.
     let mut line = match (show_model, show_provider) {
-        (true, true) => format!("Model: {BOLD}{model_style}{model}{RESET}{DIM} via {provider}"),
-        (true, false) => format!("Model: {BOLD}{model_style}{model}{RESET}"),
-        (false, true) => format!("Provider: {provider}"),
+        (true, true) => {
+            format!("{} {} {}", styles.muted("Model:"), styles.accent(model), styles.muted(&format!("via {provider}")),)
+        }
+        (true, false) => format!("{} {}", styles.muted("Model:"), styles.accent(model)),
+        (false, true) => format!("{} {provider}", styles.muted("Provider:")),
         (false, false) => String::new(),
     };
 
     if show_reasoning {
         let suffix = format!(" · {reasoning}");
         if line.is_empty() {
-            line = format!("Reasoning:{suffix}");
+            line = styles.muted(&format!("Reasoning:{suffix}"));
         } else {
-            line.push_str(&suffix);
+            line.push_str(&styles.muted(&suffix));
         }
     }
 
@@ -459,6 +533,11 @@ mod tests {
         assert_eq!(line, "Session 10s | 500 in / 100 out | Cache 400 read (80.0% hit rate)");
     }
 
+    /// Colored postamble, matching the production path when color output is on.
+    fn colored_postamble(data: &ExitData<'_>) -> String {
+        build_exit_postamble(data, true)
+    }
+
     #[test]
     fn final_response_is_rendered_before_exit_metrics() {
         // Completed sessions re-print the answer through the markdown renderer
@@ -469,7 +548,7 @@ mod tests {
             session_end_reason: vtcode_core::hooks::SessionEndReason::Completed,
             ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
         };
-        let postamble = build_exit_postamble(&data);
+        let postamble = colored_postamble(&data);
 
         assert!(postamble.contains("> VT Code (0.0.0)"), "title row missing: {postamble:?}");
         assert!(postamble.contains("Session 30s"), "stats row missing: {postamble:?}");
@@ -489,7 +568,7 @@ mod tests {
             resume_identifier: Some("session-test-1234"),
             ..stats_test_data(Duration::from_secs(95), 1_000, 200, 800, 50, Some(80.0), 10, 2)
         };
-        let postamble = build_exit_postamble(&data);
+        let postamble = colored_postamble(&data);
         let rows: Vec<&str> = postamble.split('\n').collect();
 
         let notice_row = rows
@@ -518,12 +597,111 @@ mod tests {
             session_end_reason: vtcode_core::hooks::SessionEndReason::Exit,
             ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
         };
-        let postamble = build_exit_postamble(&data);
+        let postamble = colored_postamble(&data);
 
         assert!(postamble.starts_with("\r\n"), "postamble must open on a fresh row: {postamble:?}");
         for row in postamble.split('\n').filter(|row| !row.is_empty()) {
             assert!(row.starts_with('\r'), "every postamble row must return the carriage: {row:?}");
         }
+    }
+
+    #[test]
+    fn postamble_avoids_faint_and_unvalidated_palette_styling() {
+        // Regression: the summary used to wrap nearly every row in SGR 2 (faint)
+        // and hand-pick 256-palette accents. Terminals render faint by dimming
+        // the foreground, and the picked RGB values were never checked against
+        // the background, so both could drop text below the WCAG AA 4.5:1
+        // minimum. Only theme tokens are allowed now.
+        let data = ExitData {
+            model: "gpt-5.6-sol",
+            provider: "openai",
+            reasoning: "medium",
+            trust_label: "tools policy",
+            resume_identifier: Some("session-x"),
+            ..stats_test_data(Duration::from_secs(95), 1_000, 200, 800, 50, Some(80.0), 10, 2)
+        };
+        let postamble = colored_postamble(&data);
+
+        assert!(
+            !postamble.contains("\x1b[2m") && !postamble.contains("\x1b[2;"),
+            "faint styling must not ship: {postamble:?}"
+        );
+        assert!(!postamble.contains("38;5;"), "hand-picked 256-palette colors must not ship: {postamble:?}");
+        // Every styled span is closed, so no row bleeds into the next one.
+        let opens = postamble.matches("\x1b[").count();
+        assert!(
+            opens >= 4 && postamble.matches(&*Reset.to_string()).count() >= 4,
+            "styled spans must be closed: {postamble:?}"
+        );
+    }
+
+    #[test]
+    fn postamble_colors_meet_the_theme_minimum_contrast() {
+        // Accessibility oracle: each token the postamble paints with must clear
+        // the configured WCAG minimum (4.5:1 by default) against the active
+        // theme background. The theme builds every token through its shared
+        // contrast pipeline, so a failure here means a token was swapped for
+        // something unvalidated.
+        let styles = PostambleStyles::resolve(true);
+        let minimum = theme::get_minimum_contrast();
+        for (name, style) in [
+            ("banner", &styles.banner),
+            ("notice", &styles.notice),
+            ("muted", &styles.muted),
+            ("accent", &styles.accent),
+        ] {
+            let ratio = theme::style_contrast_ratio(style)
+                .unwrap_or_else(|| panic!("{name} style must carry an RGB foreground"));
+            assert!(ratio >= minimum, "{name} contrast {ratio:.2} below {minimum:.1}");
+        }
+    }
+
+    #[test]
+    fn postamble_emits_the_active_theme_tokens() {
+        let styles = PostambleStyles::resolve(true);
+        let data = ExitData {
+            model: "gpt-5.6-sol",
+            provider: "openai",
+            resume_identifier: Some("session-x"),
+            ..stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0)
+        };
+        let postamble = colored_postamble(&data);
+
+        assert!(
+            postamble.contains(&styles.banner.to_string()),
+            "title row must use the theme banner style: {postamble:?}"
+        );
+        assert!(
+            postamble.contains(&styles.accent.to_string()),
+            "model and resume command must use the theme accent: {postamble:?}"
+        );
+        assert!(
+            postamble.contains(&styles.muted.to_string()),
+            "metadata rows must use the theme muted token: {postamble:?}"
+        );
+    }
+
+    #[test]
+    fn postamble_is_plain_text_when_color_is_disabled() {
+        // NO_COLOR / --no-color / --color never must produce a summary that is
+        // still fully readable — the styled spans degrade to their text.
+        let data = ExitData {
+            model: "gpt-5.6-sol",
+            provider: "openai",
+            reasoning: "medium",
+            session_end_reason: vtcode_core::hooks::SessionEndReason::Exit,
+            resume_identifier: Some("session-x"),
+            ..stats_test_data(Duration::from_secs(30), 1_000, 100, 0, 0, None, 0, 0)
+        };
+        let postamble = build_exit_postamble(&data, false);
+
+        assert!(!postamble.contains('\x1b'), "plain output must carry no escapes: {postamble:?}");
+        assert!(postamble.contains("Model: gpt-5.6-sol via openai"), "model row text: {postamble:?}");
+        assert!(postamble.contains("Resume: vtcode --resume session-x"), "resume row text: {postamble:?}");
+        assert!(
+            postamble.contains("Interrupted — session exited"),
+            "interrupt notice must survive without color: {postamble:?}"
+        );
     }
 
     #[test]
@@ -551,7 +729,7 @@ mod tests {
                 session_end_reason: reason,
                 ..stats_test_data(Duration::from_secs(30), 0, 0, 0, 0, None, 0, 0)
             };
-            let postamble = build_exit_postamble(&data);
+            let postamble = colored_postamble(&data);
 
             assert!(
                 !postamble.contains("long transcript body"),
