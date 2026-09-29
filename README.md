@@ -344,9 +344,6 @@ focused diff.
 VT Code is what it is because of the people who build, test, and improve it
 alongside me. Thank you, all of you.
 
-<details>
-<summary><strong>Show all contributors</strong></summary>
-
 <!-- CONTRIBUTORS:START -->
 
 **Security Advisors**
@@ -388,8 +385,6 @@ alongside me. Thank you, all of you.
   <a href="https://github.com/diegosouzapw"><img src="https://avatars.githubusercontent.com/u/8016841?v=4&s=60" width="40" height="40" alt="@diegosouzapw" title="@diegosouzapw Contributor (1 commit)" style="border-radius: 50%; border: 2px solid #B19CD9;" /></a>&nbsp;
 
 <!-- CONTRIBUTORS:END -->
-
-</details>
 
 **Want to see your avatar here?** Every bit counts: one-line fixes, bug
 reports, and feedback are all welcome.
@@ -436,15 +431,10 @@ easiest way to support the project:
 VT Code is maintained in spare time. A [sponsorship](https://github.com/sponsors/vinhnx)
 keeps the project independent.
 
-<details>
-<summary><strong>Sponsors</strong></summary>
-
 <a href="https://github.com/dnhn"><img src="https://avatars.githubusercontent.com/u/2561973" width="80" height="80" alt="@dnhn" style="border-radius: 50%" /></a>
 <a href="https://github.com/codemod"><img src="https://avatars.githubusercontent.com/u/78830094" width="80" height="80" alt="@codemod" style="border-radius: 50%" /></a>
 <a href="https://github.com/coderabbitai"><img src="https://avatars.githubusercontent.com/u/132028505" width="80" height="80" alt="@coderabbitai" style="border-radius: 50%" /></a>
 <a href="https://github.com/KhaiRyth"><img src="https://avatars.githubusercontent.com/u/273723951" width="80" height="80" alt="@KhaiRyth" style="border-radius: 50%" /></a>
-
-</details>
 
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-30363D?style=for-the-badge&logo=github-sponsors&logoColor=%23EA4AAA)](https://github.com/sponsors/vinhnx)
 [![Buy Me a Coffee](./resources/screenshots/qr_donate.png)](https://buymeacoffee.com/vinhnx)
