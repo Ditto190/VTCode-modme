@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
-use vtcode_ui::tui::app::{InlineHandle, SubmittedInput};
+use vtcode_ui::tui::app::{InlineHandle, InlineMessageKind, InlineSegment, InlineTextStyle, SubmittedInput};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct QueuedInput {
@@ -31,6 +32,8 @@ impl QueuedInput {
 /// Soft cap on concurrently queued user inputs. Under a paste-storm the
 /// oldest entry is dropped once the cap is exceeded so the authoritative
 /// VecDeque cannot grow without bound; the newest submissions are kept.
+/// Drops are coalesced into one visible warning per `flush_sync` so the
+/// discard is never silent.
 pub(crate) const MAX_QUEUED_INPUTS: usize = 256;
 
 pub(crate) struct InlineQueueState<'a> {
@@ -42,6 +45,9 @@ pub(crate) struct InlineQueueState<'a> {
     /// not publish N partial snapshots that make optimistic UI entries
     /// flicker out of existence between acknowledgements.
     sync_dirty: bool,
+    /// Oldest inputs discarded by the soft cap since the last warning.
+    /// Coalesced so a paste-storm emits one notice, not one per drop.
+    dropped_since_notice: usize,
 }
 
 impl<'a> InlineQueueState<'a> {
@@ -55,6 +61,7 @@ impl<'a> InlineQueueState<'a> {
             queued_inputs,
             prefer_latest_once,
             sync_dirty: false,
+            dropped_since_notice: 0,
         }
     }
 
@@ -64,6 +71,7 @@ impl<'a> InlineQueueState<'a> {
         // been accepted so rapid influx cannot grow the queue without bound.
         while self.queued_inputs.len() > MAX_QUEUED_INPUTS {
             self.queued_inputs.pop_front();
+            self.dropped_since_notice += 1;
         }
         self.mark_sync_dirty();
     }
@@ -180,13 +188,34 @@ impl<'a> InlineQueueState<'a> {
     ///
     /// Call this once after a drain batch (and before dispatching a queued
     /// submission) so the overlay sees one consistent snapshot instead of
-    /// N partial ones that race against optimistic UI entries.
+    /// N partial ones that race against optimistic UI entries. Also emits one
+    /// coalesced warning when the soft cap discarded older inputs.
     pub(crate) fn flush_sync(&mut self) {
+        self.notice_dropped_inputs();
         if !self.sync_dirty {
             return;
         }
         self.sync_dirty = false;
         self.sync_handle_queue();
+    }
+
+    fn notice_dropped_inputs(&mut self) {
+        if self.dropped_since_notice == 0 {
+            return;
+        }
+        let dropped = self.dropped_since_notice;
+        self.dropped_since_notice = 0;
+        let message = format!(
+            "Queue full (cap {MAX_QUEUED_INPUTS}): dropped {dropped} older queued input(s); kept the newest {kept}.",
+            kept = self.queued_inputs.len()
+        );
+        self.handle.append_line(
+            InlineMessageKind::Warning,
+            vec![InlineSegment {
+                text: message,
+                style: Arc::new(InlineTextStyle::default()),
+            }],
+        );
     }
 
     fn mark_sync_dirty(&mut self) {
@@ -490,7 +519,9 @@ mod tests {
 
     #[test]
     fn push_caps_fifo_and_keeps_newest() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        use vtcode_ui::tui::app::InlineCommand;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = InlineHandle::new_for_tests(tx);
         let mut queued_inputs = VecDeque::new();
         let mut prefer_latest_once = false;
@@ -500,6 +531,7 @@ mod tests {
             for index in 0..(MAX_QUEUED_INPUTS + 10) {
                 queue.push(format!("msg {index}").into(), None);
             }
+            queue.flush_sync();
         }
         assert_eq!(queued_inputs.len(), MAX_QUEUED_INPUTS);
         assert_eq!(queued_inputs.front().map(|q| q.input.text.as_str()), Some("msg 10"));
@@ -507,5 +539,57 @@ mod tests {
             queued_inputs.back().map(|q| q.input.text.as_str()),
             Some(format!("msg {}", MAX_QUEUED_INPUTS + 9).as_str())
         );
+
+        // Drops must be visible: one coalesced warning plus one overlay snapshot.
+        let mut warnings = Vec::new();
+        let mut snapshots = 0usize;
+        while let Ok(command) = rx.try_recv() {
+            match command {
+                InlineCommand::AppendLine { kind: InlineMessageKind::Warning, segments } => {
+                    warnings.push(segments.into_iter().map(|s| s.text).collect::<String>());
+                }
+                InlineCommand::SetQueuedInputs { .. } => snapshots += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(snapshots, 1, "flush must publish one overlay snapshot");
+        assert_eq!(warnings.len(), 1, "dropped inputs must emit exactly one coalesced warning");
+        assert!(
+            warnings[0].contains("dropped 10 older queued input(s)"),
+            "warning must name the drop count: {}",
+            warnings[0]
+        );
+        assert!(
+            warnings[0].contains(&format!("cap {MAX_QUEUED_INPUTS}")),
+            "warning must name the cap: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn flush_without_drops_emits_no_warning() {
+        use vtcode_ui::tui::app::InlineCommand;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = InlineHandle::new_for_tests(tx);
+        let mut queued_inputs = VecDeque::new();
+        let mut prefer_latest_once = false;
+        {
+            let mut queue = InlineQueueState::new(&handle, &mut queued_inputs, &mut prefer_latest_once);
+            queue.push("only".into(), None);
+            queue.flush_sync();
+        }
+
+        while let Ok(command) = rx.try_recv() {
+            match command {
+                InlineCommand::AppendLine { kind, .. } => {
+                    panic!("no warning expected without drops, got {kind:?}");
+                }
+                InlineCommand::SetQueuedInputs { entries } => {
+                    assert_eq!(entries, vec!["only".to_string()]);
+                }
+                _ => {}
+            }
+        }
     }
 }
