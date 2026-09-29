@@ -363,6 +363,8 @@ pub(crate) fn parse_recovery_response(response: &Value) -> Option<RecoveryAction
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::runloop::ui_list;
+    use crate::agent::runloop::ui_list::Tone;
 
     #[test]
     fn resolve_current_step_uses_default_tab_when_found() {
@@ -395,32 +397,28 @@ mod tests {
     #[test]
     fn find_default_choice_selection_matches_item_id() {
         let items = vec![
-            InlineListItem {
-                title: "Retry".to_string(),
-                subtitle: None,
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::AskUserChoice {
+            ui_list::action(
+                "Retry",
+                "",
+                None,
+                Tone::Neutral,
+                Some(InlineListSelection::AskUserChoice {
                     tab_id: "recovery".to_string(),
                     choice_id: "retry_all".to_string(),
                     text: None,
                 }),
-                search_value: None,
-                ..Default::default()
-            },
-            InlineListItem {
-                title: "Skip".to_string(),
-                subtitle: None,
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::AskUserChoice {
+            ),
+            ui_list::action(
+                "Skip",
+                "",
+                None,
+                Tone::Neutral,
+                Some(InlineListSelection::AskUserChoice {
                     tab_id: "recovery".to_string(),
                     choice_id: "skip".to_string(),
                     text: None,
                 }),
-                search_value: None,
-                ..Default::default()
-            },
+            ),
         ];
 
         let selected = find_default_choice_selection(&items, "skip");

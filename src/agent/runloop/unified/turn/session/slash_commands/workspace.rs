@@ -1,3 +1,4 @@
+use crate::agent::runloop::ui_list;
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use vtcode_config::{SubagentSource, SubagentSpec, builtin_subagents};
@@ -394,32 +395,26 @@ async fn prompt_overwrite_confirmation(
         title: "Overwrite".to_string(),
         question: format!("AGENTS.md already exists at {}. Overwrite it?", path.display()),
         items: vec![
-            InlineListItem {
-                title: "1. Overwrite existing AGENTS.md".to_string(),
-                subtitle: Some("Replace the file with the newly generated guidance.".to_string()),
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::RequestUserInputAnswer {
+            ui_list::choice(
+                "1. Overwrite existing AGENTS.md",
+                Some("Replace the file with the newly generated guidance.".to_string()),
+                Some(InlineListSelection::RequestUserInputAnswer {
                     question_id: OVERWRITE_PROMPT_ID.to_string(),
                     selected: vec!["overwrite".to_string()],
                     other: None,
                 }),
-                search_value: Some("overwrite replace yes".to_string()),
-                ..Default::default()
-            },
-            InlineListItem {
-                title: "2. Keep current AGENTS.md".to_string(),
-                subtitle: Some("Skip AGENTS.md generation and leave the existing file untouched.".to_string()),
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::RequestUserInputAnswer {
+            )
+            .with_search_value("overwrite replace yes".to_string()),
+            ui_list::choice(
+                "2. Keep current AGENTS.md",
+                Some("Skip AGENTS.md generation and leave the existing file untouched.".to_string()),
+                Some(InlineListSelection::RequestUserInputAnswer {
                     question_id: OVERWRITE_PROMPT_ID.to_string(),
                     selected: vec!["keep".to_string()],
                     other: None,
                 }),
-                search_value: Some("keep skip no".to_string()),
-                ..Default::default()
-            },
+            )
+            .with_search_value("keep skip no".to_string()),
         ],
         completed: false,
         answer: None,

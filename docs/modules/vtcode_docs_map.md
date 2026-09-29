@@ -187,6 +187,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Audit packs
   - **User Questions**: "What can you tell me about Session Event Persistence?", "How does Audit packs work?"
 
+- **File**: `docs/development/tui-design-system.md`
+  - **Content**: TUI design system
+  - **Topics**: Modules, Row contract, Interaction contract, Accessibility, When adding a modal
+  - **User Questions**: "What can you tell me about TUI design system?", "How does Modules work?", "How does Row contract work?"
+
 - **File**: `docs/development/tui-list-search.md`
   - **Content**: TUI list search
   - **Topics**: Surfaces, interactive_list keys, Config option keywords
@@ -837,6 +842,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Building VT Code, a year in
   - **Topics**: The model shelf, September 2026, Benchmarks, with honest framing, The roadmap shipped, The harness matters more than the model, Context engineering got real numbers
   - **User Questions**: "What can you tell me about Building VT Code, a year in?", "How does The model shelf, September 2026 work?", "How does Benchmarks, with honest framing work?"
+
+- **File**: `docs/compose/spec/ui-design-system.md`
+  - **Content**: Canonical TUI Design System in vtcode-ui
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Canonical TUI Design System in vtcode-ui?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/audits/code-review-2026-08-07.md`
   - **Content**: Code Review + Fixes — 2026-08-07

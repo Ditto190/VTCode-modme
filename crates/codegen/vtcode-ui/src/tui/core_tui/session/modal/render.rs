@@ -1212,7 +1212,7 @@ pub fn modal_list_item_lines(
     if let Some(value) = &item.value {
         // Pad short titles so values line up as a column when possible.
         let title_width: usize = item.title.chars().count();
-        let target = 28usize;
+        let target = crate::design::constants::VALUE_COL;
         if title_width < target {
             primary_spans.push(Span::raw(" ".repeat(target - title_width)));
         } else {

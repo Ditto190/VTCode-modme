@@ -9,7 +9,9 @@ use ratatui::widgets::{Block, BorderType, List, ListDirection, ListItem, ListSta
 use super::{SelectionEntry, SelectionListState};
 use crate::tui::ui::search::ListSearchFilter;
 
-const CONTROLS_HINT: &str = "↑↓/jk move · Home/End · Enter confirm · Esc clear/cancel";
+fn controls_hint() -> String {
+    crate::design::keys::choice_hint()
+}
 const FILTER_HINT: &str = "Type to filter · number jumps when filter is empty";
 const NUMBER_JUMP_HINT: &str = "Type a number to jump";
 const NO_MATCHES: &str = "No matching options";
@@ -168,7 +170,7 @@ pub(super) fn draw_selection_ui(
             }
 
             summary_lines.push(Line::from(""));
-            summary_lines.push(Line::from(CONTROLS_HINT));
+            summary_lines.push(Line::from(controls_hint()));
             summary_lines.push(Line::from(Span::styled(
                 if state.search_enabled() {
                     FILTER_HINT

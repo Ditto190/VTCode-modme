@@ -1,3 +1,4 @@
+use crate::agent::runloop::ui_list;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -80,15 +81,14 @@ pub(crate) fn show_theme_palette(renderer: &mut AnsiRenderer, mode: ThemePalette
             None
         };
         let scheme_hint = if theme::is_light_theme(id) { "light" } else { "dark" };
-        items.push(InlineListItem {
-            title: label.to_string(),
-            subtitle: Some(format!("id: {id} • {scheme_hint}")),
-            badge,
-            indent: 0,
-            selection: Some(InlineListSelection::Theme(id.to_string())),
-            search_value: Some(theme_search_value(id, label)),
-            ..Default::default()
-        });
+        let mut row = ui_list::choice(
+            label.to_string(),
+            Some(format!("id: {id} • {scheme_hint}")),
+            Some(InlineListSelection::Theme(id.to_string())),
+        );
+        row.badge = badge;
+        row.search_value = Some(theme_search_value(id, label));
+        items.push(row);
     }
 
     if items.is_empty() {
@@ -268,30 +268,24 @@ pub(crate) fn show_sessions_palette(
 
 pub(crate) fn show_fork_mode_palette(renderer: &mut AnsiRenderer, session_id: &str) -> Result<bool> {
     let items = vec![
-        InlineListItem {
-            title: "Copy full history".to_string(),
-            subtitle: Some("Start the fork with the full archived transcript.".to_string()),
-            badge: Some("Default".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::SessionForkMode {
+        ui_list::choice(
+            "Copy full history",
+            Some("Start the fork with the full archived transcript.".to_string()),
+            Some(InlineListSelection::SessionForkMode {
                 session_id: session_id.to_string(),
                 summarize: false,
             }),
-            search_value: Some("copy full history fork transcript".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Start summarized fork".to_string(),
-            subtitle: Some("Compact the source session into summary plus retained user prompts.".to_string()),
-            badge: Some("Summary".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::SessionForkMode {
+        )
+        .with_search_value("copy full history fork transcript".to_string()),
+        ui_list::choice(
+            "Start summarized fork",
+            Some("Compact the source session into summary plus retained user prompts.".to_string()),
+            Some(InlineListSelection::SessionForkMode {
                 session_id: session_id.to_string(),
                 summarize: true,
             }),
-            search_value: Some("summary summarized compact fork handoff".to_string()),
-            ..Default::default()
-        },
+        )
+        .with_search_value("summary summarized compact fork handoff".to_string()),
     ];
 
     let lines = vec![format!("This fork starts from session {session_id}.")];

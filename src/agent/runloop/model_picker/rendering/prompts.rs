@@ -10,20 +10,18 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use super::super::selection::{
     SelectionDetail, reasoning_level_description, reasoning_level_label, service_tier_label,
 };
-use super::{CURRENT_BADGE, KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
+use super::{KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
 use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
 
 fn back_to_model_list_row() -> InlineListItem {
-    InlineListItem {
-        title: "← Back to model list".to_string(),
-        subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
-        badge: None,
-        indent: 0,
-        selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
-        search_value: Some("back model list".to_string()),
-        badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
-        ..Default::default()
-    }
+    vtcode_ui::design::list::action(
+        "← Back to model list",
+        "Return to step 1 without cancelling the picker.",
+        None,
+        vtcode_commons::ui_protocol::InlineTone::Neutral,
+        Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
+    )
+    .with_search_value("back model list")
 }
 
 pub(crate) fn render_reasoning_inline(
@@ -33,56 +31,39 @@ pub(crate) fn render_reasoning_inline(
 ) -> Result<()> {
     let mut items = Vec::new();
     items.push(back_to_model_list_row());
-    items.push(InlineListItem {
-        title: format!("Keep current ({})", reasoning_level_label(current)),
-        subtitle: Some(KEEP_CURRENT_DESCRIPTION.to_string()),
-        badge: Some(CURRENT_BADGE.to_string()),
-        indent: 0,
-        selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(current))),
-        search_value: None,
-        badge_tone: vtcode_commons::ui_protocol::InlineTone::Current,
-        ..Default::default()
-    });
+    items.push(vtcode_ui::design::list::current_choice(
+        format!("Keep current ({})", reasoning_level_label(current)),
+        Some(KEEP_CURRENT_DESCRIPTION.to_string()),
+        Some(InlineListSelection::Reasoning(reasoning_to_selection_string(current))),
+    ));
 
     let levels = selection.reasoning_effort_levels();
     if levels.contains(&ReasoningEffortLevel::None) {
-        items.push(InlineListItem {
-            title: reasoning_level_label(ReasoningEffortLevel::None).to_string(),
-            subtitle: Some(reasoning_level_description(ReasoningEffortLevel::None).to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(ReasoningEffortLevel::None))),
-            search_value: None,
-            ..Default::default()
-        });
+        items.push(vtcode_ui::design::list::choice(
+            reasoning_level_label(ReasoningEffortLevel::None),
+            Some(reasoning_level_description(ReasoningEffortLevel::None).to_string()),
+            Some(InlineListSelection::Reasoning(reasoning_to_selection_string(ReasoningEffortLevel::None))),
+        ));
     }
 
     for level in levels.into_iter().filter(|level| *level != ReasoningEffortLevel::None) {
-        items.push(InlineListItem {
-            title: reasoning_level_label(level).to_string(),
-            subtitle: Some(reasoning_level_description(level).to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(level))),
-            search_value: None,
-            ..Default::default()
-        });
+        items.push(vtcode_ui::design::list::choice(
+            reasoning_level_label(level),
+            Some(reasoning_level_description(level).to_string()),
+            Some(InlineListSelection::Reasoning(reasoning_to_selection_string(level))),
+        ));
     }
 
     if let Some(alternative) = selection.reasoning_off_model.as_ref() {
-        items.push(InlineListItem {
-            title: format!("Use {} (reasoning off)", alternative.display_name()),
-            subtitle: Some(format!(
+        items.push(vtcode_ui::design::list::choice(
+            format!("Use {} (reasoning off)", alternative.display_name()),
+            Some(format!(
                 "Switch to {} ({}) without enabling structured reasoning.",
                 alternative.display_name(),
                 alternative.as_str()
             )),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::DisableReasoning),
-            search_value: None,
-            ..Default::default()
-        });
+            Some(InlineListSelection::DisableReasoning),
+        ));
     }
     let mut lines = vec![
         "Step 2 · Reasoning".to_string(),
@@ -223,47 +204,30 @@ pub(crate) fn render_service_tier_inline(
 ) -> Result<()> {
     let items = vec![
         back_to_model_list_row(),
-        InlineListItem {
-            title: format!("Keep current ({})", service_tier_label(current)),
-            subtitle: Some("Retain the existing service tier configuration.".to_string()),
-            badge: Some(CURRENT_BADGE.to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(match current {
+        vtcode_ui::design::list::current_choice(
+            format!("Keep current ({})", service_tier_label(current)),
+            Some("Retain the existing service tier configuration.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(match current {
                 Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
                 Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
                 None => OpenAIServiceTierChoice::ProjectDefault,
             })),
-            search_value: None,
-            badge_tone: vtcode_commons::ui_protocol::InlineTone::Current,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Project default".to_string(),
-            subtitle: Some("Do not send service_tier; inherit the OpenAI Project setting.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::ProjectDefault)),
-            search_value: None,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Flex".to_string(),
-            subtitle: Some("Send service_tier=flex for lower-cost, lower-priority processing.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
-            search_value: None,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Priority".to_string(),
-            subtitle: Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
-            search_value: None,
-            ..Default::default()
-        },
+        ),
+        vtcode_ui::design::list::choice(
+            "Project default",
+            Some("Do not send service_tier; inherit the OpenAI Project setting.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::ProjectDefault)),
+        ),
+        vtcode_ui::design::list::choice(
+            "Flex",
+            Some("Send service_tier=flex for lower-cost, lower-priority processing.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
+        ),
+        vtcode_ui::design::list::choice(
+            "Priority",
+            Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
+        ),
     ];
 
     renderer.show_list_modal_with_footer(
@@ -336,26 +300,22 @@ pub(crate) fn prompt_custom_model_entry(renderer: &mut AnsiRenderer) -> Result<(
 
 pub(crate) fn render_mimo_auth_method_inline(renderer: &mut AnsiRenderer) -> Result<()> {
     let items = vec![
-        InlineListItem {
-            title: "Pay-as-you-go".to_string(),
-            subtitle: Some("Standard API access. Uses sk- key with api-key header.".to_string()),
-            badge: Some("Default".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction("mimo-auth:pay-as-you-go".to_string())),
-            search_value: Some("mimo payg pay-as-you-go sk api key".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Token Plan".to_string(),
-            subtitle: Some(
-                "Subscription-based access. Uses tp- key with Bearer token. Includes more models.".to_string(),
-            ),
-            badge: Some("Subscription".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction("mimo-auth:token-plan".to_string())),
-            search_value: Some("mimo token plan subscription tp bearer".to_string()),
-            ..Default::default()
-        },
+        vtcode_ui::design::list::action(
+            "Pay-as-you-go",
+            "Standard API access. Uses sk- key with api-key header.",
+            Some("Default".to_string()),
+            vtcode_commons::ui_protocol::InlineTone::Accent,
+            Some(InlineListSelection::ConfigAction("mimo-auth:pay-as-you-go".to_string())),
+        )
+        .with_search_value("mimo payg pay-as-you-go sk api key"),
+        vtcode_ui::design::list::action(
+            "Token Plan",
+            "Subscription-based access. Uses tp- key with Bearer token. Includes more models.",
+            Some("Subscription".to_string()),
+            vtcode_commons::ui_protocol::InlineTone::Accent,
+            Some(InlineListSelection::ConfigAction("mimo-auth:token-plan".to_string())),
+        )
+        .with_search_value("mimo token plan subscription tp bearer"),
     ];
 
     renderer.show_list_modal(

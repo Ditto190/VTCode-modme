@@ -95,7 +95,9 @@ enum ModalListDensityBehavior {
     FixedComfortable,
 }
 
-const CONFIG_LIST_NAVIGATION_HINT: &str = "↑↓ select · Enter apply · ←→ value · type to filter · Esc back";
+fn config_list_navigation_hint() -> String {
+    crate::design::keys::list_hint()
+}
 
 #[derive(Clone)]
 pub struct ModalListItem {
@@ -1123,7 +1125,7 @@ impl ModalListState {
             return None;
         }
         match self.density_behavior {
-            ModalListDensityBehavior::FixedComfortable => Some(CONFIG_LIST_NAVIGATION_HINT.to_owned()),
+            ModalListDensityBehavior::FixedComfortable => Some(config_list_navigation_hint()),
             ModalListDensityBehavior::Adjustable => footer_hint.filter(|hint| !hint.is_empty()).map(ToOwned::to_owned),
         }
     }

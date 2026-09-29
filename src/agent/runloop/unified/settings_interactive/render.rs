@@ -7,8 +7,6 @@ use super::docs::FieldDoc;
 use super::path::path_with_key;
 use vtcode_commons::formatting::truncate_middle;
 
-const SETTINGS_SUBTITLE_MAX_LEN: usize = 90;
-
 pub(super) fn display_title(label: &str, path: &str, value: &TomlValue) -> String {
     if label.starts_with('[') && !ends_with_quoted_map_key(path) {
         return format!("Item {label}");
@@ -25,16 +23,6 @@ fn ends_with_quoted_map_key(path: &str) -> bool {
     path.rfind("[\"").is_some_and(|start| path[start..].ends_with("\"]"))
 }
 
-/// Description-only subtitle for setting rows that also carry a `value`.
-pub(super) fn setting_description(description: &str, _adjustable: bool) -> Option<String> {
-    // Value is rendered as an accent `InlineListItem::value`; the subtitle is
-    // description only so metadata stays dimmed and uncluttered.
-    if description.trim().is_empty() {
-        return None;
-    }
-    Some(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN))
-}
-
 pub(super) fn search_value_for_missing_doc(path: &str, label: &str, doc: Option<&FieldDoc>) -> String {
     let mut parts = vec![path.to_string(), label.to_string(), "unset".to_string()];
     if let Some(doc) = doc {
@@ -49,7 +37,7 @@ pub(super) fn search_value_for_missing_doc(path: &str, label: &str, doc: Option<
 }
 
 pub(super) fn section_item(label: &str) -> InlineListItem {
-    InlineListItem::group_header(label)
+    vtcode_ui::design::list::group_header(label)
 }
 
 /// Action row with default tone: badgeful rows get Accent, badgeless Neutral.
@@ -70,17 +58,13 @@ pub(super) fn action_item_with_tone(
     action: &str,
     tone: vtcode_commons::ui_protocol::InlineTone,
 ) -> InlineListItem {
-    InlineListItem {
-        title: title.to_string(),
-        subtitle: (!subtitle.is_empty()).then(|| subtitle.to_string()),
-        badge: badge.map(str::to_string),
-        indent: 0,
-        selection: Some(InlineListSelection::ConfigAction(action.to_string())),
-        search_value: Some(format!("{title} {subtitle}")),
-        badge_tone: tone,
-        kind: vtcode_commons::ui_protocol::InlineItemKind::Action,
-        ..Default::default()
-    }
+    vtcode_ui::design::list::action(
+        title,
+        subtitle,
+        badge.map(str::to_string),
+        tone,
+        Some(InlineListSelection::ConfigAction(action.to_string())),
+    )
 }
 
 pub(super) fn search_value_with_content(path: &str, label: &str, value: &TomlValue, doc: Option<&FieldDoc>) -> String {

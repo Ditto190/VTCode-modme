@@ -1,3 +1,5 @@
+use crate::agent::runloop::ui_list;
+use crate::agent::runloop::ui_list::Tone;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use anyhow::{Result, anyhow};
@@ -98,15 +100,13 @@ impl UrlGuardPrompt {
         };
 
         vec![
-            InlineListItem {
-                title: "Cancel".to_string(),
-                subtitle: Some("Do not open this link.".to_string()),
-                badge: Some("Default".to_string()),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction(URL_GUARD_DENY_ACTION.to_string())),
-                search_value: None,
-                ..Default::default()
-            },
+            ui_list::action(
+                "Cancel",
+                "Do not open this link.".to_string(),
+                Some("Default".to_string()),
+                Tone::Accent,
+                Some(InlineListSelection::ConfigAction(URL_GUARD_DENY_ACTION.to_string())),
+            ),
             InlineListItem {
                 title: "Open in browser".to_string(),
                 subtitle: Some("Launch the exact URL in your default browser after approval.".to_string()),

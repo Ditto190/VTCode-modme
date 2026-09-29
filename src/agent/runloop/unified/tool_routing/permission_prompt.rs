@@ -1,3 +1,5 @@
+use crate::agent::runloop::ui_list;
+use crate::agent::runloop::ui_list::Tone;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -637,15 +639,14 @@ fn build_tool_permission_options(
     use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
 
     let mut options = vec![
-        InlineListItem {
-            title: "Approve Once".to_string(),
-            subtitle: Some("Allow this time only".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApproval(true)),
-            search_value: Some("approve yes allow once y 1".to_string()),
-            ..Default::default()
-        },
+        ui_list::action(
+            "Approve Once",
+            "Allow this time only",
+            None,
+            Tone::Neutral,
+            Some(InlineListSelection::ToolApproval(true)),
+        )
+        .with_search_value("approve yes allow once y 1".to_string()),
         InlineListItem {
             title: if prompt_kind == ToolPermissionPromptKind::Mcp {
                 "Approve this session".to_string()
@@ -681,18 +682,19 @@ fn build_tool_permission_options(
         // No "policy cache" jargon: the subtitle already states the scope that
         // gets remembered, and permanent persistence is what "Always" means to
         // a user approving a command.
-        options.push(InlineListItem {
-            title: "Always approve".to_string(),
-            subtitle: Some(subtitle),
-            badge: Some("Permanent".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApprovalPermanent),
-            search_value: Some("always permanent forever save 3".to_string()),
-            ..Default::default()
-        });
+        options.push(
+            ui_list::action(
+                "Always approve",
+                subtitle,
+                None,
+                Tone::Neutral,
+                Some(InlineListSelection::ToolApprovalPermanent),
+            )
+            .with_search_value("always permanent forever save 3".to_string()),
+        );
     }
 
-    options.push(InlineListItem::group_divider());
+    options.push(ui_list::group_divider());
 
     options.push(InlineListItem {
         title: if prompt_kind == ToolPermissionPromptKind::Mcp {
@@ -719,15 +721,16 @@ fn build_tool_permission_options(
     if matches!(persistent_approval_target, Some(PersistentApprovalTarget::ToolLevel))
         && prompt_kind != ToolPermissionPromptKind::Mcp
     {
-        options.push(InlineListItem {
-            title: "Always Deny".to_string(),
-            subtitle: Some("Block this tool until policy is changed".to_string()),
-            badge: Some("Persistent".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApproval(false)),
-            search_value: Some("deny no reject cancel never always 5".to_string()),
-            ..Default::default()
-        });
+        options.push(
+            ui_list::action(
+                "Always Deny",
+                "Block this tool until policy is changed",
+                None,
+                Tone::Neutral,
+                Some(InlineListSelection::ToolApproval(false)),
+            )
+            .with_search_value("deny no reject cancel never always 5".to_string()),
+        );
     }
 
     options
@@ -900,7 +903,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
     ctrl_c_notify: &Arc<Notify>,
     session: &mut S,
 ) -> Result<HitlDecision> {
-    use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
+    use vtcode_ui::tui::app::InlineListSelection;
 
     let mut description_lines = vec![
         format!("Tool: {tool_name}"),
@@ -931,33 +934,23 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
     description_lines.push(choose_handling_line("this run"));
 
     let options = vec![
-        InlineListItem {
-            title: "Enable tool".to_string(),
-            subtitle: Some("Allow and continue execution".to_string()),
-            badge: Some("Fix Policy".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApprovalEnable),
-            search_value: Some("enable allow fix policy continue yes 1".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "".to_string(),
-            subtitle: None,
-            badge: None,
-            indent: 0,
-            selection: None,
-            search_value: None,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Deny Once".to_string(),
-            subtitle: Some("Ask again next time".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApprovalDenyOnce),
-            search_value: Some("deny no reject skip once 2".to_string()),
-            ..Default::default()
-        },
+        ui_list::action(
+            "Enable tool",
+            "Allow and continue execution",
+            None,
+            Tone::Neutral,
+            Some(InlineListSelection::ToolApprovalEnable),
+        )
+        .with_search_value("enable allow fix policy continue yes 1".to_string()),
+        ui_list::group_divider(),
+        ui_list::action(
+            "Deny Once",
+            "Ask again next time",
+            None,
+            Tone::Neutral,
+            Some(InlineListSelection::ToolApprovalDenyOnce),
+        )
+        .with_search_value("deny no reject skip once 2".to_string()),
     ];
 
     let navigation_hint = APPROVAL_NAVIGATE_DENY.to_string();
