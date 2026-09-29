@@ -22,6 +22,7 @@ pub const OPENAI_GPT_5_6_SOL: &str = "openai/gpt-5.6-sol";
 pub const OPENAI_GPT_5_6_TERRA: &str = "openai/gpt-5.6-terra";
 pub const OPENAI_GPT_6_ASTRA: &str = "openai/gpt-6-astra";
 pub const OPENAI_GPT_6_SOL: &str = "openai/gpt-6-sol";
+pub const OPENAI_GPT_6_1_SOL: &str = "openai/gpt-6.1-sol";
 pub const OPENAI_GPT_6_LUNA: &str = "openai/gpt-6-luna";
 pub const GOOGLE_GEMINI_3_8_FLASH: &str = "google/gemini-3.8-flash";
 pub const ANTHROPIC_CLAUDE_HAIKU_4_5_20251001: &str = "anthropic/claude-haiku-4-5-20251001";
@@ -59,6 +60,7 @@ pub const SUPPORTED_MODELS: &[&str] = &[
     OPENAI_GPT_5_6_TERRA,
     OPENAI_GPT_6_ASTRA,
     OPENAI_GPT_6_SOL,
+    OPENAI_GPT_6_1_SOL,
     OPENAI_GPT_6_LUNA,
 ];
 
@@ -78,6 +80,7 @@ pub const REASONING_EFFORT_ROUTES: &[&str] = &[
     OPENAI_GPT_5_6_TERRA,
     OPENAI_GPT_6_ASTRA,
     OPENAI_GPT_6_SOL,
+    OPENAI_GPT_6_1_SOL,
     OPENAI_GPT_6_LUNA,
 ];
 
@@ -121,6 +124,7 @@ pub const REASONING_MODELS: &[&str] = &[
     OPENAI_GPT_5_6_TERRA,
     OPENAI_GPT_6_ASTRA,
     OPENAI_GPT_6_SOL,
+    OPENAI_GPT_6_1_SOL,
     OPENAI_GPT_6_LUNA,
 ];
 

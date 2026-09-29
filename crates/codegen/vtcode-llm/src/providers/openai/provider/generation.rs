@@ -30,7 +30,7 @@ fn payload_uses_flex_service_tier(payload: &Value) -> bool {
     payload
         .get("service_tier")
         .and_then(Value::as_str)
-        .is_some_and(|value| value.eq_ignore_ascii_case("flex"))
+        .is_some_and(|value| value.eq_ignore_ascii_case("flex") || value.eq_ignore_ascii_case("ultrafast"))
 }
 
 fn payload_without_service_tier(payload: &Value) -> Value {

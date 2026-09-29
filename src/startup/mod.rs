@@ -26,7 +26,7 @@ use vtcode_config::workspace_env::read_workspace_env_value;
 use vtcode_config::{OpenAIPreferredMethod, PromptCacheRetention};
 use vtcode_core::cli::args::{Cli, Commands};
 use vtcode_core::config::loader::VTCodeConfig;
-use vtcode_core::config::models::{Provider, ProviderModelSupport, model_catalog_entry};
+use vtcode_core::config::models::{Provider, model_catalog_entry};
 use vtcode_core::config::types::AgentConfig as CoreAgentConfig;
 use vtcode_core::config::validator::{check_openai_hosted_shell_compat, check_prompt_cache_retention_compat};
 use vtcode_core::copilot::{CopilotAuthStatusKind, probe_auth_status};
@@ -620,7 +620,15 @@ async fn persist_runtime_selection(
     config.agent.provider = selection.provider.clone();
     config.agent.default_model = selection.model.clone();
     config.agent.api_key_env = selection.api_key_env.clone();
-    if !selection.provider.eq_ignore_ascii_case("openai") || !Provider::OpenAI.supports_service_tier(&selection.model) {
+    let tier_supported = selection
+        .provider
+        .parse::<Provider>()
+        .map(|provider| {
+            use vtcode_core::config::models::ProviderModelSupport;
+            provider.supports_service_tier(&selection.model)
+        })
+        .unwrap_or(false);
+    if !tier_supported {
         config.provider.openai.service_tier = None;
     }
 

@@ -147,15 +147,17 @@ pub(crate) fn is_responses_api_unsupported(status: StatusCode, body: &str) -> bo
         || lower.contains("invalid_request_error")
 }
 
-/// Detect if an OpenAI API error indicates `service_tier=flex` is unsupported.
+/// Detect if an OpenAI API error indicates a `service_tier` value is unsupported.
+/// Covers `flex` and `ultrafast` (e.g. EU-routed ultrafast requests).
 pub(crate) fn is_flex_service_tier_unsupported(status: StatusCode, body: &str) -> bool {
     if status != StatusCode::BAD_REQUEST {
         return false;
     }
 
     let lower = body.to_ascii_lowercase();
-    lower.contains("flex")
+    (lower.contains("flex") || lower.contains("ultrafast"))
         && (lower.contains("flex is not available for this model")
+            || lower.contains("ultrafast is not available")
             || (lower.contains("service tier") || lower.contains("service_tier"))
                 && (lower.contains("not available") || lower.contains("unsupported")))
 }

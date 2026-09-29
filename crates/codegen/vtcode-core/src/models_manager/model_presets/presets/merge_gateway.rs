@@ -190,6 +190,13 @@ pub(crate) fn merge_gateway_presets() -> Vec<ModelPreset> {
             false,
         ),
         (
+            models::merge_gateway::OPENAI_GPT_6_1_SOL,
+            "GPT-6.1 Sol (Merge Gateway)",
+            "OpenAI GPT-6.1 Sol through Merge Gateway",
+            1_050_000,
+            false,
+        ),
+        (
             models::merge_gateway::OPENAI_GPT_6_LUNA,
             "GPT-6 Luna (Merge Gateway)",
             "OpenAI GPT-6 Luna through Merge Gateway",

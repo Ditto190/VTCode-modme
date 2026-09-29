@@ -503,6 +503,48 @@
           "xhigh",
           "max"
         ]
+      },
+      "gpt-6.1-sol": {
+        "id": "gpt-6.1-sol",
+        "name": "GPT-6.1 Sol",
+        "description": "Near-Astra performance for complex coding, computer use, and professional work at a lower cost.",
+        "reasoning": true,
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1050000,
+        "output_tokens": 128000,
+        "capabilities": {
+          "caching": true,
+          "structured_output": true,
+          "thinking": true
+        },
+        "supports_sampling": false,
+        "supports_logprobs": false,
+        "prompt_cache_ttl": "30m",
+        "prompt_contract": "gpt6",
+        "cost": {
+          "input": 2e-06,
+          "output": 1e-05,
+          "cache_read": 1e-07,
+          "cache_write": 2.5e-06
+        },
+        "is_pro": true,
+        "lightweight_model": "gpt-6-luna",
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
       }
     },
     "default_model": "gpt"
@@ -4293,6 +4335,38 @@
           "function_calling": true,
           "structured_output": false
         }
+      },
+      "openai/gpt-6.1-sol": {
+        "id": "openai/gpt-6.1-sol",
+        "name": "GPT-6.1 Sol (Merge Gateway)",
+        "description": "OpenAI GPT-6.1 Sol served through Merge Gateway's native Responses API.",
+        "reasoning": true,
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "tool_call": true,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "context": 1050000,
+        "output_tokens": 128000,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "structured_output": false
+        },
+        "is_pro": true,
+        "lightweight_model": "openai/gpt-6-luna"
       }
     }
   },

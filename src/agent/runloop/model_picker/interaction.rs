@@ -251,6 +251,7 @@ pub(super) fn select_service_tier_with_ratatui(
     let current_choice = match current {
         Some(OpenAIServiceTier::Flex) => ServiceTierChoice::Flex,
         Some(OpenAIServiceTier::Priority) => ServiceTierChoice::Priority,
+        Some(OpenAIServiceTier::Ultrafast) => ServiceTierChoice::Ultrafast,
         None => ServiceTierChoice::ProjectDefault,
     };
 
@@ -274,6 +275,11 @@ pub(super) fn select_service_tier_with_ratatui(
             "Priority".to_string(),
             "Send service_tier=priority for lower and more consistent latency.".to_string(),
             ServiceTierChoice::Priority,
+        ),
+        (
+            "Ultrafast".to_string(),
+            "Send service_tier=ultrafast for fastest processing at higher cost (US/global only).".to_string(),
+            ServiceTierChoice::Ultrafast,
         ),
     ];
 

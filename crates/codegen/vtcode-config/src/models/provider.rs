@@ -110,7 +110,32 @@ impl ProviderModelSupport for Provider {
 
         match self {
             Provider::OpenAI => models::openai::SERVICE_TIER_MODELS.contains(&model),
-            _ => false,
+            Provider::MergeGateway => model.trim().starts_with("openai/"),
+            // All other OpenAI-compatible wire providers accept `service_tier`
+            // (including `ultrafast`); native non-OpenAI APIs do not.
+            Provider::DeepSeek
+            | Provider::Meta
+            | Provider::OpenRouter
+            | Provider::Ollama
+            | Provider::OllamaCloud
+            | Provider::LmStudio
+            | Provider::LlamaCpp
+            | Provider::Moonshot
+            | Provider::ZAI
+            | Provider::Minimax
+            | Provider::MiMo
+            | Provider::Mistral
+            | Provider::HuggingFace
+            | Provider::OpenCodeZen
+            | Provider::OpenCodeGo
+            | Provider::Qwen
+            | Provider::StepFun
+            | Provider::Evolink
+            | Provider::Poolside
+            | Provider::XAI
+            | Provider::NVIDIA
+            | Provider::Vercel => true,
+            Provider::Gemini | Provider::Anthropic | Provider::Copilot => false,
         }
     }
 }

@@ -21,6 +21,7 @@ impl ModelId {
             // OpenAI models
             ModelId::GPT6Astra,
             ModelId::GPT6Sol,
+            ModelId::GPT61Sol,
             ModelId::GPT6Luna,
             ModelId::GPT56Sol,
             ModelId::GPT56Terra,
@@ -73,6 +74,7 @@ impl ModelId {
             ModelId::MergeGatewayDeepseekFlash,
             ModelId::MergeGatewayOpenAIGpt6Astra,
             ModelId::MergeGatewayOpenAIGpt6Sol,
+            ModelId::MergeGatewayOpenAIGpt61Sol,
             ModelId::MergeGatewayOpenAIGpt6Luna,
             // Mistral models
             ModelId::MistralLarge3,

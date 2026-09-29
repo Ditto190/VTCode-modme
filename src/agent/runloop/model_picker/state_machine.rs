@@ -99,6 +99,9 @@ impl ModelPickerState {
             Ok(Some(ServiceTierChoice::Priority)) => self
                 .apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Priority))
                 .map(Some),
+            Ok(Some(ServiceTierChoice::Ultrafast)) => self
+                .apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Ultrafast))
+                .map(Some),
             Ok(None) => {
                 prompt_service_tier_plain(renderer, selection, self.settings.current_service_tier)?;
                 Ok(None)
@@ -468,11 +471,16 @@ impl ModelPickerState {
         match input.to_ascii_lowercase().as_str() {
             "flex" => self.apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Flex)),
             "priority" => self.apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Priority)),
+            "ultrafast" | "ultra-fast" | "ultra" => {
+                self.apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Ultrafast))
+            }
             "default" | "project" | "inherit" => self.apply_service_tier_choice(renderer, None),
             "skip" => self.apply_service_tier_choice(renderer, self.settings.current_service_tier),
             _ => {
-                renderer
-                    .line(MessageStyle::Error, "Unknown service tier option. Use flex, priority, default, or skip.")?;
+                renderer.line(
+                    MessageStyle::Error,
+                    "Unknown service tier option. Use flex, priority, ultrafast, default, or skip.",
+                )?;
                 prompt_service_tier_plain(renderer, selection, self.settings.current_service_tier)?;
                 Ok(ModelPickerProgress::InProgress)
             }

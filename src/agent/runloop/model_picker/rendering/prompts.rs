@@ -210,6 +210,7 @@ pub(crate) fn render_service_tier_inline(
             Some(InlineListSelection::OpenAIServiceTier(match current {
                 Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
                 Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
+                Some(OpenAIServiceTier::Ultrafast) => OpenAIServiceTierChoice::Ultrafast,
                 None => OpenAIServiceTierChoice::ProjectDefault,
             })),
         ),
@@ -228,18 +229,24 @@ pub(crate) fn render_service_tier_inline(
             Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
             Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
         ),
+        vtcode_ui::design::list::choice(
+            "Ultrafast",
+            Some("Send service_tier=ultrafast for fastest processing at higher cost (US/global only).".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Ultrafast)),
+        ),
     ];
 
     renderer.show_list_modal_with_footer(
         STEP_THREE_TITLE,
         vec![
             format!("Selected: {}", selection.model_display),
-            "Applies only to native OpenAI models that support service tiers.".to_string(),
+            "Applies only to OpenAI-compatible models that support service tiers.".to_string(),
         ],
         items,
         Some(InlineListSelection::OpenAIServiceTier(match current {
             Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
             Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
+            Some(OpenAIServiceTier::Ultrafast) => OpenAIServiceTierChoice::Ultrafast,
             None => OpenAIServiceTierChoice::ProjectDefault,
         })),
         None,
@@ -256,13 +263,12 @@ pub(crate) fn prompt_service_tier_plain(
     renderer.line(
         MessageStyle::Info,
         &format!(
-            "Service tier – choose 'flex', 'priority', or 'default' for {}. Type 'skip' to keep {}.",
+            "Service tier – choose 'flex', 'priority', 'ultrafast', or 'default' for {}. Type 'skip' to keep {}.",
             selection.model_display,
             service_tier_label(current)
         ),
     )?;
-    renderer
-        .line(MessageStyle::Info, "This applies only to native OpenAI models that support OpenAI service tiers.")?;
+    renderer.line(MessageStyle::Info, "This applies only to OpenAI-compatible models that support service tiers.")?;
     Ok(())
 }
 

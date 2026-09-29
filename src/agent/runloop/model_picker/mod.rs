@@ -573,6 +573,7 @@ impl ModelPickerState {
                         OpenAIServiceTierChoice::ProjectDefault => None,
                         OpenAIServiceTierChoice::Flex => Some(OpenAIServiceTier::Flex),
                         OpenAIServiceTierChoice::Priority => Some(OpenAIServiceTier::Priority),
+                        OpenAIServiceTierChoice::Ultrafast => Some(OpenAIServiceTier::Ultrafast),
                     };
                     self.apply_service_tier_choice(renderer, service_tier)
                 }

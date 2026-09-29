@@ -31,6 +31,7 @@ fn service_tier_message_label(service_tier: Option<vtcode_config::OpenAIServiceT
     match service_tier {
         Some(vtcode_config::OpenAIServiceTier::Flex) => "flex",
         Some(vtcode_config::OpenAIServiceTier::Priority) => "priority",
+        Some(vtcode_config::OpenAIServiceTier::Ultrafast) => "ultrafast",
         None => "project default",
     }
 }
@@ -456,7 +457,7 @@ fn selected_provider_config(
     openai_chatgpt_auth: Option<vtcode_config::auth::OpenAIChatGptAuthHandle>,
 ) -> ProviderConfig {
     let mut openai = auth_cfg.provider.openai.clone();
-    if selection.provider_enum == Some(Provider::OpenAI) && selection.service_tier_supported {
+    if selection.service_tier_supported {
         openai.service_tier = selection.service_tier;
     }
     ProviderConfig {

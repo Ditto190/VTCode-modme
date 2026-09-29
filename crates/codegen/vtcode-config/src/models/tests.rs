@@ -266,7 +266,7 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaNemotron3Super120bA12b));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 24);
+    assert_eq!(merge_gateway_models.len(), 25);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini38Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeFable51));
@@ -275,6 +275,7 @@ fn test_models_for_provider() {
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayMetaMuseSpark13));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt6Astra));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt6Sol));
+    assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt61Sol));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayOpenAIGpt6Luna));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeHaiku4520251001));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayXaiGrok47));
@@ -471,6 +472,51 @@ fn test_gpt_5_5_dated_alias_round_trips_to_gpt55_capabilities() {
         Provider::OpenAI.supports_service_tier(models::openai::GPT_5_6_SOL),
         "dated GPT-5.5 alias should inherit service-tier support"
     );
+}
+
+#[test]
+fn test_gpt_61_sol_openai_and_merge_gateway() {
+    // OpenAI native route
+    assert_eq!(ModelId::from_str(models::openai::GPT_6_1_SOL).unwrap(), ModelId::GPT61Sol);
+    assert_eq!(ModelId::GPT61Sol.as_str(), models::openai::GPT_6_1_SOL);
+    assert_eq!(ModelId::GPT61Sol.display_name(), "GPT-6.1 Sol");
+    assert!(models::openai::SUPPORTED_MODELS.contains(&models::openai::GPT_6_1_SOL));
+    assert!(models::openai::REASONING_MODELS.contains(&models::openai::GPT_6_1_SOL));
+    assert!(models::openai::RESPONSES_API_MODELS.contains(&models::openai::GPT_6_1_SOL));
+    assert!(Provider::OpenAI.supports_service_tier(models::openai::GPT_6_1_SOL));
+    assert!(ModelId::GPT61Sol.is_top_tier());
+    assert_eq!(ModelId::GPT61Sol.generation(), "6.1");
+
+    // Merge Gateway route
+    assert_eq!(
+        ModelId::from_str(models::merge_gateway::OPENAI_GPT_6_1_SOL).unwrap(),
+        ModelId::MergeGatewayOpenAIGpt61Sol
+    );
+    assert_eq!(ModelId::MergeGatewayOpenAIGpt61Sol.as_str(), models::merge_gateway::OPENAI_GPT_6_1_SOL);
+    assert!(models::merge_gateway::SUPPORTED_MODELS.contains(&models::merge_gateway::OPENAI_GPT_6_1_SOL));
+    assert!(models::merge_gateway::REASONING_MODELS.contains(&models::merge_gateway::OPENAI_GPT_6_1_SOL));
+    assert!(models::merge_gateway::REASONING_EFFORT_ROUTES.contains(&models::merge_gateway::OPENAI_GPT_6_1_SOL));
+    assert_eq!(ModelId::MergeGatewayOpenAIGpt61Sol.generation(), "6.1");
+    assert!(ModelId::MergeGatewayOpenAIGpt61Sol.is_top_tier());
+}
+
+#[test]
+fn test_service_tier_ultrafast_supported_on_openai_compatibles_only() {
+    use crate::core::OpenAIServiceTier;
+
+    assert_eq!(OpenAIServiceTier::parse("ultrafast"), Some(OpenAIServiceTier::Ultrafast));
+    // Native OpenAI curated model
+    assert!(Provider::OpenAI.supports_service_tier(models::openai::GPT_6_1_SOL));
+    // Merge Gateway openai/ routes proxy OpenAI service tiers including ultrafast
+    assert!(Provider::MergeGateway.supports_service_tier(models::merge_gateway::OPENAI_GPT_6_1_SOL));
+    assert!(!Provider::MergeGateway.supports_service_tier(models::merge_gateway::MINIMAX_H3));
+    // Other OpenAI-compatible providers accept service_tier
+    assert!(Provider::XAI.supports_service_tier("grok-4.7"));
+    assert!(Provider::Vercel.supports_service_tier("openai/gpt-6-astra"));
+    // Native non-compat APIs do not
+    assert!(!Provider::Anthropic.supports_service_tier(models::anthropic::CLAUDE_SONNET_5));
+    assert!(!Provider::Gemini.supports_service_tier(models::GEMINI_3_8_FLASH));
+    assert!(!Provider::Copilot.supports_service_tier(models::copilot::AUTO));
 }
 
 #[test]

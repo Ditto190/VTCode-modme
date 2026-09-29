@@ -18,6 +18,7 @@ use std::sync::Arc;
 use vtcode_commons::reasoning::ReasoningEffortLevel;
 use vtcode_core::config::build_session_affinity_prompt_cache_key;
 use vtcode_core::config::constants::llm_generation;
+use vtcode_core::config::models::{Provider, ProviderModelSupport};
 use vtcode_core::config::{ToolDisplayMode, ToolOutputMode};
 use vtcode_core::core::agent::harness_kernel::{
     HarnessRequestPlanInput, build_harness_request_plan, stable_system_prefix_hash,
@@ -391,7 +392,7 @@ pub(super) async fn build_turn_request(
             turn_scoped_system_messages,
         );
     }
-    let request_plan = build_harness_request_plan(HarnessRequestPlanInput {
+    let mut request_plan = build_harness_request_plan(HarnessRequestPlanInput {
         messages: request_messages,
         system_prompt: request_envelope.system_prompt(),
         tools: (!request_envelope.ordered_tools().is_empty()).then(|| request_envelope.ordered_tools()),
@@ -428,6 +429,30 @@ pub(super) async fn build_turn_request(
         tool_catalog_hash,
         system_prompt_prefix_hash: Some(stable_prefix_hash),
     });
+
+    // Canonical `provider.openai.service_tier` applies to any OpenAI-compatible
+    // route that advertises support (native OpenAI honors it via provider
+    // default; compat gateways forward `request.service_tier`). Custom
+    // providers with an OpenAI api_format ride the same path. Ultrafast is
+    // US/global only; the backend rejects EU-routed requests.
+    if let Some(cfg) = ctx.vt_cfg
+        && let Some(tier) = cfg.provider.openai.service_tier
+    {
+        let builtin_supported = turn_snapshot
+            .provider_name
+            .parse::<Provider>()
+            .map(|provider| provider.supports_service_tier(&turn_snapshot.active_model))
+            .unwrap_or(false);
+        let custom_openai = cfg.custom_provider(&turn_snapshot.provider_name).is_some_and(|custom| {
+            !matches!(
+                custom.resolved_profile(&turn_snapshot.active_model).api_format,
+                Some(vtcode_core::config::core::CustomProviderApiFormat::AnthropicMessages)
+            )
+        });
+        if builtin_supported || custom_openai {
+            request_plan.request.service_tier = Some(tier.as_str().to_string());
+        }
+    }
 
     // Phase 1.2 observability: record how the assembled first-request prefix is
     // spent across system prompt, tool schemas, and message history, using the

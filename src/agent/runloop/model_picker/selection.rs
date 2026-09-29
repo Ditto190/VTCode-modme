@@ -45,6 +45,7 @@ pub(super) enum ServiceTierChoice {
     ProjectDefault,
     Flex,
     Priority,
+    Ultrafast,
 }
 
 #[derive(Clone)]
@@ -494,6 +495,7 @@ pub(super) fn service_tier_label(service_tier: Option<OpenAIServiceTier>) -> &'s
     match service_tier {
         Some(OpenAIServiceTier::Flex) => "Flex",
         Some(OpenAIServiceTier::Priority) => "Priority",
+        Some(OpenAIServiceTier::Ultrafast) => "Ultrafast",
         None => "Project default",
     }
 }

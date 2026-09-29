@@ -31,6 +31,8 @@ pub enum ModelId {
     GPT6Astra,
     /// GPT-6 Sol - Cost-efficient high-end model in the GPT-6 series for demanding professional work
     GPT6Sol,
+    /// GPT-6.1 Sol - Near-Astra performance for complex coding, computer use, and professional work at a lower cost
+    GPT61Sol,
     /// GPT-6 Luna - Fast cost-efficient model in the GPT-6 series for high-volume latency-sensitive workloads
     GPT6Luna,
     /// GPT-5.6 Sol - Frontier model for complex professional work in the GPT-5.6 family
@@ -138,6 +140,8 @@ pub enum ModelId {
     MergeGatewayOpenAIGpt6Astra,
     /// OpenAI GPT-6 Sol through Merge Gateway
     MergeGatewayOpenAIGpt6Sol,
+    /// OpenAI GPT-6.1 Sol through Merge Gateway
+    MergeGatewayOpenAIGpt61Sol,
     /// OpenAI GPT-6 Luna through Merge Gateway
     MergeGatewayOpenAIGpt6Luna,
 

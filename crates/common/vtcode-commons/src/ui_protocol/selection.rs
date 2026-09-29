@@ -17,6 +17,7 @@ pub enum OpenAIServiceTierChoice {
     ProjectDefault,
     Flex,
     Priority,
+    Ultrafast,
 }
 
 /// Selection value returned from a list or wizard overlay.

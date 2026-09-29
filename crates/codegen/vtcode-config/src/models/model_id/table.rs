@@ -106,6 +106,13 @@ model_id_table! {
         display: "GPT-6 Sol",
         description: "Cost-efficient high-end model in the GPT-6 series for demanding professional work",
     },
+    GPT61Sol {
+        provider: OpenAI,
+        id: models::openai::GPT_6_1_SOL,
+        parse: [models::openai::GPT_6_1_SOL],
+        display: "GPT-6.1 Sol",
+        description: "Near-Astra performance for complex coding, computer use, and professional work at a lower cost",
+    },
     GPT6Luna {
         provider: OpenAI,
         id: models::openai::GPT_6_LUNA,
@@ -419,6 +426,13 @@ model_id_table! {
         parse: [models::merge_gateway::OPENAI_GPT_6_SOL],
         display: "GPT-6 Sol (Merge Gateway)",
         description: "OpenAI GPT-6 Sol accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayOpenAIGpt61Sol {
+        provider: MergeGateway,
+        id: models::merge_gateway::OPENAI_GPT_6_1_SOL,
+        parse: [models::merge_gateway::OPENAI_GPT_6_1_SOL],
+        display: "GPT-6.1 Sol (Merge Gateway)",
+        description: "OpenAI GPT-6.1 Sol accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayOpenAIGpt6Luna {
         provider: MergeGateway,
@@ -826,6 +840,7 @@ mod tests {
                     | ModelId::MergeGatewayMetaMuseSpark13
                     | ModelId::MergeGatewayOpenAIGpt6Astra
                     | ModelId::MergeGatewayOpenAIGpt6Sol
+                    | ModelId::MergeGatewayOpenAIGpt61Sol
                     | ModelId::MergeGatewayOpenAIGpt6Luna
                     | ModelId::MergeGatewayDeepseekFlash
             )
