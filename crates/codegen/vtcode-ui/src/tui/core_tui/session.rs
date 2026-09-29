@@ -234,6 +234,7 @@ pub struct Session {
     /// Transient "copied"/"copy failed" confirmation shown in the input status row.
     copy_notification_until: Option<Instant>,
     copy_notification_failed: bool,
+    copy_notification_chars: usize,
     input_compact_mode: bool,
 
     // --- UI State ---

@@ -974,7 +974,6 @@ impl Session {
 
         let mut left = self
             .copy_notification_text()
-            .map(str::to_owned)
             .or_else(|| self.status_left_text().map(str::to_owned));
         let right = self.status_right_text().map(str::to_string);
 

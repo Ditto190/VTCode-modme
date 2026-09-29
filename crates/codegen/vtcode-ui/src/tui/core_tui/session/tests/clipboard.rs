@@ -237,8 +237,8 @@ fn double_click_selects_transcript_word_and_copies_it() {
         .map(|span| span.content.as_ref())
         .collect::<String>();
     assert!(
-        rendered_status.contains("Copied to clipboard"),
-        "transcript copy should surface a temporary confirmation"
+        rendered_status.contains("copied 5 chars to clipboard"),
+        "transcript copy should surface a temporary confirmation with char count, got: {rendered_status}"
     );
 }
 
@@ -272,8 +272,8 @@ fn selecting_input_text_auto_copies_and_keeps_selection() {
 
     let rendered = rendered_app_session_lines(&mut session, VIEW_ROWS);
     assert!(
-        rendered.iter().any(|line| line.contains("Copied to clipboard")),
-        "input copy should surface a temporary confirmation"
+        rendered.iter().any(|line| line.contains("copied 5 chars to clipboard")),
+        "input copy should surface a temporary confirmation with char count"
     );
 
     for _ in 0..500 {

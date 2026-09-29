@@ -98,6 +98,7 @@ impl Session {
             input_status_right: None,
             copy_notification_until: None,
             copy_notification_failed: false,
+            copy_notification_chars: 0,
             drag_auto_scroll: None,
             input_compact_mode: false,
 

@@ -30,7 +30,6 @@ use crate::tui::config::constants::ui;
 use crate::tui::options::FullscreenInteractionSettings;
 
 const COPY_NOTIFICATION_DURATION: Duration = Duration::from_secs(2);
-const COPY_NOTIFICATION_TEXT: &str = "Copied to clipboard";
 const COPY_FAILURE_NOTIFICATION_TEXT: &str = "Copy failed";
 const ACTION_REQUIRED_STATUS_TEXT: &str = "Action required";
 const APPROVAL_REQUIRED_STATUS_TEXT: &str = "Approval required";
@@ -60,14 +59,15 @@ impl Session {
     }
 
     pub(crate) fn copy_input_selection_to_clipboard(&mut self) -> bool {
-        if self.input_manager.selected_text().is_none() {
+        let Some(selected) = self.input_manager.selected_text() else {
             return false;
-        }
+        };
+        let char_count = selected.chars().count();
 
         // Swallow the key even on hard failure so Ctrl+C never degrades into an
         // interrupt while the user is trying to copy a selection.
         if self.input_manager.copy_selected_text_to_clipboard() {
-            self.show_copy_notification();
+            self.show_copy_notification(char_count);
         } else {
             self.show_copy_failure_notification();
         }
@@ -79,8 +79,9 @@ impl Session {
             return;
         }
 
+        let char_count = text.chars().count();
         if MouseSelectionState::copy_to_clipboard(text) {
-            self.show_copy_notification();
+            self.show_copy_notification(char_count);
         } else {
             self.show_copy_failure_notification();
         }
@@ -356,6 +357,7 @@ impl Session {
             && Instant::now() >= until
         {
             self.copy_notification_until = None;
+            self.copy_notification_chars = 0;
             self.render_state.request_redraw();
         }
         if self.last_shimmer_active && !shimmer_active {
@@ -367,7 +369,8 @@ impl Session {
         }
     }
 
-    pub(crate) fn show_copy_notification(&mut self) {
+    pub(crate) fn show_copy_notification(&mut self, char_count: usize) {
+        self.copy_notification_chars = char_count;
         self.show_copy_result_notification(false);
     }
 
@@ -381,13 +384,18 @@ impl Session {
         self.render_state.request_redraw();
     }
 
-    pub(crate) fn copy_notification_text(&self) -> Option<&'static str> {
+    pub(crate) fn format_copy_notification(char_count: usize) -> String {
+        let unit = if char_count == 1 { "char" } else { "chars" };
+        format!("copied {char_count} {unit} to clipboard")
+    }
+
+    pub(crate) fn copy_notification_text(&self) -> Option<String> {
         self.copy_notification_until.filter(|until| Instant::now() < *until)?;
-        Some(if self.copy_notification_failed {
-            COPY_FAILURE_NOTIFICATION_TEXT
+        if self.copy_notification_failed {
+            Some(COPY_FAILURE_NOTIFICATION_TEXT.to_string())
         } else {
-            COPY_NOTIFICATION_TEXT
-        })
+            Some(Self::format_copy_notification(self.copy_notification_chars))
+        }
     }
 
     fn overlay_attention_status_text(&self) -> Option<&'static str> {
