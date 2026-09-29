@@ -3,7 +3,7 @@ feature: config-models-modal-ux
 status: delivered
 updated: 2026-09-26
 branch: compose/config-models-modal-ux
-commits:
+commits: 4c2061337..772b9441e
 ---
 
 # Config & Models Modal UX
