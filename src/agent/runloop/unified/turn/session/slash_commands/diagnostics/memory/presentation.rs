@@ -221,39 +221,55 @@ pub(super) fn show_memory_actions_modal(
         search_value: Some("memory triage lightweight model pick".to_string()),
         ..Default::default()
     });
-    items.push(
-        ui_list::current_choice(
-            "Automatic",
-            Some(format!(
-                "Use {} and fall back to {}.",
-                auto_lightweight_model(&ctx.config.provider, &ctx.config.model),
-                ctx.config.model
-            )),
-            Some(InlineListSelection::ConfigAction(format!(
-                "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}auto"
-            ))),
-        )
-        .with_search_value("memory lightweight model automatic".to_string()),
-    );
-    items.push(
-        ui_list::current_choice(
-            "Use main model",
-            Some(format!("Keep memory extraction on {}.", lightweight_route.main_model)),
-            Some(InlineListSelection::ConfigAction(format!(
-                "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}main"
-            ))),
-        )
-        .with_search_value("memory lightweight model main".to_string()),
-    );
+    // Only the configured route is `Current`; others keep their advice badges.
+    let mut automatic = ui_list::choice(
+        "Automatic",
+        Some(format!(
+            "Use {} and fall back to {}.",
+            auto_lightweight_model(&ctx.config.provider, &ctx.config.model),
+            ctx.config.model
+        )),
+        Some(InlineListSelection::ConfigAction(format!(
+            "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}auto"
+        ))),
+    )
+    .with_search_value("memory lightweight model automatic".to_string());
+    let auto_is_current = lightweight_route.configured_label == "Automatic";
+    automatic = if auto_is_current {
+        automatic.with_badge("Current", vtcode_commons::ui_protocol::InlineTone::Current)
+    } else {
+        automatic.with_badge("Recommended", vtcode_commons::ui_protocol::InlineTone::Accent)
+    };
+    items.push(automatic);
+
+    let mut main = ui_list::choice(
+        "Use main model",
+        Some(format!("Keep memory extraction on {}.", lightweight_route.main_model)),
+        Some(InlineListSelection::ConfigAction(format!(
+            "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}main"
+        ))),
+    )
+    .with_search_value("memory lightweight model main".to_string());
+    main = if lightweight_route.configured_label == "Use main model" {
+        main.with_badge("Current", vtcode_commons::ui_protocol::InlineTone::Current)
+    } else {
+        main.with_badge("Accuracy", vtcode_commons::ui_protocol::InlineTone::Accent)
+    };
+    items.push(main);
+
     items.extend(lightweight_route.choices.iter().map(|model| {
-        ui_list::current_choice(
+        let mut row = ui_list::choice(
             model.clone(),
             Some("Explicit same-provider lightweight model.".to_string()),
             Some(InlineListSelection::ConfigAction(format!(
                 "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}{model}"
             ))),
         )
-        .with_search_value(format!("memory lightweight triage {model}"))
+        .with_search_value(format!("memory lightweight triage {model}"));
+        if lightweight_route.configured_label.eq_ignore_ascii_case(model.as_str()) {
+            row = row.with_badge("Current", vtcode_commons::ui_protocol::InlineTone::Current);
+        }
+        row
     }));
     items.extend([
         InlineListItem {

@@ -18,8 +18,8 @@ pub const BACK: &str = "Esc back";
 pub const CANCEL: &str = "Esc cancel";
 /// Vim-style movement used by standalone ratatui pickers.
 pub const MOVE_VIM: &str = "↑↓/jk move";
-/// Jump by catalog number (idle filter only).
-pub const JUMP: &str = "Home/End";
+/// Jump to first/last row.
+pub const ENDS: &str = "Home/End";
 /// Confirm in standalone pickers.
 pub const CONFIRM: &str = "Enter confirm";
 /// Standalone picker Esc: clear filter, then cancel.
@@ -34,12 +34,7 @@ pub fn list_hint() -> String {
 
 /// Footer for standalone choice pickers (`run_interactive_selection`).
 pub fn choice_hint() -> String {
-    [MOVE_VIM, JUMP, CONFIRM, CLEAR_OR_CANCEL].join(SEP)
-}
-
-/// Footer when the list has no search field.
-pub fn list_hint_no_filter() -> String {
-    [NAVIGATE, APPLY, ADJUST, BACK].join(SEP)
+    [MOVE_VIM, ENDS, CONFIRM, CLEAR_OR_CANCEL].join(SEP)
 }
 
 #[cfg(test)]

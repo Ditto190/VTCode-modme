@@ -84,11 +84,14 @@ pub fn choice(
     description: Option<String>,
     selection: Option<InlineListSelection>,
 ) -> InlineListItem {
+    let title = title.into();
+    let search_value = format!("{title} {}", description.clone().unwrap_or_default()).to_ascii_lowercase();
     InlineListItem {
-        title: title.into(),
         subtitle: description,
+        title,
         selection,
         kind: InlineItemKind::Item,
+        search_value: Some(search_value),
         ..InlineListItem::default()
     }
 }
@@ -137,6 +140,12 @@ mod tests {
         let row = current_choice("Keep current (high)", Some("desc".into()), None);
         assert_eq!(row.badge.as_deref(), Some("Current"));
         assert_eq!(row.badge_tone, InlineTone::Current);
+    }
+
+    #[test]
+    fn choice_seeds_search_from_title_and_description() {
+        let row = choice("Flex", Some("lower cost".to_string()), None);
+        assert_eq!(row.search_value.as_deref(), Some("flex lower cost"));
     }
 
     #[test]

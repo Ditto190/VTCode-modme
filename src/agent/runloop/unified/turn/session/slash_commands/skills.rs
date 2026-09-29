@@ -685,7 +685,7 @@ async fn prompt_text(
 
 fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
     let items = vec![
-        InlineListItem::group_header("Actions"),
+        ui_list::group_header("Actions"),
         ui_list::action(
             "Browse skills",
             "Open the skills catalog and per-skill actions".to_string(),
