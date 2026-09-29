@@ -87,6 +87,22 @@ fn is_legacy_openai_base_url(base_url: &str) -> bool {
         .ends_with("/v1/openai")
 }
 
+/// Maps an OpenAI `service_tier` value onto Merge Gateway's tier vocabulary
+/// (`standard`/`flex`/`priority`). OpenAI-only tiers (e.g. `ultrafast`) have
+/// no Merge equivalent and map to `None` so the caller omits the field and
+/// the gateway default applies instead of 422ing on `literal_error`.
+fn map_openai_service_tier_for_merge(tier: &str) -> Option<&'static str> {
+    if tier.eq_ignore_ascii_case("standard") {
+        Some("standard")
+    } else if tier.eq_ignore_ascii_case("flex") {
+        Some("flex")
+    } else if tier.eq_ignore_ascii_case("priority") {
+        Some("priority")
+    } else {
+        None
+    }
+}
+
 /// How a Merge Gateway route exposes reasoning controls. Merge Gateway routes
 /// reasoning per provider: some vendors expose a provider-native
 /// `reasoning_effort` parameter, others only accept a Gateway-managed thinking
@@ -423,7 +439,18 @@ impl MergeGatewayProvider {
             payload.insert("response_format".to_owned(), output_format.clone());
         }
         if let Some(service_tier) = request.service_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-            payload.insert("service_tier".to_owned(), Value::String(service_tier.to_owned()));
+            match map_openai_service_tier_for_merge(service_tier) {
+                Some(mapped) => {
+                    payload.insert("service_tier".to_owned(), Value::String(mapped.to_owned()));
+                }
+                None => {
+                    tracing::warn!(
+                        model = %request.model,
+                        service_tier = %service_tier,
+                        "Merge Gateway has no equivalent for service_tier; omitting it and using gateway default routing"
+                    );
+                }
+            }
         }
         if let Some(cache_key) = request
             .prompt_cache_key
@@ -1663,6 +1690,35 @@ mod tests {
                 "route {model} must advertise non-streaming fallback capability"
             );
         }
+    }
+
+    #[test]
+    fn native_payload_maps_openai_service_tiers_and_omits_ultrafast() {
+        // Merge Gateway only accepts `standard`/`flex`/`priority`; OpenAI's
+        // `ultrafast` has no equivalent and must be omitted (gateway default
+        // routing) rather than 422ing on `literal_error`.
+        assert_eq!(map_openai_service_tier_for_merge("flex"), Some("flex"));
+        assert_eq!(map_openai_service_tier_for_merge("priority"), Some("priority"));
+        assert_eq!(map_openai_service_tier_for_merge("standard"), Some("standard"));
+        assert_eq!(map_openai_service_tier_for_merge("Flex"), Some("flex"));
+        assert_eq!(map_openai_service_tier_for_merge("ultrafast"), None);
+
+        let provider = MergeGatewayProvider::with_model(
+            "test-key".to_string(),
+            models::merge_gateway::OPENAI_GPT_6_1_SOL.to_string(),
+        );
+        let mut ultrafast = LLMRequest {
+            messages: vec![Message::user("hello".to_string())].into(),
+            model: models::merge_gateway::OPENAI_GPT_6_1_SOL.to_string(),
+            service_tier: Some("ultrafast".to_string()),
+            ..Default::default()
+        };
+        let payload = provider.build_native_payload(&ultrafast, false).expect("payload");
+        assert!(payload.get("service_tier").is_none(), "ultrafast must be omitted for Merge Gateway routes");
+
+        ultrafast.service_tier = Some("priority".to_string());
+        let payload = provider.build_native_payload(&ultrafast, false).expect("payload");
+        assert_eq!(payload.get("service_tier").and_then(Value::as_str), Some("priority"));
     }
 
     #[test]
