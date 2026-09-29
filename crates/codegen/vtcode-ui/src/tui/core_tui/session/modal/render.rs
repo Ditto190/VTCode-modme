@@ -1216,20 +1216,22 @@ pub fn modal_list_item_lines(
     let title_spans = highlight_segments(item.title.as_str(), title_style, styles.search_match, list.highlight_terms());
     primary_spans.extend(title_spans);
 
-    // Live value for setting rows: accent-styled so the eye lands on it first.
+    // Live value for setting rows: trailing column after a dimmed separator.
+    // Tone follows `badge_tone` (On → success, Off/unset → dimmed, else accent).
     if let Some(value) = &item.value {
-        primary_spans.push(Span::raw("  "));
+        // Pad short titles so values line up as a column when possible.
+        let title_width: usize = item.title.chars().count();
+        let target = 28usize;
+        if item.kind == InlineItemKind::Setting && title_width < target {
+            primary_spans.push(Span::raw(" ".repeat(target - title_width)));
+        } else {
+            primary_spans.push(Span::raw("  "));
+        }
+        primary_spans.push(Span::styled("·  ", styles.detail));
         let value_style = if is_selected {
             styles.highlight
-        } else if item.kind == InlineItemKind::Setting {
-            tone_style(
-                if item.badge_tone == InlineTone::Neutral {
-                    InlineTone::Accent
-                } else {
-                    item.badge_tone
-                },
-                styles,
-            )
+        } else if item.badge_tone == InlineTone::Neutral {
+            styles.detail
         } else {
             tone_style(item.badge_tone, styles)
         };

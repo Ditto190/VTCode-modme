@@ -26,21 +26,13 @@ fn ends_with_quoted_map_key(path: &str) -> bool {
 }
 
 /// Description-only subtitle for setting rows that also carry a `value`.
-pub(super) fn setting_description(description: &str, adjustable: bool) -> Option<String> {
-    // Value is rendered as an accent `InlineListItem::value`; the subtitle
-    // carries only description (+ adjust hint) so metadata stays dimmed.
-    let mut parts = Vec::new();
-    if adjustable {
-        parts.push("<- adjust ->".to_string());
+pub(super) fn setting_description(description: &str, _adjustable: bool) -> Option<String> {
+    // Value is rendered as an accent `InlineListItem::value`; the subtitle is
+    // description only so metadata stays dimmed and uncluttered.
+    if description.trim().is_empty() {
+        return None;
     }
-    if !description.is_empty() {
-        parts.push(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN));
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" • "))
-    }
+    Some(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN))
 }
 
 pub(super) fn search_value_for_missing_doc(path: &str, label: &str, doc: Option<&FieldDoc>) -> String {
@@ -89,7 +81,7 @@ pub(super) fn action_item_with_tone(
 ) -> InlineListItem {
     InlineListItem {
         title: title.to_string(),
-        subtitle: Some(subtitle.to_string()),
+        subtitle: (!subtitle.is_empty()).then(|| subtitle.to_string()),
         badge: badge.map(str::to_string),
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(action.to_string())),
@@ -170,7 +162,7 @@ pub(super) fn count_leaf_entries(value: &TomlValue) -> usize {
 
 pub(super) fn summarize_value(value: &TomlValue) -> String {
     match value {
-        TomlValue::String(text) => format!("\"{}\"", truncate_middle(text, 48)),
+        TomlValue::String(text) => truncate_middle(text, 48),
         TomlValue::Integer(number) => number.to_string(),
         TomlValue::Float(number) => number.to_string(),
         TomlValue::Boolean(value) => {

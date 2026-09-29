@@ -277,12 +277,12 @@ fn short_display_path(path: &Path, workspace: &Path) -> String {
 }
 
 fn settings_header_lines(state: &SettingsPaletteState) -> Vec<String> {
-    let write_target = format!("Write target: {}.", short_display_path(&state.source_path, &state.workspace));
+    let write_target = format!("Writing to {}", short_display_path(&state.source_path, &state.workspace));
 
     if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
         let mut lines = vec![
             "Settings › Reset.".to_string(),
-            "This clears every setting in the target layer. Credentials are preserved.".to_string(),
+            "Clears every setting in this file. Credentials are kept.".to_string(),
             write_target,
         ];
         if let Some(label) = state.source_label.as_deref() {
@@ -311,7 +311,7 @@ fn settings_header_lines(state: &SettingsPaletteState) -> Vec<String> {
         }
         return lines;
     }
-    let mut lines = vec!["Choose a settings group to edit.".to_string(), write_target];
+    let mut lines = vec!["Pick a group to edit.".to_string(), write_target];
     if let Some(label) = state.source_label.as_deref() {
         lines.push(label.to_string());
     }
@@ -678,12 +678,12 @@ mod tests {
             item.selection,
             Some(InlineListSelection::ConfigAction("settings:set:ui.tool_display_mode:cycle".to_string()))
         );
-        assert_eq!(item.badge.as_deref(), Some("Pick"));
+        assert_eq!(item.badge.as_deref(), None, "setting rows carry value, not action badges");
         assert!(
             item.value
                 .as_deref()
                 .is_some_and(|value| value.contains("compact") || value.contains("expanded")),
-            "live value should render in the accent value slot: {:?}",
+            "live value should render in the value slot: {:?}",
             item.value
         );
     }
@@ -739,7 +739,7 @@ mod tests {
                 })
             })
             .expect("copy on select entry in Interface & Terminal");
-        assert_eq!(item.badge.as_deref(), Some("On"), "boolean rows carry a state badge (On/Off)");
+        assert_eq!(item.badge.as_deref(), None, "boolean state lives in the value slot");
         assert_eq!(item.kind, vtcode_commons::ui_protocol::InlineItemKind::Setting);
     }
 
@@ -837,15 +837,18 @@ mod tests {
                 "Interface & Terminal",
                 "Performance & Diagnostics",
                 "Advanced settings",
+                "Actions",
                 "Reload configuration",
                 "Reset configuration",
             ]
         );
-        assert!(items.iter().all(|item| item.selection.is_some()));
+        assert!(items.iter().all(|item| item.selection.is_some() || item.title == "Actions"));
         assert!(items.iter().all(|item| {
-            item.subtitle
-                .as_deref()
-                .is_some_and(|subtitle| subtitle.contains("editable setting"))
+            item.title == "Actions"
+                || item
+                    .subtitle
+                    .as_deref()
+                    .is_some_and(|subtitle| subtitle.contains("editable setting"))
                 || matches!(item.title.as_str(), "Advanced settings" | "Reload configuration" | "Reset configuration")
         }));
     }
@@ -1750,12 +1753,12 @@ api_key_env = "TRUSTED_API_KEY"
         ] {
             let state = header_test_state(view);
             let lines = settings_header_lines(&state);
-            assert!(lines.iter().any(|line| line.contains("Write target: vtcode.toml.")));
+            assert!(lines.iter().any(|line| line.contains("Writing to vtcode.toml")));
             assert!(lines.iter().any(|line| line == "test"));
             assert!(lines.iter().all(|line| !line.contains("Enter") && !line.contains("Esc")));
         }
         let root = settings_header_lines(&header_test_state(None));
-        assert_eq!(root.first().map(String::as_str), Some("Choose a settings group to edit."));
+        assert_eq!(root.first().map(String::as_str), Some("Pick a group to edit."));
         let advanced = settings_header_lines(&header_test_state(Some(SETTINGS_ADVANCED_VIEW_PATH)));
         assert!(advanced.iter().any(|line| line.contains("Advanced settings")));
     }
@@ -1766,8 +1769,8 @@ api_key_env = "TRUSTED_API_KEY"
         state.source_label = None;
         let lines = settings_header_lines(&state);
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines.first().map(String::as_str), Some("Choose a settings group to edit."));
-        assert!(lines[1].starts_with("Write target: "));
+        assert_eq!(lines.first().map(String::as_str), Some("Pick a group to edit."));
+        assert!(lines[1].starts_with("Writing to "));
         assert!(lines.iter().all(|line| !line.contains("Configuration source")));
     }
 
