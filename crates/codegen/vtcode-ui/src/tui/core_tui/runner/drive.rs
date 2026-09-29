@@ -64,7 +64,7 @@ fn suspend_to_shell<B: Backend, S: TuiSessionDriver>(
             DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
             EnableMouseCapture, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
         },
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+        terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
     use signal_hook::{consts::signal::SIGTSTP, low_level::raise};
 
@@ -79,6 +79,10 @@ fn suspend_to_shell<B: Backend, S: TuiSessionDriver>(
             tracing::debug!(%error, "failed to suspend keyboard enhancement flags");
         }
         if use_alternate_screen {
+            // Purge the alternate viewport before leaving so suspending to the
+            // shell never reveals the last TUI frame in the main scrollback
+            // (mirrors the canonical `panic_hook::restore_tui` ordering).
+            let _ = execute!(stderr, Clear(ClearType::All));
             execute!(stderr, LeaveAlternateScreen).context("failed to leave alternate screen before suspend")?;
         }
 

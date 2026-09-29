@@ -244,6 +244,11 @@ fn show_tool_output_in_scrollback(text: &str, mouse_capture: bool) -> Result<()>
     };
 
     let mut stderr = io::stderr();
+    // Purge the alternate viewport before leaving so the fullscreen TUI frame
+    // is never revealed in the main scrollback (mirrors the canonical
+    // `panic_hook::restore_tui` ordering).
+    // Best-effort: a failed clear must not block the native scrollback view.
+    let _ = execute!(stderr, Clear(ClearType::All));
     execute!(stderr, LeaveAlternateScreen)?;
     if mouse_capture {
         let _ = execute!(stderr, DisableMouseCapture);
