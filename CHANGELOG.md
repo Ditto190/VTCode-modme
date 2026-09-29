@@ -2,6 +2,13 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.171.0 - 2026-09-29
+
+### Highlights
+#### Features
+
+- Add GPT-6.1 Sol and ultrafast service tier (6ff19cb8) 
+### Other Changes
 ## 0.170.1 - 2026-09-29
 
 ### Highlights
