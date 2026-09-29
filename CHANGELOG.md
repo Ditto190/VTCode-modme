@@ -2,6 +2,71 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.170.1 - 2026-09-29
+
+### Highlights
+#### Bug Fixes
+
+- Show full command in transcript review and advertise q to close (ef7aaae2) 
+- Accessible postamble styling and faster Ctrl+C teardown (08fb6217) 
+- Keep search-off picker layout and drop per-row filter allocs (d8be78d2) 
+- Simplify settings row helpers and model-picker back (00391eab) 
+- Declutter config settings rows and value column (21dec621) 
+- Align model picker with the value-column row pattern (08efb5b6) 
+- Tighten picker hints and drop dead footer copy (2b8fccaf) 
+- Unify grouped-modal design system and spacing (9b424fda) 
+- Clarify single-Enter slash submit intent (b2efeb1b) 
+- Clear alternate viewport before leaving across teardown paths (a3f32b9f) 
+- Restore conditional Current badges and align choice search (39966df7) 
+- Claim cooked-mode restore separately from escape restore (a6187c37) 
+- Surface coalesced warning when queued inputs hit the soft cap (4c2f4194) 
+- Badge permanence scope on tool permission prompt rows (c521bbf3) 
+- Condense failed-edit old_str and patch context in errors (60147a9f) 
+- Cap list_files tree emission with a node budget (9054561a) 
+- Preserve read paging fields, decouple tree from max_items, harden diagnosis memo (b77cbc61) 
+- Flag chunk_tail_omitted on byte-capped paged reads (4a3fc30a) 
+#### Documentation
+
+- Group extra commands and tighten usage intro (894f3449) (@vinhnx)
+- Expand contributors and sponsors by default (d2fa1600) 
+- Finalize tui-config-search report and commit range (db7619d7) 
+- Finalize config-models-modal-ux report and commit range (ec1ad729) 
+- Finalize ui-design-system report and commit range (332f350a) 
+- Finalize clear-tool-inputs-default report and commit range (e9e91a2a) 
+#### Features
+
+- Apply Sonnet 5.5 tuning guidance (0c9589cb) 
+- Collapse large composer inputs to bounded summary (7f045947) 
+- Paste-twice expand, Shift+Ctrl+V raw paste, shorter copy toast (1014be67) 
+- Responsive search for TUI configuration pickers (97fcfeac) 
+- Redesign config and models modal hierarchy and feedback (772b9441) 
+- Add char counter to copy notifications (85d8c449) 
+- Clear tool inputs with stubbed results by default (d2f448ad) 
+- Apply reduce_tool_result hard caps on interactive tool responses (b09e04d7) 
+### Other Changes
+#### Other
+
+- Cleanup (494a0bf4) (@vinhnx)
+- Responsive TUI configuration search (compose/tui-config-search) (916170a3) 
+- Config and models modal hierarchy and feedback (compose/config-models-modal-ux) (438bfd2a) 
+- Canonical TUI design system in vtcode-ui (compose/ui-design-system) (99d93b3d) 
+- Update README (5d67f5ae) 
+- Clear tool inputs with stubbed results by default (compose/clear-tool-inputs-default) (fa69e427) 
+- Tool-output economy — reduce caps, tree bounds, diagnosis memo (compose/tool-output-compact) (255a48ce) 
+#### Performance
+
+- Drop instruction-appendix Key points echo and single-source map (15b3daf7) 
+- Memoize tool-failure diagnosis and cap model calls per turn (fbb6fc1c) 
+#### Refactors
+
+- Simplify the deferred raw-mode restore on exit (1a2c5427) 
+- Move shared list design system into vtcode-ui::design (189ee766) 
+- Finish design::list migration from review (ac8905a8) 
+- Dedupe persistent-memory disabled check and fix hint text (e872b4c5) 
+- Name diagnosis-memo types and use CompactStr (dd7d4eb7) 
+#### Tests
+
+- Complete InlineListItem fields after modal UX merge (d3914450) 
 ## 0.170.0 - 2026-09-29
 
 ### Highlights
