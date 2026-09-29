@@ -99,6 +99,12 @@ fn reduce_read_file_result(result: Value) -> Value {
     let mut reduced = obj.clone();
     reduced.insert("content".to_string(), Value::String(content));
     reduced.insert("is_truncated".to_string(), Value::Bool(true));
+    // next_read_args.offset still points past the *original* chunk. Without
+    // this flag the model would assume the page is complete and skip the
+    // byte-capped tail.
+    if reduced.contains_key("next_read_args") || reduced.get("has_more").and_then(Value::as_bool) == Some(true) {
+        reduced.insert("chunk_tail_omitted".to_string(), Value::Bool(true));
+    }
     if line_truncated {
         reduced.insert("note".to_string(), Value::String("File content truncated for context economy.".to_string()));
     }
@@ -261,5 +267,10 @@ mod tests {
         assert!(reduced["content"].as_str().unwrap().lines().count() < 2_500, "content must be line-capped");
         assert_eq!(reduced["has_more"], json!(true), "paging fields survive truncation");
         assert!(reduced.get("next_read_args").is_some(), "next_read_args must survive truncation");
+        assert_eq!(
+            reduced["chunk_tail_omitted"],
+            json!(true),
+            "byte-capped page must warn that the chunk tail is not in content"
+        );
     }
 }
