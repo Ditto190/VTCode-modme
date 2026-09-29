@@ -23,10 +23,6 @@ pub(crate) static COLOR_SCHEME_REPORTS_ENABLED: AtomicBool = AtomicBool::new(fal
 /// screen already restores it.
 pub(crate) static ALTERNATE_SCREEN_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) static RESTORE_DONE: AtomicBool = AtomicBool::new(false);
-/// Whether a graceful exit asked [`crate::tui::panic_hook::restore_tui`] to keep
-/// the tty in raw mode. Only the runner's mode guard honors this; every other
-/// restore path (panic hook, emergency exit, backstops) forces the transition.
-pub(crate) static RAW_MODE_RESTORE_DEFERRED: AtomicBool = AtomicBool::new(false);
 /// Original iTerm2 profile name to revert to on teardown.
 ///
 /// Set when the TUI applies its one-shot `OSC 1337;SetProfile=VT Code` switch
@@ -103,14 +99,6 @@ pub fn set_app_metadata(
 
 pub(crate) fn app_metadata() -> AppMetadata {
     APP_METADATA.get().cloned().unwrap_or_else(AppMetadata::default_for_tui_crate)
-}
-
-pub(crate) fn mark_raw_mode_restore_deferred(deferred: bool) {
-    RAW_MODE_RESTORE_DEFERRED.store(deferred, Ordering::SeqCst);
-}
-
-pub(crate) fn is_raw_mode_restore_deferred() -> bool {
-    RAW_MODE_RESTORE_DEFERRED.load(Ordering::SeqCst)
 }
 
 pub(crate) fn mark_tui_initialized() {
@@ -252,16 +240,6 @@ mod tests {
         assert!(is_color_eyre_enabled());
 
         COLOR_EYRE_ENABLED.store(false, Ordering::SeqCst);
-    }
-
-    #[test]
-    fn raw_mode_deferral_flag_round_trips() {
-        RAW_MODE_RESTORE_DEFERRED.store(false, Ordering::SeqCst);
-        assert!(!is_raw_mode_restore_deferred(), "a fresh session must not defer");
-        mark_raw_mode_restore_deferred(true);
-        assert!(is_raw_mode_restore_deferred(), "deferral must be observable");
-        mark_raw_mode_restore_deferred(false);
-        assert!(!is_raw_mode_restore_deferred(), "clearing must be observable");
     }
 
     #[test]

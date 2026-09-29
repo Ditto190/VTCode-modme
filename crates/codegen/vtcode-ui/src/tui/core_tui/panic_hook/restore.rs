@@ -149,10 +149,6 @@ pub fn drain_pending_terminal_input() {
 /// - Resets cursor style and shows cursor
 /// - Restores raw mode to its state before the TUI started
 pub fn restore_tui() -> io::Result<()> {
-    // Force semantics: callers other than the runner's mode guard (panic hook,
-    // emergency exit, error report) always want the tty fully restored, so any
-    // pending deferral is cleared first.
-    state::mark_raw_mode_restore_deferred(false);
     let error = restore_terminal_state(false);
     drain_pending_terminal_input();
     error
@@ -160,18 +156,15 @@ pub fn restore_tui() -> io::Result<()> {
 
 /// Restore every escape-sequence mode but deliberately **keep raw mode**.
 ///
-/// Used by the graceful exit path while the runloop still has teardown work to
-/// do. Raw mode keeps the tty's echo off, so a late kitty-protocol reply (e.g.
-/// the key-release report for the exiting Ctrl+C) cannot be echoed onto the
-/// screen; the caller drains and then transitions to cooked mode as its final
-/// step, in [`finish_deferred_raw_mode_restore`].
-///
-/// The deferral is armed from session start (the TUI task's own restore fires
-/// before the runloop has finished teardown) and every non-runner caller of
-/// [`restore_tui`] clears it, so a panic or emergency exit still restores the
-/// tty immediately.
+/// Used by the runner's mode guard, which fires the moment the TUI task ends —
+/// before the runloop has finished teardown (archive write, MCP shutdown, TUI
+/// join). Raw mode keeps the tty's echo off, so a late kitty-protocol reply
+/// (the key-release report for the exiting Ctrl+C) cannot be echoed onto the
+/// screen; the exit postamble drains and then transitions to cooked mode as its
+/// final step, in [`finish_deferred_raw_mode_restore`]. Every other restore path
+/// goes through [`restore_tui`], which forces the transition, so a panic or
+/// emergency exit can never leave the tty in raw mode.
 pub fn restore_tui_keep_raw_mode() -> io::Result<()> {
-    state::mark_raw_mode_restore_deferred(true);
     restore_terminal_state(true)
 }
 
@@ -206,14 +199,6 @@ fn restore_raw_mode_state() -> Option<io::Error> {
     error
 }
 
-/// Ask every restore path that honors the deferral (currently only the runner's
-/// mode guard, which fires when the TUI task exits) to keep the tty in raw
-/// mode. The graceful exit path calls this before shutting the TUI down and
-/// clears it in [`finish_deferred_raw_mode_restore`].
-pub fn defer_raw_mode_restore() {
-    state::mark_raw_mode_restore_deferred(true);
-}
-
 /// Finish a deferred raw-mode restore as the last act of a graceful exit.
 ///
 /// Drains pending input *before* leaving raw mode — echo is still off, so the
@@ -224,7 +209,6 @@ pub fn finish_deferred_raw_mode_restore() {
     if let Some(error) = restore_raw_mode_state() {
         tracing::debug!(%error, "failed to finish the deferred raw-mode restore");
     }
-    state::mark_raw_mode_restore_deferred(false);
     state::mark_raw_mode_was_enabled(false);
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
@@ -279,7 +263,6 @@ fn restore_terminal_state(keep_raw_mode: bool) -> io::Result<()> {
     // key-release report for the exiting Ctrl+C) cannot be echoed onto the
     // screen. The caller finishes the transition as its final act.
     if keep_raw_mode {
-        state::mark_raw_mode_restore_deferred(true);
         let _ = io::stdout().flush();
         let _ = io::stderr().flush();
         return Ok(());
