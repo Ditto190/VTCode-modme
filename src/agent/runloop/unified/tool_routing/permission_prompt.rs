@@ -636,7 +636,7 @@ fn build_tool_permission_options(
     prompt_kind: ToolPermissionPromptKind,
     persistent_approval_target: Option<&PersistentApprovalTarget>,
 ) -> Vec<vtcode_ui::tui::app::InlineListItem> {
-    use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
+    use vtcode_ui::tui::app::InlineListSelection;
 
     let mut options = vec![
         ui_list::action(
@@ -647,23 +647,23 @@ fn build_tool_permission_options(
             Some(InlineListSelection::ToolApproval(true)),
         )
         .with_search_value("approve yes allow once y 1".to_string()),
-        InlineListItem {
-            title: if prompt_kind == ToolPermissionPromptKind::Mcp {
-                "Approve this session".to_string()
+        // Scope badge is load-bearing: "Always" rows persist, "Session" does not.
+        ui_list::action(
+            if prompt_kind == ToolPermissionPromptKind::Mcp {
+                "Approve this session"
             } else {
-                "Allow for Session".to_string()
+                "Allow for Session"
             },
-            subtitle: if prompt_kind == ToolPermissionPromptKind::Mcp {
-                Some("Remember for this session".to_string())
+            if prompt_kind == ToolPermissionPromptKind::Mcp {
+                "Remember for this session"
             } else {
-                Some("For the current session".to_string())
+                "For the current session"
             },
-            badge: Some("Session".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApprovalSession),
-            search_value: Some("session temporary temp 2".to_string()),
-            ..Default::default()
-        },
+            Some("Session".to_string()),
+            Tone::Neutral,
+            Some(InlineListSelection::ToolApprovalSession),
+        )
+        .with_search_value("session temporary temp 2".to_string()),
     ];
 
     if let Some(target) = persistent_approval_target {
@@ -679,14 +679,11 @@ fn build_tool_permission_options(
             }
         };
         let subtitle = format!("Remember {short_label} in this workspace");
-        // No "policy cache" jargon: the subtitle already states the scope that
-        // gets remembered, and permanent persistence is what "Always" means to
-        // a user approving a command.
         options.push(
             ui_list::action(
                 "Always approve",
                 subtitle,
-                None,
+                Some("Permanent".to_string()),
                 Tone::Neutral,
                 Some(InlineListSelection::ToolApprovalPermanent),
             )
@@ -696,27 +693,28 @@ fn build_tool_permission_options(
 
     options.push(ui_list::group_divider());
 
-    options.push(InlineListItem {
-        title: if prompt_kind == ToolPermissionPromptKind::Mcp {
-            "Cancel".to_string()
-        } else {
-            "Deny Once".to_string()
-        },
-        subtitle: if prompt_kind == ToolPermissionPromptKind::Mcp {
-            Some("Cancel this tool call".to_string())
-        } else {
-            Some("Ask again next time".to_string())
-        },
-        badge: None,
-        indent: 0,
-        selection: Some(InlineListSelection::ToolApprovalDenyOnce),
-        search_value: Some(if prompt_kind == ToolPermissionPromptKind::Mcp {
+    options.push(
+        ui_list::action(
+            if prompt_kind == ToolPermissionPromptKind::Mcp {
+                "Cancel"
+            } else {
+                "Deny Once"
+            },
+            if prompt_kind == ToolPermissionPromptKind::Mcp {
+                "Cancel this tool call"
+            } else {
+                "Ask again next time"
+            },
+            None,
+            Tone::Neutral,
+            Some(InlineListSelection::ToolApprovalDenyOnce),
+        )
+        .with_search_value(if prompt_kind == ToolPermissionPromptKind::Mcp {
             "cancel stop reject decline 4".to_string()
         } else {
             "deny no reject once temporary 4".to_string()
         }),
-        ..Default::default()
-    });
+    );
 
     if matches!(persistent_approval_target, Some(PersistentApprovalTarget::ToolLevel))
         && prompt_kind != ToolPermissionPromptKind::Mcp
@@ -725,7 +723,7 @@ fn build_tool_permission_options(
             ui_list::action(
                 "Always Deny",
                 "Block this tool until policy is changed",
-                None,
+                Some("Persistent".to_string()),
                 Tone::Neutral,
                 Some(InlineListSelection::ToolApproval(false)),
             )
@@ -1285,6 +1283,27 @@ mod tests {
         .collect::<Vec<_>>();
         assert!(titles.iter().any(|title| title == "Deny Once"));
         assert!(titles.iter().any(|title| title == "Always Deny"));
+    }
+
+    #[test]
+    fn always_rows_carry_permanence_badges() {
+        let items = build_tool_permission_options(
+            ToolPermissionPromptKind::Standard,
+            Some(&PersistentApprovalTarget::ToolLevel),
+        );
+        let badge_for = |title: &str| {
+            items
+                .iter()
+                .find(|item| item.title == title)
+                .unwrap_or_else(|| panic!("{title} row must exist"))
+                .badge
+                .clone()
+        };
+        assert_eq!(badge_for("Always approve").as_deref(), Some("Permanent"));
+        assert_eq!(badge_for("Always Deny").as_deref(), Some("Persistent"));
+        assert_eq!(badge_for("Allow for Session").as_deref(), Some("Session"));
+        assert_eq!(badge_for("Approve Once"), None, "one-shot rows must not claim permanence");
+        assert_eq!(badge_for("Deny Once"), None);
     }
 
     #[test]
