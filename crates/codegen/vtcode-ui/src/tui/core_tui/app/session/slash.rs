@@ -375,7 +375,7 @@ pub(super) fn try_handle_slash_navigation(
             // the generic Enter arm (busy-steer/queue/block/help-modal
             // checks + Submit). Tab remains the complete-without-run
             // path for editing args before submitting.
-            apply_selected_slash_suggestion(session);
+            let _ = apply_selected_slash_suggestion(session);
             return false;
         }
         KeyCode::Esc => {

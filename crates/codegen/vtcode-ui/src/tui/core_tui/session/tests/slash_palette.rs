@@ -6,7 +6,7 @@ use super::super::*;
 use super::helpers::*;
 
 #[test]
-fn busy_slash_palette_stop_accepts_then_interrupts_on_second_enter() {
+fn busy_slash_palette_stop_submits_on_single_enter() {
     let mut session = session_with_slash_palette_commands();
     session.handle_command(app_types::InlineCommand::SetInputStatus {
         left: Some("Running command: cargo test".to_string()),
@@ -31,7 +31,7 @@ fn busy_slash_palette_stop_accepts_then_interrupts_on_second_enter() {
 }
 
 #[test]
-fn slash_palette_enter_accepts_immediate_command_for_review() {
+fn slash_palette_enter_submits_immediate_command() {
     let mut session = session_with_slash_palette_commands();
 
     for key in [
@@ -51,7 +51,7 @@ fn slash_palette_enter_accepts_immediate_command_for_review() {
 }
 
 #[test]
-fn slash_palette_enter_accepts_review_for_review() {
+fn slash_palette_enter_submits_arg_capable_command() {
     let mut session = session_with_slash_palette_commands();
 
     for key in [
@@ -72,7 +72,7 @@ fn slash_palette_enter_accepts_review_for_review() {
 }
 
 #[test]
-fn slash_palette_tab_accepts_selected_suggestion_like_enter() {
+fn slash_palette_tab_completes_without_submitting() {
     let mut session = session_with_slash_palette_commands();
 
     for key in [
@@ -92,7 +92,29 @@ fn slash_palette_tab_accepts_selected_suggestion_like_enter() {
 }
 
 #[test]
-fn slash_palette_accepted_input_remains_editable_and_cancellable() {
+fn slash_palette_shift_enter_inserts_newline_without_submitting() {
+    let mut session = session_with_slash_palette_commands();
+
+    for key in [
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE),
+    ] {
+        let event = session.process_key(key);
+        assert!(event.is_none());
+    }
+    assert!(!session.slash_palette.suggestions().is_empty());
+
+    // Modified Enter must not complete-and-submit: it falls through to the
+    // multiline newline path with the palette untouched.
+    let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+    assert!(event.is_none(), "Shift+Enter should insert newline, not submit");
+    assert!(session.core.input_manager.content().contains('\n'), "Shift+Enter should insert a newline");
+}
+
+#[test]
+fn slash_palette_tab_completed_input_remains_editable_and_cancellable() {
     let mut session = session_with_slash_palette_commands();
 
     for key in [
