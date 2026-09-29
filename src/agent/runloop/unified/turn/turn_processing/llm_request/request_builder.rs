@@ -1622,7 +1622,7 @@ mod tests {
                     "trigger": { "type": "input_tokens", "value": 120000 },
                     "keep": { "type": "tool_uses", "value": 5 },
                     "clear_at_least": { "type": "input_tokens", "value": 40000 },
-                    "clear_tool_inputs": false,
+                    "clear_tool_inputs": true,
                     "exclude_tools": ["memory"],
                 }, {
                     "type": "compact_20260112",

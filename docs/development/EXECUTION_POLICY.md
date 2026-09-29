@@ -165,6 +165,10 @@ are designed to keep the first-request overhead low and per-turn growth bounded.
   `trigger_tokens: 40000`, `keep_tool_uses: 2`. Research/audit turns were
   observed at ~1M input tokens/turn with the old 100k trigger — tool results
   piled up long before any clearing. Durable history is unchanged.
+  `clear_tool_inputs` defaults to `true`, so paired `apply_patch` /
+  `write_file` arguments are replaced with a JSON placeholder whenever their
+  results are stubbed; set it `false` to keep full tool-call inputs on the
+  wire.
 - **Startup token-overhead warnings.** At session start (unless `--quiet`),
   VT Code logs non-fatal `tracing::warn!` messages when the config is likely to
   inflate per-request cost: more than 8 configured MCP servers,

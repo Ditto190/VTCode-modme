@@ -848,6 +848,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
   - **User Questions**: "What can you tell me about Canonical TUI Design System in vtcode-ui?", "How does Report work?", "How does [S1] Problem work?"
 
+- **File**: `docs/compose/spec/clear-tool-inputs-default.md`
+  - **Content**: Clear Tool Inputs by Default
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Clear Tool Inputs by Default?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/audits/code-review-2026-08-07.md`
   - **Content**: Code Review + Fixes — 2026-08-07
   - **Topics**: Completed fixes, Decomposition: `core/loop_detector.rs` → `core/loop_detector/mod.rs` + `normalization.rs`, Intentionally not changed, Verification summary, Status
