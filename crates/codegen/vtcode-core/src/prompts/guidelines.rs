@@ -188,6 +188,12 @@ pub fn generate_tool_guidelines_for_profile(
         // prompt keeps only the outcome rule so wording cannot drift from
         // enforcement.
         lines.push("- Run verifiers standalone or as a pure `&&` chain so the exit status is visible; a verifier piped only into `head` or `tail` counts as standalone, while results behind other pipes, `;`, or `||` stay unverified.".to_string());
+        // Low-effort models sometimes report a change as done without
+        // exercising it: require a real check (tests, type-checker, build,
+        // or the changed command itself). A syntax-only check, or a check
+        // command that failed to start, does not count. Applies to Sonnet
+        // 5.5 at `low` effort and any route where verification is skipped.
+        lines.push("- Run a real check that exercises the change; syntax-only or failed-to-start checks do not count. Install missing deps via the project's package manager, never sudo; if no check can run, say which and why.".to_string());
         // Tool-latency tail is dominated by full builds (observed p90 ~18s):
         // verify incrementally first. Kept tool-agnostic: fast checks exist
         // in every stack (`cargo check`, `tsc --noEmit`, `pytest --collect-only`).
@@ -1090,7 +1096,10 @@ mod tests {
         // The batching, bounded-diff, and verifier-discipline guardrails are
         // intentionally part of the compact shared prompt. Raised from 500 so
         // the verifier rule can state its reason (a visible exit status).
-        assert!(approx_tokens < 520, "got ~{approx_tokens} tokens");
+        // Raised to 580 for the Sonnet 5.5 low-effort real-check rule
+        // (syntax-only/failed-to-start do not count; project package manager,
+        // never sudo; state which check was skipped and why).
+        assert!(approx_tokens < 580, "got ~{approx_tokens} tokens");
     }
 
     #[test]

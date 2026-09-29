@@ -318,12 +318,14 @@ pub(crate) fn supports_mid_conversation_system_messages(model: &str, default_mod
 
 /// Whether the model accepts Anthropic's turn-scoped `clear_at` system-message
 /// field. The current beta is available to the model families that accept
-/// mid-conversation system messages, but not Sonnet 5.
+/// mid-conversation system messages, but not Sonnet 5 (Sonnet 5.5 adds it
+/// alongside per-message effort and mid-conversation tool changes).
 pub(crate) fn supports_turn_scoped_system_messages(model: &str, default_model: &str) -> bool {
     let requested = resolve_model_name(model, default_model);
     matches_model(requested, models::anthropic::CLAUDE_FABLE_5)
         || matches_model(requested, CLAUDE_OPUS_4_8)
         || matches_model(requested, models::anthropic::CLAUDE_OPUS_5)
+        || matches_model(requested, models::anthropic::CLAUDE_SONNET_5_5)
 }
 
 pub(crate) fn adaptive_thinking_always_on(model: &str, default_model: &str) -> bool {
