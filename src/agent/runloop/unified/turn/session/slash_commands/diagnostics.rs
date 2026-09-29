@@ -1,9 +1,11 @@
+use crate::agent::runloop::ui_list;
+use crate::agent::runloop::ui_list::Tone;
 use anyhow::{Context, Result};
 use vtcode_config::loader::ConfigManager;
 use vtcode_core::config::ToolPolicy;
 use vtcode_core::config::loader::VTCodeConfig;
 use vtcode_core::utils::ansi::MessageStyle;
-use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
+use vtcode_ui::tui::app::InlineListSelection;
 
 use crate::agent::runloop::unified::diagnostics::{CheckupOptions, count_configured_hooks, run_checkup_diagnostics};
 use crate::agent::runloop::unified::ui_interaction::display_session_status;
@@ -244,48 +246,43 @@ pub(crate) async fn handle_start_terminal_setup(ctx: SlashCommandContext<'_>) ->
 
 fn show_checkup_actions_modal(ctx: &mut SlashCommandContext<'_>) {
     let mut items = vec![
-        InlineListItem {
-            title: "Run full checkup".to_string(),
-            subtitle: Some("Run all checks: config, provider key, dependencies, MCP, links, and skills".to_string()),
-            badge: Some("Recommended".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}full"))),
-            search_value: Some("checkup full all checks mcp dependencies".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Run quick checkup".to_string(),
-            subtitle: Some("Run core checks only (skips dependencies, MCP, links, and skills)".to_string()),
-            badge: Some("Fast".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}quick"))),
-            search_value: Some("checkup quick fast checks".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Back".to_string(),
-            subtitle: Some("Close without running the checkup".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction(CHECKUP_ACTION_BACK.to_string())),
-            search_value: Some("back close cancel".to_string()),
-            ..Default::default()
-        },
+        ui_list::action(
+            "Run full checkup",
+            "Run all checks: config, provider key, dependencies, MCP, links, and skills".to_string(),
+            Some("Recommended".to_string()),
+            Tone::Accent,
+            Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}full"))),
+        )
+        .with_search_value("checkup full all checks mcp dependencies".to_string()),
+        ui_list::action(
+            "Run quick checkup",
+            "Run core checks only (skips dependencies, MCP, links, and skills)".to_string(),
+            Some("Fast".to_string()),
+            Tone::Accent,
+            Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}quick"))),
+        )
+        .with_search_value("checkup quick fast checks".to_string()),
+        ui_list::action(
+            "Back",
+            "Close without running the checkup".to_string(),
+            None,
+            Tone::Neutral,
+            Some(InlineListSelection::ConfigAction(CHECKUP_ACTION_BACK.to_string())),
+        )
+        .with_search_value("back close cancel".to_string()),
     ];
 
     for remediation in compute_checkup_remediations(ctx.vt_cfg) {
-        items.push(InlineListItem {
-            title: remediation.title,
-            subtitle: Some(remediation.subtitle),
-            badge: Some("Optimization".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction(format!(
-                "{CHECKUP_ACTION_OPTIMIZE_PREFIX}{}",
-                remediation.id
-            ))),
-            search_value: Some(remediation.search_value),
-            ..Default::default()
-        });
+        items.push(
+            ui_list::action(
+                remediation.title,
+                remediation.subtitle,
+                Some("Optimization".to_string()),
+                Tone::Accent,
+                Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_OPTIMIZE_PREFIX}{}", remediation.id))),
+            )
+            .with_search_value(remediation.search_value),
+        );
     }
 
     ctx.renderer.show_list_modal(

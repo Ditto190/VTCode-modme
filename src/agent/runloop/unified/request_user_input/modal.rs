@@ -1,3 +1,5 @@
+use crate::agent::runloop::ui_list;
+use crate::agent::runloop::ui_list::Tone;
 use anyhow::{Context, Result};
 use hashbrown::HashMap;
 use serde_json::{Value, json};
@@ -157,19 +159,17 @@ pub(super) fn build_question_items_with_options(
         });
         items
     } else {
-        vec![InlineListItem {
-            title: "Enter your response...".to_string(),
-            subtitle: Some("Type your answer in the input field".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::RequestUserInputAnswer {
+        vec![ui_list::action(
+            "Enter your response...",
+            "Type your answer in the input field".to_string(),
+            None,
+            Tone::Neutral,
+            Some(InlineListSelection::RequestUserInputAnswer {
                 question_id: question.id.clone(),
                 selected: vec![],
                 other: Some(String::new()),
             }),
-            search_value: None,
-            ..Default::default()
-        }]
+        )]
     }
 }
 

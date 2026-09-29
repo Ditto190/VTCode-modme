@@ -468,22 +468,17 @@ fn advanced_schema_item(path: &str, doc: &FieldDoc) -> InlineListItem {
     }
     terms.extend(doc.options.iter().cloned());
 
-    InlineListItem {
-        title: label,
-        subtitle: Some(format!(
+    vtcode_ui::design::list::hint(label)
+        .with_subtitle(format!(
             "{path} • {}",
             if doc.description.is_empty() {
                 "Documented schema field; configure a concrete entry to edit it."
             } else {
                 doc.description.as_str()
             }
-        )),
-        badge: Some("Schema".to_string()),
-        indent: 0,
-        selection: None,
-        search_value: Some(terms.join(" ").to_ascii_lowercase()),
-        ..Default::default()
-    }
+        ))
+        .with_badge("Schema", vtcode_commons::ui_protocol::InlineTone::Neutral)
+        .with_search_value(terms.join(" ").to_ascii_lowercase())
 }
 
 fn advanced_label(path: &str) -> String {

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::agent::runloop::ui_list;
+use crate::agent::runloop::ui_list::Tone;
 use anyhow::Result;
 use tokio::sync::Notify;
 use vtcode_commons::modal_hints::{APPROVAL_NAVIGATE_DENY, APPROVAL_NAVIGATE_STOP};
@@ -29,22 +30,28 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
     ];
 
     let options = vec![
-        ui_list::choice(
+        ui_list::action(
             "+100 tool calls",
-            Some("Increase the session limit by 100".to_string()),
+            "Increase the session limit by 100",
+            None,
+            Tone::Neutral,
             Some(InlineListSelection::SessionLimitIncrease(100)),
         )
         .with_search_value("increase 100 hundred plus more".to_string()),
-        ui_list::choice(
+        ui_list::action(
             "+50 tool calls",
-            Some("Increase the session limit by 50".to_string()),
+            "Increase the session limit by 50",
+            None,
+            Tone::Neutral,
             Some(InlineListSelection::SessionLimitIncrease(50)),
         )
         .with_search_value("increase 50 fifty plus more".to_string()),
-        ui_list::choice("", None, None),
-        ui_list::choice(
+        ui_list::group_divider(),
+        ui_list::action(
             "Deny",
-            Some("Do not increase limit (stops tool execution)".to_string()),
+            "Do not increase limit (stops tool execution)",
+            None,
+            Tone::Neutral,
             Some(InlineListSelection::ToolApproval(false)),
         )
         .with_search_value("deny no exit stop cancel".to_string()),
@@ -150,19 +157,23 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
             } else {
                 format!("Continue with {increment} more tool loops")
             };
-            ui_list::choice(
+            ui_list::action(
                 format!("+{increment} tool loops"),
-                Some(subtitle),
+                subtitle,
+                None,
+                Tone::Neutral,
                 Some(InlineListSelection::SessionLimitIncrease(*increment)),
             )
             .with_search_value(tool_loop_search_value(*increment))
         })
         .collect();
-    options.push(InlineListItem::group_divider());
+    options.push(ui_list::group_divider());
     options.push(
-        ui_list::choice(
+        ui_list::action(
             "Stop",
-            Some("Stop the current turn and wait for input".to_string()),
+            "Stop the current turn and wait for input",
+            None,
+            Tone::Neutral,
             Some(InlineListSelection::ToolApproval(false)),
         )
         .with_search_value("stop no exit cancel done".to_string()),

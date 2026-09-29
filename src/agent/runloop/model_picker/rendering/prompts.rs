@@ -213,33 +213,21 @@ pub(crate) fn render_service_tier_inline(
                 None => OpenAIServiceTierChoice::ProjectDefault,
             })),
         ),
-        InlineListItem {
-            title: "Project default".to_string(),
-            subtitle: Some("Do not send service_tier; inherit the OpenAI Project setting.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::ProjectDefault)),
-            search_value: None,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Flex".to_string(),
-            subtitle: Some("Send service_tier=flex for lower-cost, lower-priority processing.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
-            search_value: None,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Priority".to_string(),
-            subtitle: Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
-            search_value: None,
-            ..Default::default()
-        },
+        vtcode_ui::design::list::choice(
+            "Project default",
+            Some("Do not send service_tier; inherit the OpenAI Project setting.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::ProjectDefault)),
+        ),
+        vtcode_ui::design::list::choice(
+            "Flex",
+            Some("Send service_tier=flex for lower-cost, lower-priority processing.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
+        ),
+        vtcode_ui::design::list::choice(
+            "Priority",
+            Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
+        ),
     ];
 
     renderer.show_list_modal_with_footer(
@@ -312,26 +300,22 @@ pub(crate) fn prompt_custom_model_entry(renderer: &mut AnsiRenderer) -> Result<(
 
 pub(crate) fn render_mimo_auth_method_inline(renderer: &mut AnsiRenderer) -> Result<()> {
     let items = vec![
-        InlineListItem {
-            title: "Pay-as-you-go".to_string(),
-            subtitle: Some("Standard API access. Uses sk- key with api-key header.".to_string()),
-            badge: Some("Default".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction("mimo-auth:pay-as-you-go".to_string())),
-            search_value: Some("mimo payg pay-as-you-go sk api key".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Token Plan".to_string(),
-            subtitle: Some(
-                "Subscription-based access. Uses tp- key with Bearer token. Includes more models.".to_string(),
-            ),
-            badge: Some("Subscription".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::ConfigAction("mimo-auth:token-plan".to_string())),
-            search_value: Some("mimo token plan subscription tp bearer".to_string()),
-            ..Default::default()
-        },
+        vtcode_ui::design::list::action(
+            "Pay-as-you-go",
+            "Standard API access. Uses sk- key with api-key header.",
+            Some("Default".to_string()),
+            vtcode_commons::ui_protocol::InlineTone::Accent,
+            Some(InlineListSelection::ConfigAction("mimo-auth:pay-as-you-go".to_string())),
+        )
+        .with_search_value("mimo payg pay-as-you-go sk api key"),
+        vtcode_ui::design::list::action(
+            "Token Plan",
+            "Subscription-based access. Uses tp- key with Bearer token. Includes more models.",
+            Some("Subscription".to_string()),
+            vtcode_commons::ui_protocol::InlineTone::Accent,
+            Some(InlineListSelection::ConfigAction("mimo-auth:token-plan".to_string())),
+        )
+        .with_search_value("mimo token plan subscription tp bearer"),
     ];
 
     renderer.show_list_modal(
