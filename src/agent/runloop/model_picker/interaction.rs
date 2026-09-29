@@ -71,7 +71,13 @@ pub(super) fn select_model_with_ratatui_list(
                 entry: SelectionEntry::new(
                     option.display.to_string(),
                     Some(format!("{description}\n{}", option.description)),
-                ),
+                )
+                .with_keywords([
+                    provider.label().to_string(),
+                    provider.as_ref().to_string(),
+                    option.id.clone(),
+                    option.display.clone(),
+                ]),
                 outcome: ModelSelectionChoiceOutcome::Predefined(selection_from_option_with_mode(option, storage_mode)),
             });
         }
@@ -98,7 +104,13 @@ pub(super) fn select_model_with_ratatui_list(
                             entry: SelectionEntry::new(
                                 detail.model_display.clone(),
                                 Some(format!("{description}\nLocally available {} model", provider.label(),)),
-                            ),
+                            )
+                            .with_keywords([
+                                provider.label().to_string(),
+                                detail.model_id.clone(),
+                                detail.model_display.clone(),
+                                "local".to_string(),
+                            ]),
                             outcome: ModelSelectionChoiceOutcome::Predefined(detail.clone()),
                         });
                     }

@@ -109,7 +109,10 @@ fn model_options(provider: Provider, default_model: &'static str) -> Vec<String>
 }
 
 fn model_entries(options: &[String]) -> Vec<SelectionEntry> {
-    options.iter().map(|model| SelectionEntry::new(model.clone(), None)).collect()
+    options
+        .iter()
+        .map(|model| SelectionEntry::new(model.clone(), None).with_keywords([model.clone()]))
+        .collect()
 }
 
 #[derive(Clone)]
@@ -171,7 +174,10 @@ fn select_model_with_ratatui(options: &[String], default_model: &'static str) ->
 fn select_lightweight_model_with_ratatui(options: &[LightweightModelOption]) -> Result<String> {
     let entries = options
         .iter()
-        .map(|option| SelectionEntry::new(option.label.clone(), Some(option.subtitle.clone())))
+        .map(|option| {
+            SelectionEntry::new(option.label.clone(), Some(option.subtitle.clone()))
+                .with_keywords([option.value.clone(), option.label.clone()])
+        })
         .collect::<Vec<_>>();
     let instructions = "Automatic is recommended. Use ↑/↓ or j/k to choose, Enter to confirm, Esc to keep Automatic.";
     let selected_index = run_selection("Lightweight model", instructions, &entries, 0)?;

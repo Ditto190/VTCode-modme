@@ -1441,3 +1441,51 @@ fn list_modal_page_navigation_respects_viewport() {
     let selection = modal.list.as_ref().and_then(|state| state.current_selection());
     assert_eq!(selection, Some(InlineListSelection::Model(0)));
 }
+
+#[test]
+fn apply_search_matches_title_and_description_without_search_value() {
+    let mut list = ModalListState::new(
+        vec![
+            InlineListItem {
+                title: "Tool Display Mode".to_string(),
+                subtitle: Some("expanded compact".to_string()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::Model(0)),
+                search_value: None,
+            },
+            InlineListItem {
+                title: "Other".to_string(),
+                subtitle: Some("unrelated".to_string()),
+                badge: None,
+                indent: 0,
+                selection: Some(InlineListSelection::Model(1)),
+                search_value: None,
+            },
+        ],
+        None,
+    );
+    list.apply_search("display", false);
+    assert_eq!(list.visible_indices, vec![0]);
+    list.apply_search("compact", false);
+    assert_eq!(list.visible_indices, vec![0]);
+}
+
+#[test]
+fn apply_search_prefers_explicit_search_value_over_title() {
+    let mut list = ModalListState::new(
+        vec![InlineListItem {
+            title: "Hidden title terms".to_string(),
+            subtitle: None,
+            badge: None,
+            indent: 0,
+            selection: Some(InlineListSelection::Model(0)),
+            search_value: Some("only-this".to_string()),
+        }],
+        None,
+    );
+    list.apply_search("hidden", false);
+    assert!(list.visible_indices.is_empty(), "search_value is the sole corpus when set");
+    list.apply_search("only-this", false);
+    assert_eq!(list.visible_indices, vec![0]);
+}
