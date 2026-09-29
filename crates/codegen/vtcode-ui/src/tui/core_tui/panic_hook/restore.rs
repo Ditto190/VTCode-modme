@@ -114,10 +114,11 @@ fn emit_restore_to_all_targets(clear_alternate: bool) -> Option<io::Error> {
 
 /// Best-effort raw-mode release for post-TUI stdout postambles.
 ///
-/// Unlike [`restore_tui()`] (one-shot via `RESTORE_DONE`), this always
-/// attempts `disable_raw_mode()` so a late `println!` never staircases when
-/// output processing (`ONLCR`) is still off. Safe to call when raw mode was
-/// never enabled: crossterm's disable is a no-op in that case.
+/// Unlike [`restore_tui()`] (escape restore is one-shot via `RESTORE_DONE`),
+/// this always attempts `disable_raw_mode()` so a late `println!` never
+/// staircases when output processing (`ONLCR`) is still off. Safe to call when
+/// raw mode was never enabled: crossterm's disable is a no-op in that case.
+/// Used after [`finish_deferred_raw_mode_restore`] as a force-cooked backstop.
 pub fn ensure_raw_mode_disabled() {
     let _ = disable_raw_mode();
 }
@@ -137,8 +138,9 @@ pub fn drain_pending_terminal_input() {
 
 /// Restore terminal to a usable state after a panic or error.
 ///
-/// This is the single canonical function for terminal restoration.
-/// It is idempotent: subsequent calls are no-ops.
+/// Escape-sequence restore is one-shot via `RESTORE_DONE`. The cooked-mode
+/// transition is claimed separately, so this always finishes raw-mode restore
+/// even when a prior [`restore_tui_keep_raw_mode`] already tore the TUI down.
 ///
 /// - Drains pending events before and after restoration
 /// - Clears the alternate viewport before leaving the alternate screen
@@ -150,6 +152,10 @@ pub fn drain_pending_terminal_input() {
 /// - Restores raw mode to its state before the TUI started
 pub fn restore_tui() -> io::Result<()> {
     let error = restore_terminal_state(false);
+    // Always force the cooked-mode transition. A prior `restore_tui_keep_raw_mode`
+    // may have claimed the escape-sequence restore and left raw mode on; Drop
+    // backstops, panic hooks, and emergency exits must never leave the tty raw.
+    finish_raw_mode_restore();
     drain_pending_terminal_input();
     error
 }
@@ -162,8 +168,9 @@ pub fn restore_tui() -> io::Result<()> {
 /// (the key-release report for the exiting Ctrl+C) cannot be echoed onto the
 /// screen; the exit postamble drains and then transitions to cooked mode as its
 /// final step, in [`finish_deferred_raw_mode_restore`]. Every other restore path
-/// goes through [`restore_tui`], which forces the transition, so a panic or
-/// emergency exit can never leave the tty in raw mode.
+/// goes through [`restore_tui`], which forces the cooked transition even when
+/// the escape-sequence restore was already claimed, so a panic or emergency
+/// exit can never leave the tty in raw mode.
 pub fn restore_tui_keep_raw_mode() -> io::Result<()> {
     restore_terminal_state(true)
 }
@@ -206,13 +213,25 @@ fn restore_raw_mode_state() -> Option<io::Error> {
 /// state and drains once more so nothing spills into the shell.
 pub fn finish_deferred_raw_mode_restore() {
     drain_pending_terminal_input();
-    if let Some(error) = restore_raw_mode_state() {
-        tracing::debug!(%error, "failed to finish the deferred raw-mode restore");
-    }
-    state::mark_raw_mode_was_enabled(false);
+    finish_raw_mode_restore();
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
     drain_pending_terminal_input();
+}
+
+/// Restore raw mode to its pre-TUI state exactly once.
+///
+/// Claimed separately from the escape-sequence restore so force paths
+/// ([`restore_tui`]) can still finish the cooked transition after
+/// [`restore_tui_keep_raw_mode`] already tore the TUI down.
+fn finish_raw_mode_restore() {
+    if !state::try_claim_raw_mode_restore() {
+        return;
+    }
+    if let Some(error) = restore_raw_mode_state() {
+        tracing::debug!(%error, "failed to restore raw mode");
+    }
+    state::mark_raw_mode_was_enabled(false);
 }
 
 /// Shared restore body. With `keep_raw_mode` the tty is left in raw mode and
@@ -261,15 +280,12 @@ fn restore_terminal_state(keep_raw_mode: bool) -> io::Result<()> {
     // A graceful exit may ask to keep raw mode past this point: the tty's echo
     // stays off while the runloop finishes teardown, so late input (the kitty
     // key-release report for the exiting Ctrl+C) cannot be echoed onto the
-    // screen. The caller finishes the transition as its final act.
+    // screen. The cooked transition is owned by `finish_raw_mode_restore` and
+    // claimed separately, so a later force path can still finish it.
     if keep_raw_mode {
         let _ = io::stdout().flush();
         let _ = io::stderr().flush();
         return Ok(());
-    }
-
-    if let Some(error) = restore_raw_mode_state() {
-        first_error.get_or_insert(error);
     }
 
     // Best-effort stty sane equivalent for /dev/tty when raw-mode toggles
@@ -277,11 +293,12 @@ fn restore_terminal_state(keep_raw_mode: bool) -> io::Result<()> {
     if let Some(mut tty) = open_tty_writer() {
         let _ = tty.flush();
     }
-    // Ensure both streams are flushed after raw mode restore so the shell
-    // prompt and any exit postamble are ordered after the restore sequences.
+    // Ensure both streams are flushed after restore sequences so the shell
+    // prompt and any exit postamble are ordered after them. The raw-mode
+    // transition itself runs in `finish_raw_mode_restore` (called by
+    // `restore_tui` / `finish_deferred_raw_mode_restore`).
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
-    state::mark_raw_mode_was_enabled(false);
 
     match first_error {
         Some(error) => Err(error),
@@ -297,10 +314,55 @@ mod tests {
     #[test]
     fn test_restore_terminal_no_panic_when_not_initialized() {
         state::RESTORE_DONE.store(false, Ordering::SeqCst);
+        state::RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
         state::TUI_INITIALIZED.store(false, Ordering::SeqCst);
 
         let result = restore_tui();
         assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn keep_raw_mode_leaves_raw_restore_pending() {
+        state::RESTORE_DONE.store(false, Ordering::SeqCst);
+        state::RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
+        state::mark_terminal_modified();
+
+        let _ = restore_tui_keep_raw_mode();
+        assert!(state::RESTORE_DONE.load(Ordering::SeqCst), "escape restore must be claimed");
+        assert!(
+            !state::RAW_MODE_RESTORE_DONE.load(Ordering::SeqCst),
+            "keep_raw_mode must leave the cooked transition pending"
+        );
+
+        let _ = restore_tui();
+        assert!(
+            state::RAW_MODE_RESTORE_DONE.load(Ordering::SeqCst),
+            "force restore_tui after keep_raw_mode must finish the cooked transition"
+        );
+        state::mark_terminal_restored();
+    }
+
+    #[test]
+    fn raw_mode_restore_is_claimed_exactly_once() {
+        state::RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
+        assert!(state::try_claim_raw_mode_restore());
+        assert!(!state::try_claim_raw_mode_restore(), "second raw restore claim must fail");
+        state::RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn finish_deferred_then_restore_tui_is_idempotent() {
+        state::RESTORE_DONE.store(false, Ordering::SeqCst);
+        state::RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
+        state::mark_terminal_modified();
+
+        let _ = restore_tui_keep_raw_mode();
+        finish_deferred_raw_mode_restore();
+        assert!(state::RAW_MODE_RESTORE_DONE.load(Ordering::SeqCst));
+
+        let _ = restore_tui();
+        assert!(state::RAW_MODE_RESTORE_DONE.load(Ordering::SeqCst));
+        state::mark_terminal_restored();
     }
 
     #[test]

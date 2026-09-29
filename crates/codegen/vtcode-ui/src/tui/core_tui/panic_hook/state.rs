@@ -23,6 +23,13 @@ pub(crate) static COLOR_SCHEME_REPORTS_ENABLED: AtomicBool = AtomicBool::new(fal
 /// screen already restores it.
 pub(crate) static ALTERNATE_SCREEN_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) static RESTORE_DONE: AtomicBool = AtomicBool::new(false);
+/// One-shot claim for the cooked-mode (raw-mode) transition.
+///
+/// Separate from [`RESTORE_DONE`]: the escape-sequence restore may run via
+/// `restore_tui_keep_raw_mode` while deliberately leaving the tty raw during
+/// teardown. Force paths (`restore_tui`, Drop backstops, emergency exit) must
+/// still be able to finish the cooked transition exactly once.
+pub(crate) static RAW_MODE_RESTORE_DONE: AtomicBool = AtomicBool::new(false);
 /// Original iTerm2 profile name to revert to on teardown.
 ///
 /// Set when the TUI applies its one-shot `OSC 1337;SetProfile=VT Code` switch
@@ -104,6 +111,7 @@ pub(crate) fn app_metadata() -> AppMetadata {
 pub(crate) fn mark_tui_initialized() {
     TUI_INITIALIZED.store(true, Ordering::SeqCst);
     RESTORE_DONE.store(false, Ordering::SeqCst);
+    RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
     RAW_MODE_WAS_ENABLED.store(false, Ordering::SeqCst);
     // Fresh session: alternate-screen state is set by the runner when it enters one.
     ALTERNATE_SCREEN_ACTIVE.store(false, Ordering::SeqCst);
@@ -193,6 +201,12 @@ pub(crate) fn try_claim_restore() -> bool {
     !RESTORE_DONE.swap(true, Ordering::SeqCst)
 }
 
+/// Claim the one-shot cooked-mode transition. `true` means this caller owns
+/// restoring raw mode to its pre-TUI state.
+pub(crate) fn try_claim_raw_mode_restore() -> bool {
+    !RAW_MODE_RESTORE_DONE.swap(true, Ordering::SeqCst)
+}
+
 /// Whether terminal restoration has already been claimed (by this task, the
 /// host, or a panic hook). Once true, the TUI must not draw any more frames:
 /// the main screen buffer is live and a straggler frame would leak transcript
@@ -250,6 +264,20 @@ mod tests {
         assert!(is_restore_claimed());
         assert!(!try_claim_restore(), "second claim must fail");
         RESTORE_DONE.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn raw_mode_restore_claim_is_independent_of_escape_restore() {
+        RESTORE_DONE.store(false, Ordering::SeqCst);
+        RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
+
+        assert!(try_claim_restore());
+        assert!(!RAW_MODE_RESTORE_DONE.load(Ordering::SeqCst), "escape claim must not finish cooked restore");
+        assert!(try_claim_raw_mode_restore());
+        assert!(!try_claim_raw_mode_restore());
+
+        RESTORE_DONE.store(false, Ordering::SeqCst);
+        RAW_MODE_RESTORE_DONE.store(false, Ordering::SeqCst);
     }
 
     #[test]
