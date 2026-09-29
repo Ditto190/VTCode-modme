@@ -629,6 +629,7 @@ async fn prompt_text(
                 other: Some(String::new()),
             }),
             search_value: Some("submit input".to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,
@@ -690,6 +691,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}browse"))),
             search_value: Some("browse catalog skills".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "List skills".to_string(),
@@ -698,6 +700,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}list"))),
             search_value: Some("list skills".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Search skills".to_string(),
@@ -706,6 +709,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}search"))),
             search_value: Some("search query".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Create skill".to_string(),
@@ -714,6 +718,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}create"))),
             search_value: Some("create scaffold".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Enable skill".to_string(),
@@ -722,6 +727,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}load"))),
             search_value: Some("enable load".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Disable skill".to_string(),
@@ -730,6 +736,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}unload"))),
             search_value: Some("disable unload".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "View skill details".to_string(),
@@ -738,6 +745,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}info"))),
             search_value: Some("details info metadata".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Run skill".to_string(),
@@ -746,6 +754,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}use"))),
             search_value: Some("run execute use".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Validate skill".to_string(),
@@ -754,6 +763,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}validate"))),
             search_value: Some("validate lint".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Package skill".to_string(),
@@ -762,6 +772,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}package"))),
             search_value: Some("package bundle".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Regenerate index".to_string(),
@@ -770,6 +781,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}regen"))),
             search_value: Some("index regenerate".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Show help".to_string(),
@@ -778,6 +790,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SKILL_ACTION_PREFIX}help"))),
             search_value: Some("help commands".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Back".to_string(),
@@ -786,6 +799,7 @@ fn show_skills_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(SKILL_ACTION_BACK.to_string())),
             search_value: Some("back close".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -808,6 +822,7 @@ fn show_skills_list_modal(ctx: &mut SlashCommandContext<'_>, entries: &[Interact
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_OPEN_PREFIX, entry.name))),
             search_value: Some(format!("{} {}", entry.name, entry.description)),
+            ..Default::default()
         })
         .collect();
 
@@ -818,6 +833,7 @@ fn show_skills_list_modal(ctx: &mut SlashCommandContext<'_>, entries: &[Interact
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(SKILL_PICK_BACK_ACTION.to_string())),
         search_value: Some("back".to_string()),
+        ..Default::default()
     });
 
     let selected = entries
@@ -852,6 +868,7 @@ fn show_skill_picker_modal(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_PICK_PREFIX, entry.name))),
             search_value: Some(format!("{} {}", entry.name, entry.description)),
+            ..Default::default()
         })
         .collect();
 
@@ -862,6 +879,7 @@ fn show_skill_picker_modal(
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(SKILL_PICK_BACK_ACTION.to_string())),
         search_value: Some("back cancel".to_string()),
+        ..Default::default()
     });
 
     let selected = entries
@@ -891,6 +909,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_DISABLE_PREFIX, entry.name))),
             search_value: Some("disable unload session".to_string()),
+            ..Default::default()
         });
     } else if entry.is_loadable() {
         items.push(InlineListItem {
@@ -900,6 +919,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_ENABLE_PREFIX, entry.name))),
             search_value: Some("enable load session".to_string()),
+            ..Default::default()
         });
     }
 
@@ -910,6 +930,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_INFO_PREFIX, entry.name))),
         search_value: Some("details info metadata".to_string()),
+        ..Default::default()
     });
 
     items.push(InlineListItem {
@@ -919,6 +940,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_USE_PREFIX, entry.name))),
         search_value: Some("run execute use".to_string()),
+        ..Default::default()
     });
 
     if entry.supports_validation() {
@@ -929,6 +951,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_VALIDATE_PREFIX, entry.name))),
             search_value: Some("validate".to_string()),
+            ..Default::default()
         });
     }
 
@@ -940,6 +963,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", SKILL_PACKAGE_PREFIX, entry.name))),
             search_value: Some("package bundle".to_string()),
+            ..Default::default()
         });
     }
 
@@ -950,6 +974,7 @@ fn show_skill_actions_modal(ctx: &mut SlashCommandContext<'_>, entry: &Interacti
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(SKILL_BACK_ACTION.to_string())),
         search_value: Some("back return".to_string()),
+        ..Default::default()
     });
 
     let default_selection = items.first().and_then(|item| item.selection.clone());

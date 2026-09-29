@@ -308,6 +308,7 @@ pub(crate) fn show_basic_list_overlay(session: &mut Session) {
                     indent: 0,
                     selection: Some(InlineListSelection::SlashCommand("a".to_string())),
                     search_value: None,
+                    ..Default::default()
                 },
                 InlineListItem {
                     title: "Option B".to_string(),
@@ -316,11 +317,13 @@ pub(crate) fn show_basic_list_overlay(session: &mut Session) {
                     indent: 0,
                     selection: Some(InlineListSelection::SlashCommand("b".to_string())),
                     search_value: None,
+                    ..Default::default()
                 },
             ],
             selected: Some(InlineListSelection::SlashCommand("a".to_string())),
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })),
     });
 }
@@ -529,6 +532,7 @@ pub(crate) fn request_user_input_step(question_id: &str, label: &str) -> WizardS
                 other: None,
             }),
             search_value: Some(label.to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,
@@ -554,6 +558,7 @@ pub(crate) fn request_user_input_custom_step(question_id: &str, label: &str, def
                 other: Some(String::new()),
             }),
             search_value: Some(label.to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,
@@ -587,6 +592,7 @@ pub(crate) fn show_plan_confirmation_overlay(session: &mut Session, plan: app_ty
                     indent: 0,
                     selection: Some(InlineListSelection::PlanApprovalAutoAccept),
                     search_value: None,
+                    ..Default::default()
                 },
                 InlineListItem {
                     title: "Yes, manually approve edits".to_string(),
@@ -595,6 +601,7 @@ pub(crate) fn show_plan_confirmation_overlay(session: &mut Session, plan: app_ty
                     indent: 0,
                     selection: Some(InlineListSelection::PlanApprovalExecute),
                     search_value: None,
+                    ..Default::default()
                 },
                 InlineListItem {
                     title: "Type feedback to revise the plan".to_string(),
@@ -603,6 +610,7 @@ pub(crate) fn show_plan_confirmation_overlay(session: &mut Session, plan: app_ty
                     indent: 0,
                     selection: Some(InlineListSelection::PlanApprovalEditPlan),
                     search_value: None,
+                    ..Default::default()
                 },
             ],
             selected: Some(InlineListSelection::PlanApprovalAutoAccept),
@@ -611,6 +619,7 @@ pub(crate) fn show_plan_confirmation_overlay(session: &mut Session, plan: app_ty
                 key: OverlayHotkeyKey::CtrlChar('g'),
                 action: OverlayHotkeyAction::LaunchEditor,
             }],
+            status: None,
         })),
     });
 }
@@ -677,6 +686,7 @@ pub(crate) fn wizard_auth_transient(url: &str) -> app_types::TransientRequest {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("submit".to_string())),
                 search_value: None,
+                ..Default::default()
             }],
             completed: false,
             answer: None,
@@ -703,10 +713,12 @@ pub(crate) fn list_auth_overlay(url: &str) -> OverlayRequest {
             indent: 0,
             selection: Some(InlineListSelection::SlashCommand("continue".to_string())),
             search_value: None,
+            ..Default::default()
         }],
         selected: Some(InlineListSelection::SlashCommand("continue".to_string())),
         search: None,
         hotkeys: Vec::new(),
+        status: None,
     })
 }
 

@@ -16,12 +16,13 @@ pub const APPROVAL_NAVIGATE_STOP: &str = "Use ↑↓ or Tab to navigate • Ente
 pub const MODEL_PICKER_NAVIGATE_FILTER: &str =
     "Use ↑↓ or Tab to navigate • Enter to select • Type to filter • Esc to cancel";
 /// Model picker follow-ups (reasoning, service tier): short single-choice list.
-/// Esc cancels the whole picker (there is no per-step back navigation).
+/// Esc cancels the whole picker; `← Back to model list` returns to step 1.
 ///
 /// Only pass this to lists without `InlineListSelection::ConfigAction` items:
 /// `ConfigAction` lists are `FixedComfortable` and render the shared
 /// `CONFIG_LIST_NAVIGATION_HINT`, dropping any explicit footer.
-pub const MODEL_PICKER_FOLLOW_UP_HINT: &str = "Use ↑↓ or Tab to navigate • Enter to select • Esc to cancel";
+pub const MODEL_PICKER_FOLLOW_UP_HINT: &str =
+    "Use ↑↓ or Tab to navigate • Enter to select • ← Back to model list • Esc cancels the picker";
 
 /// Trailing sentence before approval options, e.g. `choose_handling_line("this tool")`.
 pub fn choose_handling_line(object: &str) -> String {
@@ -59,7 +60,8 @@ mod tests {
             assert!(hint.starts_with("Use ↑↓ or Tab to navigate • Enter to "));
         }
         assert!(MODEL_PICKER_NAVIGATE_FILTER.contains("Type to filter"));
-        assert!(MODEL_PICKER_FOLLOW_UP_HINT.ends_with("Esc to cancel"));
+        assert!(MODEL_PICKER_FOLLOW_UP_HINT.contains("Back to model list"));
+        assert!(MODEL_PICKER_FOLLOW_UP_HINT.contains("Esc"));
     }
 
     #[test]

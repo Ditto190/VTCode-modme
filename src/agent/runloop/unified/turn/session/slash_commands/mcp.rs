@@ -162,6 +162,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}status"))),
             search_value: Some("status overview health".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "List providers".to_string(),
@@ -170,6 +171,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}providers"))),
             search_value: Some("providers list".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "List tools".to_string(),
@@ -178,6 +180,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}tools"))),
             search_value: Some("tools list".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Refresh tools".to_string(),
@@ -186,6 +189,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}refresh"))),
             search_value: Some("refresh reload".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Show config".to_string(),
@@ -194,6 +198,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}config"))),
             search_value: Some("config show".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Edit config guidance".to_string(),
@@ -202,6 +207,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}edit"))),
             search_value: Some("edit config".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Repair runtime".to_string(),
@@ -210,6 +216,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}repair"))),
             search_value: Some("repair fix runtime".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Diagnose".to_string(),
@@ -218,6 +225,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{MCP_ACTION_PREFIX}diagnose"))),
             search_value: Some("diagnose diagnostics".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Back".to_string(),
@@ -226,6 +234,7 @@ fn show_mcp_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(MCP_ACTION_BACK.to_string())),
             search_value: Some("back close".to_string()),
+            ..Default::default()
         },
     ];
 

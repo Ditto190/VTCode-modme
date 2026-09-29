@@ -63,6 +63,7 @@ pub(crate) async fn present_start_planning_confirmation(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(START_PLANNING_APPROVE_ACTION.to_string())),
                 search_value: None,
+                ..Default::default()
             },
             InlineListItem {
                 title: "Continue without Planning workflow".to_string(),
@@ -71,10 +72,12 @@ pub(crate) async fn present_start_planning_confirmation(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(START_PLANNING_STAY_ACTION.to_string())),
                 search_value: None,
+                ..Default::default()
             },
         ],
         selected: Some(InlineListSelection::ConfigAction(START_PLANNING_APPROVE_ACTION.to_string())),
         search: None,
+        status: None,
         hotkeys: Vec::new(),
     });
 

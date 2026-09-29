@@ -684,6 +684,7 @@ pub(super) async fn prompt_startup_planning_workflow(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(STARTUP_PLANNING_WORKFLOW_ENTER_ACTION.to_string())),
                 search_value: None,
+                ..Default::default()
             },
             InlineListItem {
                 title: "Start normally".to_string(),
@@ -692,10 +693,12 @@ pub(super) async fn prompt_startup_planning_workflow(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(STARTUP_PLANNING_WORKFLOW_STAY_ACTION.to_string())),
                 search_value: None,
+                ..Default::default()
             },
         ],
         selected: Some(InlineListSelection::ConfigAction(STARTUP_PLANNING_WORKFLOW_ENTER_ACTION.to_string())),
         search: None,
+        status: None,
         hotkeys: Vec::new(),
     });
 

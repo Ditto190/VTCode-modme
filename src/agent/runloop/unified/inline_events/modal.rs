@@ -432,6 +432,7 @@ impl<'a> InlineModalProcessor<'a> {
                             other: Some(String::new()),
                         }),
                         search_value: Some("edit value custom response".to_string()),
+                        ..Default::default()
                     }],
                     completed: false,
                     answer: None,

@@ -328,7 +328,8 @@ fn static_model_subtitle_formats_current_capabilities() {
 
     let subtitle = static_model_subtitle(option, "openai", "gpt-5.6-sol");
 
-    assert_eq!(subtitle, Some("Current • 1M context • Reasoning • Tools • image".to_string()));
+    // `Current` is a badge (tone `Current`), not subtitle text.
+    assert_eq!(subtitle, Some("1M context • Reasoning • Tools • image".to_string()));
 }
 
 #[test]
@@ -336,7 +337,7 @@ fn dynamic_model_subtitle_stays_conservative_for_unknown_local_models() {
     let subtitle =
         dynamic_model_subtitle(Provider::Ollama, "custom-local-model", false, "ollama", "custom-local-model");
 
-    assert_eq!(subtitle, Some("Current • Local".to_string()));
+    assert_eq!(subtitle, Some("Local".to_string()));
 }
 
 #[test]

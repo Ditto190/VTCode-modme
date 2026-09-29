@@ -302,6 +302,7 @@ async fn show_agent_catalog(mut ctx: SlashCommandContext<'_>) -> Result<SlashCom
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{AGENT_INSPECT_PREFIX}{}", spec.name))),
             search_value: Some(format!("{} {} {}", spec.name, spec.description, spec.source.label())),
+            ..Default::default()
         });
     }
     for spec in &shadowed {
@@ -312,6 +313,7 @@ async fn show_agent_catalog(mut ctx: SlashCommandContext<'_>) -> Result<SlashCom
             indent: 0,
             selection: None,
             search_value: Some(format!("{} shadowed {} {}", spec.name, spec.description, spec.source.label())),
+            ..Default::default()
         });
     }
 
@@ -476,6 +478,7 @@ async fn select_custom_agent_name(ctx: &mut SlashCommandContext<'_>, title: &str
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{AGENT_INSPECT_PREFIX}{}", spec.name))),
             search_value: Some(format!("{} {} {}", spec.name, spec.description, spec.source.label())),
+            ..Default::default()
         })
         .collect::<Vec<_>>();
     let selected = items.first().and_then(|item| item.selection.clone());
@@ -514,6 +517,7 @@ async fn confirm_delete_agent(ctx: &mut SlashCommandContext<'_>, name: &str) -> 
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("agents:confirm-delete".to_string())),
                 search_value: Some("confirm delete".to_string()),
+                ..Default::default()
             },
             InlineListItem {
                 title: "Cancel".to_string(),
@@ -522,6 +526,7 @@ async fn confirm_delete_agent(ctx: &mut SlashCommandContext<'_>, name: &str) -> 
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("agents:cancel-delete".to_string())),
                 search_value: Some("cancel".to_string()),
+                ..Default::default()
             },
         ],
         Some(InlineListSelection::ConfigAction("agents:cancel-delete".to_string())),
@@ -619,6 +624,7 @@ fn action_item(title: &str, subtitle: &str, badge: Option<&str>, search_value: &
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{AGENT_ACTION_PREFIX}{action}"))),
         search_value: Some(search_value.to_string()),
+        ..Default::default()
     }
 }
 

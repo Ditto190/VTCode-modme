@@ -186,6 +186,7 @@ fn show_local_providers_modal(ctx: &mut SlashCommandContext<'_>, statuses: &[Loc
                     status.endpoint,
                     if status.running { "running" } else { "stopped" }
                 )),
+                ..Default::default()
             }
         })
         .collect();
@@ -197,6 +198,7 @@ fn show_local_providers_modal(ctx: &mut SlashCommandContext<'_>, statuses: &[Loc
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(LOCAL_ACTION_BACK.to_string())),
         search_value: Some("back close".to_string()),
+        ..Default::default()
     };
     let mut all_items = items;
     all_items.push(back_item);
@@ -239,6 +241,7 @@ fn show_local_actions_modal(ctx: &mut SlashCommandContext<'_>, provider: LocalPr
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(action_key("status"))),
             search_value: Some("status health check models".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Start server".to_string(),
@@ -247,6 +250,7 @@ fn show_local_actions_modal(ctx: &mut SlashCommandContext<'_>, provider: LocalPr
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(action_key("start"))),
             search_value: Some("start launch run".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Stop server".to_string(),
@@ -255,6 +259,7 @@ fn show_local_actions_modal(ctx: &mut SlashCommandContext<'_>, provider: LocalPr
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(action_key("stop"))),
             search_value: Some("stop shutdown kill".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Configure".to_string(),
@@ -263,6 +268,7 @@ fn show_local_actions_modal(ctx: &mut SlashCommandContext<'_>, provider: LocalPr
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(action_key("configure"))),
             search_value: Some("configure settings env variables".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Troubleshoot".to_string(),
@@ -271,6 +277,7 @@ fn show_local_actions_modal(ctx: &mut SlashCommandContext<'_>, provider: LocalPr
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(action_key("troubleshoot"))),
             search_value: Some("troubleshoot diagnose fix debug".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Back".to_string(),
@@ -279,6 +286,7 @@ fn show_local_actions_modal(ctx: &mut SlashCommandContext<'_>, provider: LocalPr
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(LOCAL_ACTION_BACK.to_string())),
             search_value: Some("back return".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -299,6 +307,7 @@ fn show_local_detail_modal(ctx: &mut SlashCommandContext<'_>, title: &str, lines
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(LOCAL_DETAIL_BACK.to_string())),
         search_value: Some("back return".to_string()),
+        ..Default::default()
     }];
 
     ctx.renderer.show_list_modal(

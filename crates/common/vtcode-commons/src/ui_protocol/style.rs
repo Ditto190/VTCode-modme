@@ -126,6 +126,62 @@ pub struct InlineTheme {
 }
 
 // ---------------------------------------------------------------------------
+// List / modal presentation tones
+// ---------------------------------------------------------------------------
+
+/// Semantic tone for list badges, values, and modal status strips.
+///
+/// Renderers map each tone onto theme styles; callers pick the tone, never a
+/// raw color, so every surface stays theme-consistent and WCAG-checked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InlineTone {
+    #[default]
+    Neutral,
+    Accent,
+    Success,
+    Warning,
+    Danger,
+    /// Live/current selection marker (the active model, the current value).
+    Current,
+}
+
+/// A short-lived status message shown inside a list modal (footer strip).
+///
+/// One status is kept at a time; a new action overwrites the previous status.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InlineStatus {
+    pub tone: InlineTone,
+    pub message: String,
+}
+
+impl InlineStatus {
+    #[must_use]
+    pub fn new(tone: InlineTone, message: impl Into<String>) -> Self {
+        Self { tone, message: message.into() }
+    }
+
+    #[must_use]
+    pub fn success(message: impl Into<String>) -> Self {
+        Self::new(InlineTone::Success, message)
+    }
+
+    #[must_use]
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self::new(InlineTone::Warning, message)
+    }
+
+    #[must_use]
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::new(InlineTone::Danger, message)
+    }
+
+    #[must_use]
+    pub fn info(message: impl Into<String>) -> Self {
+        Self::new(InlineTone::Accent, message)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Header context types
 // ---------------------------------------------------------------------------
 

@@ -720,6 +720,7 @@ async fn settings_editor_selection_submits_editor_config_command() {
             last_selection: None,
             selection_by_view: BTreeMap::new(),
             pending_edit_path: None,
+            status: None,
         }),
         esc_armed: false,
     });
@@ -793,6 +794,7 @@ async fn settings_string_selection_opens_value_editor() {
             last_selection: None,
             selection_by_view: BTreeMap::new(),
             pending_edit_path: None,
+            status: None,
         }),
         esc_armed: false,
     });

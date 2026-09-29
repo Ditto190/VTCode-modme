@@ -853,6 +853,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: MEDIUM SEVERITY, LOW SEVERITY, STYLE / QUALITY (bulk fixes), PRIORITY ORDER
   - **User Questions**: "What can you tell me about Code Review Action Plan?", "How does MEDIUM SEVERITY work?", "How does LOW SEVERITY work?"
 
+- **File**: `docs/compose/spec/config-models-modal-ux.md`
+  - **Content**: Config & Models Modal UX
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Config & Models Modal UX?", "How does Report work?", "How does [S1] Problem work?"
+
 - **File**: `docs/context/context_engineering.md`
   - **Content**: Context Engineering in VT Code
   - **Topics**: Overview, Context Engineering vs Prompt Engineering, VT Code's Three Context Primitives, Accuracy Optimization Loop, Core Principles

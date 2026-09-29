@@ -1,9 +1,9 @@
 use crate::tui::config::constants::ui;
 use crate::tui::ui::search::{FuzzyQuery, exact_terms_match, normalize_query};
 use crate::tui::ui::tui::types::{
-    InlineEvent, InlineListItem, InlineListSearchConfig, InlineListSelection, OverlayEvent, OverlayHotkey,
-    OverlayHotkeyAction, OverlayHotkeyKey, OverlaySelectionChange, OverlaySubmission, SecurePromptConfig,
-    WizardModalMode, WizardStep,
+    InlineEvent, InlineItemKind, InlineListItem, InlineListSearchConfig, InlineListSelection, InlineStatus, InlineTone,
+    OverlayEvent, OverlayHotkey, OverlayHotkeyAction, OverlayHotkeyKey, OverlaySelectionChange, OverlaySubmission,
+    SecurePromptConfig, WizardModalMode, WizardStep,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
@@ -14,6 +14,8 @@ pub struct ModalState {
     pub(crate) title: String,
     pub(crate) lines: Vec<String>,
     pub(crate) footer_hint: Option<String>,
+    /// Latest apply/save/cancel feedback shown as a toned status strip.
+    pub(crate) status: Option<InlineStatus>,
     pub(crate) hotkeys: Vec<OverlayHotkey>,
     pub(crate) list: Option<ModalListState>,
     pub(crate) secure_prompt: Option<SecurePromptConfig>,
@@ -93,7 +95,8 @@ enum ModalListDensityBehavior {
     FixedComfortable,
 }
 
-const CONFIG_LIST_NAVIGATION_HINT: &str = "Navigation: ↑/↓ select • Space/Enter apply • ←/→ change value • Esc close";
+const CONFIG_LIST_NAVIGATION_HINT: &str =
+    "Navigation: ↑/↓ select • Enter/Space apply • ←/→ change value • type to filter • Esc back/close";
 
 #[derive(Clone)]
 pub struct ModalListItem {
@@ -104,6 +107,9 @@ pub struct ModalListItem {
     pub(crate) selection: Option<InlineListSelection>,
     search_value: Option<String>,
     pub(crate) is_divider: bool,
+    pub(crate) value: Option<String>,
+    pub(crate) badge_tone: InlineTone,
+    pub(crate) kind: InlineItemKind,
 }
 
 #[derive(Clone)]
@@ -511,8 +517,15 @@ fn map_config_selection_for_arrow(selection: &InlineListSelection, is_left: bool
 }
 
 impl ModalListItem {
+    /// Group-header rows get bold titles and a blank gap above. Explicit
+    /// `Hint` rows are dimmed notes and must not be treated as headers.
     pub(crate) fn is_header(&self) -> bool {
-        self.selection.is_none() && !self.is_divider
+        !self.is_divider && self.selection.is_none() && self.kind != InlineItemKind::Hint
+    }
+
+    /// Dimmed note row (non-selectable, not a group header).
+    pub(crate) fn is_hint(&self) -> bool {
+        !self.is_divider && self.kind == InlineItemKind::Hint
     }
 
     /// Lowercased match corpus: caller `search_value` when present, else
@@ -570,6 +583,9 @@ impl ModalListState {
                     selection: item.selection,
                     search_value,
                     is_divider,
+                    value: item.value,
+                    badge_tone: item.badge_tone,
+                    kind: item.kind,
                 }
             })
             .collect();
@@ -1113,12 +1129,17 @@ impl ModalListState {
         }
     }
 
-    pub(crate) fn summary_line_rows(&self, footer_hint: Option<&str>) -> usize {
-        if self.filter_active() || self.has_non_filter_summary(footer_hint) {
-            1
-        } else {
-            0
+    /// Summary rows above the list: filter/keyboard hint, plus one extra row
+    /// when a status strip is shown (`has_status`).
+    pub(crate) fn summary_line_rows(&self, footer_hint: Option<&str>, has_status: bool) -> usize {
+        let mut rows = 0;
+        if has_status {
+            rows += 1;
         }
+        if self.filter_active() || self.has_non_filter_summary(footer_hint) {
+            rows += 1;
+        }
+        rows
     }
 
     fn has_non_filter_summary(&self, footer_hint: Option<&str>) -> bool {

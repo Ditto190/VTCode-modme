@@ -179,6 +179,7 @@ fn config_action_item(
         indent,
         selection: Some(InlineListSelection::ConfigAction(action.into())),
         search_value: Some(search_value.into()),
+        ..Default::default()
     }
 }
 

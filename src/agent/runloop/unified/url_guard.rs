@@ -105,6 +105,7 @@ impl UrlGuardPrompt {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(URL_GUARD_DENY_ACTION.to_string())),
                 search_value: None,
+                ..Default::default()
             },
             InlineListItem {
                 title: "Open in browser".to_string(),
@@ -113,6 +114,7 @@ impl UrlGuardPrompt {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(URL_GUARD_APPROVE_ACTION.to_string())),
                 search_value: None,
+                ..Default::default()
             },
         ]
     }
@@ -130,6 +132,7 @@ impl UrlGuardPrompt {
             selected: Some(self.default_selection()),
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })
     }
 }

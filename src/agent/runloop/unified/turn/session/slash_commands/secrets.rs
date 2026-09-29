@@ -697,6 +697,7 @@ fn build_secret_action_items(
             indent: 1,
             selection: Some(InlineListSelection::ConfigAction(add_action.clone())),
             search_value: Some(format!("add {} api key", label.to_lowercase())),
+            ..Default::default()
         });
         items.push(InlineListItem {
             title: format!("Delete {label} key"),
@@ -705,6 +706,7 @@ fn build_secret_action_items(
             indent: 1,
             selection: Some(InlineListSelection::ConfigAction(delete_action)),
             search_value: Some(format!("delete {} api key", label.to_lowercase())),
+            ..Default::default()
         });
         if is_current {
             current_selection = Some(InlineListSelection::ConfigAction(add_action));
@@ -718,6 +720,7 @@ fn build_secret_action_items(
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(SECRET_ACTION_BACK.to_string())),
         search_value: Some("back close exit".to_string()),
+        ..Default::default()
     });
 
     let selected =
@@ -819,5 +822,6 @@ fn list_item(title: &str, subtitle: &str, action: String, search: &str) -> Inlin
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(action)),
         search_value: Some(search.to_string()),
+        ..Default::default()
     }
 }

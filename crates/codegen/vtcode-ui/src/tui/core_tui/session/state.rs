@@ -845,6 +845,7 @@ impl Session {
             is_help_modal: request.is_help_modal,
             restore_input: true,
             restore_cursor: true,
+            status: None,
         };
         if state.secure_prompt.is_none() {
             self.input_enabled = false;
@@ -876,6 +877,7 @@ impl Session {
             restore_input: true,
             restore_cursor: true,
             is_help_modal: false,
+            status: request.status,
         };
         self.input_enabled = false;
         self.cursor_visible = false;

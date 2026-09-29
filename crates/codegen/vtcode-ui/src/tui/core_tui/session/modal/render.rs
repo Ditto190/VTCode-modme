@@ -6,7 +6,7 @@ use crate::tui::ui::tui::session::inline_list::{
 use crate::tui::ui::tui::session::list_panel::{
     SharedListPanelSections, SharedListPanelStyles, SharedListWidgetModel, render_shared_list_panel,
 };
-use crate::tui::ui::tui::types::{InlineListSelection, SecurePromptConfig};
+use crate::tui::ui::tui::types::{InlineItemKind, InlineListSelection, InlineStatus, InlineTone, SecurePromptConfig};
 use ratatui::{
     prelude::*,
     widgets::{Paragraph, Tabs, Wrap},
@@ -225,18 +225,22 @@ pub fn render_modal_list(
     footer_hint: Option<&str>,
     inline_editor: Option<&ModalInlineEditor>,
     show_numbers: bool,
+    status: Option<&InlineStatus>,
 ) -> Rect {
     if area.width == 0 || area.height == 0 {
         return area;
     }
 
-    let summary = modal_list_summary_line(list, styles, footer_hint);
+    let mut info = Vec::new();
+    // Status strip sits above the keyboard/filter hint so the last action is
+    // still readable while the user keeps navigating.
+    if let Some(status) = status {
+        let tone = tone_style(status.tone, styles);
+        info.push(Line::from(vec![Span::styled("• ", tone), Span::styled(status.message.clone(), tone)]));
+    }
+    info.extend(modal_list_summary_line(list, styles, footer_hint));
     let mut panel_model = ModalListPanelModel { list, styles, inline_editor, show_numbers };
-    let sections = SharedListPanelSections {
-        header: Vec::new(),
-        info: summary.into_iter().collect(),
-        search: None,
-    };
+    let sections = SharedListPanelSections { header: Vec::new(), info, search: None };
     render_shared_list_panel(
         frame,
         area,
@@ -492,6 +496,7 @@ pub(crate) fn render_wizard_modal_body(
             None,
             inline_editor.as_ref(),
             wizard_numbers,
+            None,
         ));
     }
 
@@ -502,10 +507,12 @@ fn modal_list_summary_line(
     list: &ModalListState,
     styles: &ModalRenderStyles,
     footer_hint: Option<&str>,
-) -> Option<Line<'static>> {
+) -> Vec<Line<'static>> {
     if !list.filter_active() {
-        let message = list.non_filter_summary_text(footer_hint)?;
-        return Some(Line::from(Span::styled(message, styles.hint)));
+        return match list.non_filter_summary_text(footer_hint) {
+            Some(message) => vec![Line::from(Span::styled(message, styles.hint))],
+            None => Vec::new(),
+        };
     }
 
     let mut spans = Vec::new();
@@ -533,9 +540,9 @@ fn modal_list_summary_line(
     }
 
     if spans.is_empty() {
-        None
+        Vec::new()
     } else {
-        Some(Line::from(spans))
+        vec![Line::from(spans)]
     }
 }
 
@@ -677,6 +684,7 @@ pub(crate) fn render_modal_body(
                         context.footer_hint,
                         None,
                         context.search.is_none(),
+                        context.status,
                     ));
                 }
             }
@@ -1189,11 +1197,13 @@ pub fn modal_list_item_lines(
 
     if let Some(badge) = &item.badge {
         let badge_label = format!("[{badge}]");
-        primary_spans.push(Span::styled(badge_label, modal_badge_style(badge.as_str(), styles)));
+        primary_spans.push(Span::styled(badge_label, modal_badge_style(badge.as_str(), item.badge_tone, styles)));
         primary_spans.push(Span::raw(" "));
     }
 
-    let title_style = if is_selected && item.selection.is_some() {
+    let title_style = if item.is_hint() {
+        styles.detail
+    } else if is_selected && item.selection.is_some() {
         styles.highlight
     } else if item.selection.is_some() {
         styles.selectable
@@ -1205,6 +1215,31 @@ pub fn modal_list_item_lines(
 
     let title_spans = highlight_segments(item.title.as_str(), title_style, styles.search_match, list.highlight_terms());
     primary_spans.extend(title_spans);
+
+    // Live value for setting rows: accent-styled so the eye lands on it first.
+    if let Some(value) = &item.value {
+        primary_spans.push(Span::raw("  "));
+        let value_style = if is_selected {
+            styles.highlight
+        } else if item.kind == InlineItemKind::Setting {
+            tone_style(
+                if item.badge_tone == InlineTone::Neutral {
+                    InlineTone::Accent
+                } else {
+                    item.badge_tone
+                },
+                styles,
+            )
+        } else {
+            tone_style(item.badge_tone, styles)
+        };
+        primary_spans.extend(highlight_segments(
+            value.as_str(),
+            value_style,
+            styles.search_match,
+            list.highlight_terms(),
+        ));
+    }
 
     // Group spacing without per-item cost: headers (Actions, Quick Access,
     // Sections, Settings) get one blank row above so dense subtitle lists
@@ -1268,7 +1303,22 @@ pub fn modal_list_item_lines(
     lines
 }
 
-fn modal_badge_style(badge: &str, styles: &ModalRenderStyles) -> Style {
+fn tone_style(tone: InlineTone, styles: &ModalRenderStyles) -> Style {
+    match tone {
+        InlineTone::Neutral => styles.badge,
+        InlineTone::Accent => styles.accent,
+        InlineTone::Success => styles.success,
+        InlineTone::Warning => styles.warning,
+        InlineTone::Danger => styles.danger,
+        InlineTone::Current => styles.accent.add_modifier(Modifier::BOLD),
+    }
+}
+
+fn modal_badge_style(badge: &str, tone: InlineTone, styles: &ModalRenderStyles) -> Style {
+    if tone != InlineTone::Neutral {
+        return tone_style(tone, styles);
+    }
+    // Fallback for callers that set only a badge label (no tone).
     match badge {
         "Active" | "Action" | "Current" => styles.header.add_modifier(Modifier::BOLD),
         "Read-only" => styles.detail.add_modifier(Modifier::ITALIC),
@@ -1306,6 +1356,10 @@ mod tests {
             instruction_bullet: Style::default(),
             instruction_body: Style::default(),
             hint: Style::default(),
+            success: Style::default(),
+            warning: Style::default(),
+            danger: Style::default(),
+            accent: Style::default(),
         }
     }
 
@@ -1441,6 +1495,7 @@ mod tests {
             indent: 0,
             selection: Some(InlineListSelection::SlashCommand(title.to_string())),
             search_value: None,
+            ..Default::default()
         }
     }
 
@@ -1452,6 +1507,7 @@ mod tests {
             indent: 0,
             selection: None,
             search_value: None,
+            ..Default::default()
         }
     }
 
@@ -1686,6 +1742,7 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::Model(0)),
                 search_value: Some("alpha".to_string()),
+                ..Default::default()
             }],
             None,
         );
@@ -1700,6 +1757,7 @@ mod tests {
                     Rect::new(0, 0, 80, 8),
                     ModalBodyContext {
                         instructions: &instructions,
+                        status: None,
                         footer_hint: None,
                         list: Some(&mut list),
                         styles: &styles,
@@ -1764,6 +1822,7 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("permissions.default:cycle".to_string())),
                 search_value: None,
+                ..Default::default()
             }],
             None,
         );
@@ -1784,9 +1843,16 @@ mod tests {
             instruction_bullet: Style::default(),
             instruction_body: Style::default(),
             hint: Style::default(),
+            success: Style::default(),
+            warning: Style::default(),
+            danger: Style::default(),
+            accent: Style::default(),
         };
 
-        let summary = modal_list_summary_line(&list, &styles, None).expect("expected summary line for config list");
+        let summary = modal_list_summary_line(&list, &styles, None)
+            .into_iter()
+            .next()
+            .expect("expected summary line for config list");
         let text = line_text(&summary);
         assert!(text.contains("Navigation:"));
         assert!(!text.contains("Alt+D"));
@@ -1807,6 +1873,7 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("permissions.default:cycle".to_string())),
                 search_value: None,
+                ..Default::default()
             }],
             None,
         );
@@ -1827,9 +1894,16 @@ mod tests {
             instruction_bullet: Style::default(),
             instruction_body: Style::default(),
             hint: Style::default(),
+            success: Style::default(),
+            warning: Style::default(),
+            danger: Style::default(),
+            accent: Style::default(),
         };
 
-        let summary = modal_list_summary_line(&list, &styles, Some("Esc to go back")).expect("summary line");
+        let summary = modal_list_summary_line(&list, &styles, Some("Esc to go back"))
+            .into_iter()
+            .next()
+            .expect("summary line");
         let text = line_text(&summary);
         assert!(text.contains("Navigation:"), "config lists render the shared navigation hint: {text}");
         assert!(!text.contains("Esc to go back"), "explicit footer must be dropped for config lists: {text}");
@@ -1845,6 +1919,7 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::Model(0)),
                 search_value: Some("gpt-5".to_string()),
+                ..Default::default()
             }],
             None,
         );
@@ -1865,10 +1940,14 @@ mod tests {
             instruction_bullet: Style::default(),
             instruction_body: Style::default(),
             hint: Style::default(),
+            success: Style::default(),
+            warning: Style::default(),
+            danger: Style::default(),
+            accent: Style::default(),
         };
 
         let summary = modal_list_summary_line(&list, &styles, None);
-        assert!(summary.is_none(), "density summary should be hidden");
+        assert!(summary.is_empty(), "density summary should be hidden");
     }
 
     #[test]
@@ -1957,6 +2036,7 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::Model(0)),
                 search_value: Some("gpt-5".to_string()),
+                ..Default::default()
             }],
             None,
         );
@@ -1964,7 +2044,10 @@ mod tests {
         let mut list = list;
         list.apply_search("gpt", false);
 
-        let summary = modal_list_summary_line(&list, &styles, None).expect("summary should exist");
+        let summary = modal_list_summary_line(&list, &styles, None)
+            .into_iter()
+            .next()
+            .expect("summary should exist");
         let text = line_text(&summary);
 
         assert!(text.contains("Matches 1 of 1"));
@@ -1987,6 +2070,7 @@ mod tests {
                     Rect::new(0, 0, 40, 8),
                     ModalBodyContext {
                         instructions: &instructions,
+                        status: None,
                         footer_hint: None,
                         list: Some(&mut list),
                         styles: &styles,
@@ -2016,5 +2100,73 @@ mod tests {
 
         assert!(rendered.contains("ABCD-EFGH"));
         assert!(!rendered.contains("**ABCD-EFGH**"));
+    }
+
+    #[test]
+    fn setting_row_renders_accent_value_and_dimmed_subtitle() {
+        let styles = modal_render_styles();
+        let list = ModalListState::new(
+            vec![InlineListItem {
+                title: "Fullscreen copy".to_string(),
+                value: Some("On".to_string()),
+                subtitle: Some("Copy selection to clipboard".to_string()),
+                badge: Some("On".to_string()),
+                selection: Some(InlineListSelection::ConfigAction("settings:set:x:toggle".to_string())),
+                badge_tone: InlineTone::Success,
+                kind: InlineItemKind::Setting,
+                ..Default::default()
+            }],
+            None,
+        );
+        let lines = modal_list_item_lines(&list, 0, 0, &styles, 60, None, false, None);
+        let text: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
+            .collect();
+        assert!(text.contains("Fullscreen copy"), "title rendered: {text}");
+        assert!(text.contains("On"), "value rendered: {text}");
+        assert!(text.contains("Copy selection to clipboard"), "subtitle rendered: {text}");
+    }
+
+    #[test]
+    fn status_strip_uses_tone_and_sits_above_hint() {
+        let styles = modal_render_styles();
+        let mut list = ModalListState::new(
+            vec![InlineListItem {
+                title: "Item".to_string(),
+                selection: Some(InlineListSelection::ConfigAction("x".to_string())),
+                ..Default::default()
+            }],
+            None,
+        );
+        let status = InlineStatus::success("Enabled IDE context");
+        let area = Rect::new(0, 0, 60, 6);
+        let mut terminal = Terminal::new(TestBackend::new(60, 6)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                render_modal_list(frame, area, &mut list, &styles, Some("Esc close"), None, false, Some(&status));
+            })
+            .expect("render");
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("Enabled IDE context"), "status visible: {rendered}");
+        assert!(rendered.contains("•"), "status bullet: {rendered}");
+    }
+
+    #[test]
+    fn badge_tone_maps_current_to_accent_bold() {
+        let styles = modal_render_styles();
+        let current = modal_badge_style("Current", InlineTone::Current, &styles);
+        let danger = modal_badge_style("Destructive", InlineTone::Danger, &styles);
+        assert_ne!(current, danger, "tones must be distinguishable");
+        assert_eq!(current, styles.accent.add_modifier(Modifier::BOLD));
+        assert_eq!(danger, styles.danger);
     }
 }

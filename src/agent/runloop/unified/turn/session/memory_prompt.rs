@@ -642,6 +642,7 @@ async fn confirm_memory_plan(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(MEMORY_CONFIRM_ACCEPT.to_string())),
                 search_value: Some("confirm accept yes".to_string()),
+                ..Default::default()
             },
             InlineListItem {
                 title: "Cancel".to_string(),
@@ -650,6 +651,7 @@ async fn confirm_memory_plan(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(MEMORY_CONFIRM_CANCEL.to_string())),
                 search_value: Some("cancel no dismiss".to_string()),
+                ..Default::default()
             },
         ],
         completed: false,
@@ -719,6 +721,7 @@ async fn confirm_memory_cleanup(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(MEMORY_CLEANUP_ACCEPT.to_string())),
                 search_value: Some("cleanup memory now".to_string()),
+                ..Default::default()
             },
             InlineListItem {
                 title: "Cancel".to_string(),
@@ -727,6 +730,7 @@ async fn confirm_memory_cleanup(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(MEMORY_CLEANUP_CANCEL.to_string())),
                 search_value: Some("cancel cleanup".to_string()),
+                ..Default::default()
             },
         ],
         completed: false,
@@ -797,6 +801,7 @@ async fn prompt_missing_memory_value(
                 other: Some(String::new()),
             }),
             search_value: Some("submit memory detail".to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,

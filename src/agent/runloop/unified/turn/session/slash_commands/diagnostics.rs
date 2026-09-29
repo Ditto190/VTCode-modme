@@ -251,6 +251,7 @@ fn show_checkup_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}full"))),
             search_value: Some("checkup full all checks mcp dependencies".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Run quick checkup".to_string(),
@@ -259,6 +260,7 @@ fn show_checkup_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{CHECKUP_ACTION_PREFIX}quick"))),
             search_value: Some("checkup quick fast checks".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Back".to_string(),
@@ -267,6 +269,7 @@ fn show_checkup_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(CHECKUP_ACTION_BACK.to_string())),
             search_value: Some("back close cancel".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -281,6 +284,7 @@ fn show_checkup_actions_modal(ctx: &mut SlashCommandContext<'_>) {
                 remediation.id
             ))),
             search_value: Some(remediation.search_value),
+            ..Default::default()
         });
     }
 

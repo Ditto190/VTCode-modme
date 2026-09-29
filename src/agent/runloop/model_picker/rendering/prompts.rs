@@ -20,12 +20,24 @@ pub(crate) fn render_reasoning_inline(
 ) -> Result<()> {
     let mut items = Vec::new();
     items.push(InlineListItem {
+        title: "← Back to model list".to_string(),
+        subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
+        badge: Some("Back".to_string()),
+        indent: 0,
+        selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
+        search_value: Some("back model list".to_string()),
+        badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
+        ..Default::default()
+    });
+    items.push(InlineListItem {
         title: format!("Keep current ({})", reasoning_level_label(current)),
         subtitle: Some(KEEP_CURRENT_DESCRIPTION.to_string()),
         badge: Some(CURRENT_BADGE.to_string()),
         indent: 0,
         selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(current))),
         search_value: None,
+        badge_tone: vtcode_commons::ui_protocol::InlineTone::Current,
+        ..Default::default()
     });
 
     let levels = selection.reasoning_effort_levels();
@@ -37,6 +49,7 @@ pub(crate) fn render_reasoning_inline(
             indent: 0,
             selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(ReasoningEffortLevel::None))),
             search_value: None,
+            ..Default::default()
         });
     }
 
@@ -48,6 +61,7 @@ pub(crate) fn render_reasoning_inline(
             indent: 0,
             selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(level))),
             search_value: None,
+            ..Default::default()
         });
     }
 
@@ -63,9 +77,14 @@ pub(crate) fn render_reasoning_inline(
             indent: 0,
             selection: Some(InlineListSelection::DisableReasoning),
             search_value: None,
+            ..Default::default()
         });
     }
-    let mut lines = vec![format!("Selected model: {}.", selection.model_display)];
+    let mut lines = vec![
+        "Step 2 · Reasoning".to_string(),
+        format!("Selected: {}", selection.model_display),
+        format!("Current reasoning: {}", reasoning_level_label(current)),
+    ];
     if let Some(alternative) = selection.reasoning_off_model.as_ref() {
         lines.push(format!(
             "Select \"Use {} (reasoning off)\" to switch to {}.",
@@ -200,6 +219,16 @@ pub(crate) fn render_service_tier_inline(
 ) -> Result<()> {
     let items = vec![
         InlineListItem {
+            title: "← Back to model list".to_string(),
+            subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
+            badge: Some("Back".to_string()),
+            indent: 0,
+            selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
+            search_value: Some("back model list".to_string()),
+            badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
+            ..Default::default()
+        },
+        InlineListItem {
             title: format!("Keep current ({})", service_tier_label(current)),
             subtitle: Some("Retain the existing service tier configuration.".to_string()),
             badge: Some(CURRENT_BADGE.to_string()),
@@ -210,6 +239,8 @@ pub(crate) fn render_service_tier_inline(
                 None => OpenAIServiceTierChoice::ProjectDefault,
             })),
             search_value: None,
+            badge_tone: vtcode_commons::ui_protocol::InlineTone::Current,
+            ..Default::default()
         },
         InlineListItem {
             title: "Project default".to_string(),
@@ -218,6 +249,7 @@ pub(crate) fn render_service_tier_inline(
             indent: 0,
             selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::ProjectDefault)),
             search_value: None,
+            ..Default::default()
         },
         InlineListItem {
             title: "Flex".to_string(),
@@ -226,6 +258,7 @@ pub(crate) fn render_service_tier_inline(
             indent: 0,
             selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
             search_value: None,
+            ..Default::default()
         },
         InlineListItem {
             title: "Priority".to_string(),
@@ -234,13 +267,14 @@ pub(crate) fn render_service_tier_inline(
             indent: 0,
             selection: Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
             search_value: None,
+            ..Default::default()
         },
     ];
 
     renderer.show_list_modal_with_footer(
         STEP_THREE_TITLE,
         vec![
-            format!("Selected model: {}.", selection.model_display),
+            format!("Selected: {}", selection.model_display),
             "Applies only to native OpenAI models that support service tiers.".to_string(),
         ],
         items,
@@ -314,6 +348,7 @@ pub(crate) fn render_mimo_auth_method_inline(renderer: &mut AnsiRenderer) -> Res
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("mimo-auth:pay-as-you-go".to_string())),
             search_value: Some("mimo payg pay-as-you-go sk api key".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Token Plan".to_string(),
@@ -324,6 +359,7 @@ pub(crate) fn render_mimo_auth_method_inline(renderer: &mut AnsiRenderer) -> Res
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("mimo-auth:token-plan".to_string())),
             search_value: Some("mimo token plan subscription tp bearer".to_string()),
+            ..Default::default()
         },
     ];
 

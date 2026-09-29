@@ -405,6 +405,7 @@ async fn prompt_overwrite_confirmation(
                     other: None,
                 }),
                 search_value: Some("overwrite replace yes".to_string()),
+                ..Default::default()
             },
             InlineListItem {
                 title: "2. Keep current AGENTS.md".to_string(),
@@ -417,6 +418,7 @@ async fn prompt_overwrite_confirmation(
                     other: None,
                 }),
                 search_value: Some("keep skip no".to_string()),
+                ..Default::default()
             },
         ],
         completed: false,
@@ -502,6 +504,7 @@ fn build_question_step(question: &GuidedInitQuestion) -> WizardStep {
                 other: None,
             }),
             search_value: Some(format!("{} {}", option.label, option.description)),
+            ..Default::default()
         })
         .collect::<Vec<_>>();
 
@@ -517,6 +520,7 @@ fn build_question_step(question: &GuidedInitQuestion) -> WizardStep {
                 other: Some(String::new()),
             }),
             search_value: Some("custom freeform".to_string()),
+            ..Default::default()
         });
     }
 

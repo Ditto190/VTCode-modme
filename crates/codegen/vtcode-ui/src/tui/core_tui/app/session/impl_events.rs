@@ -172,6 +172,7 @@ impl Session {
                 area,
                 row,
                 wizard.numbered_shortcuts(),
+                false,
             );
         }
 
@@ -186,6 +187,7 @@ impl Session {
             area,
             row,
             modal.search.is_none(),
+            modal.status.is_some(),
         )
     }
 

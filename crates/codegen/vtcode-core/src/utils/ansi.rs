@@ -547,8 +547,22 @@ impl AnsiRenderer {
         search: Option<InlineListSearchConfig>,
         footer_hint: Option<String>,
     ) {
+        self.show_list_modal_with_status(title, lines, items, selected, search, footer_hint, None);
+    }
+
+    /// Show a list modal with an optional status strip (last action feedback).
+    pub fn show_list_modal_with_status(
+        &mut self,
+        title: &str,
+        lines: Vec<String>,
+        items: Vec<InlineListItem>,
+        selected: Option<InlineListSelection>,
+        search: Option<InlineListSearchConfig>,
+        footer_hint: Option<String>,
+        status: Option<vtcode_commons::ui_protocol::InlineStatus>,
+    ) {
         if let Some(sink) = &self.sink {
-            sink.show_list_modal_with_footer(title.into(), lines, items, selected, search, footer_hint);
+            sink.show_list_modal_with_status(title.into(), lines, items, selected, search, footer_hint, status);
         }
     }
 
@@ -1445,7 +1459,7 @@ impl InlineSink {
         self.handle.show_list_modal(title, lines, items, selected, search);
     }
 
-    fn show_list_modal_with_footer(
+    fn show_list_modal_with_status(
         &self,
         title: String,
         lines: Vec<String>,
@@ -1453,9 +1467,10 @@ impl InlineSink {
         selected: Option<InlineListSelection>,
         search: Option<InlineListSearchConfig>,
         footer_hint: Option<String>,
+        status: Option<vtcode_commons::ui_protocol::InlineStatus>,
     ) {
         self.handle
-            .show_list_modal_with_footer(title, lines, items, selected, search, footer_hint);
+            .show_list_modal_with_status(title, lines, items, selected, search, footer_hint, status);
     }
 
     fn show_secure_prompt_modal(&self, title: String, lines: Vec<String>, prompt_label: String) {

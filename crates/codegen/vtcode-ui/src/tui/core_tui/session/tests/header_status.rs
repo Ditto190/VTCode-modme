@@ -170,10 +170,12 @@ fn permission_overlay_surfaces_action_required_status() {
             indent: 0,
             selection: Some(InlineListSelection::ToolApproval(true)),
             search_value: None,
+            ..Default::default()
         }],
         selected: Some(InlineListSelection::ToolApproval(true)),
         search: None,
         hotkeys: Vec::new(),
+        status: None,
     }));
 
     let rendered = session
@@ -264,10 +266,12 @@ fn non_permission_overlay_surfaces_generic_action_required_status() {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("open".to_string())),
             search_value: None,
+            ..Default::default()
         }],
         selected: None,
         search: None,
         hotkeys: Vec::new(),
+        status: None,
     }));
 
     let rendered = session

@@ -35,6 +35,7 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
             indent: 0,
             selection: Some(InlineListSelection::SessionLimitIncrease(100)),
             search_value: Some("increase 100 hundred plus more".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "+50 tool calls".to_string(),
@@ -43,6 +44,7 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
             indent: 0,
             selection: Some(InlineListSelection::SessionLimitIncrease(50)),
             search_value: Some("increase 50 fifty plus more".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "".to_string(),
@@ -51,6 +53,7 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
             indent: 0,
             selection: None,
             search_value: None,
+            ..Default::default()
         },
         InlineListItem {
             title: "Deny".to_string(),
@@ -59,6 +62,7 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
             indent: 0,
             selection: Some(InlineListSelection::ToolApproval(false)),
             search_value: Some("deny no exit stop cancel".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -169,6 +173,7 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
                 indent: 0,
                 selection: Some(InlineListSelection::SessionLimitIncrease(*increment)),
                 search_value: Some(tool_loop_search_value(*increment)),
+                ..Default::default()
             }
         })
         .collect();
@@ -179,6 +184,7 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
         indent: 0,
         selection: None,
         search_value: None,
+        ..Default::default()
     });
     options.push(InlineListItem {
         title: "Stop".to_string(),
@@ -187,6 +193,7 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
         indent: 0,
         selection: Some(InlineListSelection::ToolApproval(false)),
         search_value: Some("stop no exit cancel done".to_string()),
+        ..Default::default()
     });
 
     let default_increment = viable_increments.first().copied().unwrap_or(remaining_headroom);
@@ -233,6 +240,7 @@ async fn prompt_limit_increase_modal<S: UiSession + ?Sized>(
                 selected: Some(InlineListSelection::SessionLimitIncrease(default_increment)),
                 search: None,
                 hotkeys: Vec::new(),
+                status: None,
             }),
             ctrl_c_state,
             ctrl_c_notify,

@@ -127,6 +127,7 @@ pub(crate) async fn handle_open_donate_links(ctx: SlashCommandContext<'_>) -> Re
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(DONATE_URL.to_string())),
                 search_value: None,
+                ..Default::default()
             },
             InlineListItem {
                 title: "Sponsor VT Code developement on GitHub".to_string(),
@@ -135,11 +136,13 @@ pub(crate) async fn handle_open_donate_links(ctx: SlashCommandContext<'_>) -> Re
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(PROJECT_URL.to_string())),
                 search_value: None,
+                ..Default::default()
             },
         ],
         selected: Some(InlineListSelection::ConfigAction(DONATE_URL.to_string())),
         search: None,
         hotkeys: Vec::new(),
+        status: None,
     });
 
     let outcome =
@@ -670,6 +673,7 @@ fn build_custom_editor_command_step(placeholder: String) -> WizardStep {
                 other: Some(String::new()),
             }),
             search_value: Some("editor command custom raw command".to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,
@@ -727,6 +731,7 @@ fn request_choice_item(question_id: &str, title: &str, subtitle: &str, value: &s
             other: None,
         }),
         search_value: Some(format!("{title} {subtitle} {value}")),
+        ..Default::default()
     }
 }
 

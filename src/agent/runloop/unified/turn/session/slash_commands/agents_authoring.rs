@@ -612,6 +612,7 @@ async fn prompt_scope(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("agents:author:scope:project".to_string())),
             search_value: Some("project workspace .vtcode agents".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "User scope".to_string(),
@@ -620,6 +621,7 @@ async fn prompt_scope(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("agents:author:scope:user".to_string())),
             search_value: Some("user home shared agent".to_string()),
+            ..Default::default()
         },
     ];
     let selected = Some(InlineListSelection::ConfigAction(match current {
@@ -657,6 +659,7 @@ async fn prompt_background_mode(ctx: &mut SlashCommandContext<'_>, current: bool
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("agents:author:background:false".to_string())),
             search_value: Some("background disabled".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Enabled".to_string(),
@@ -665,6 +668,7 @@ async fn prompt_background_mode(ctx: &mut SlashCommandContext<'_>, current: bool
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction("agents:author:background:true".to_string())),
             search_value: Some("background enabled".to_string()),
+            ..Default::default()
         },
     ];
     let selected = Some(InlineListSelection::ConfigAction(format!("agents:author:background:{current}")));
@@ -773,6 +777,7 @@ async fn prompt_text_value(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(KEEP_CURRENT_ACTION.to_string())),
                 search_value: Some(format!("keep {current_trimmed}")),
+                ..Default::default()
             });
         }
         if allow_clear {
@@ -783,6 +788,7 @@ async fn prompt_text_value(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(CLEAR_VALUE_ACTION.to_string())),
                 search_value: Some("clear unset remove".to_string()),
+                ..Default::default()
             });
         }
         items.push(InlineListItem {
@@ -796,6 +802,7 @@ async fn prompt_text_value(
                 other: Some(String::new()),
             }),
             search_value: Some("custom value input".to_string()),
+            ..Default::default()
         });
 
         let outcome = show_wizard_modal_and_wait(
@@ -874,6 +881,7 @@ async fn edit_tools_checklist(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(format!("{TOOL_TOGGLE_PREFIX}{tool_id}"))),
                 search_value: Some(format!("{tool_id} {subtitle} {badge}")),
+                ..Default::default()
             })
             .collect::<Vec<_>>();
         items.push(InlineListItem {
@@ -883,6 +891,7 @@ async fn edit_tools_checklist(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(TOOL_ADD_CUSTOM_ACTION.to_string())),
             search_value: Some("add custom tool id".to_string()),
+            ..Default::default()
         });
         items.push(InlineListItem {
             title: "Save selection".to_string(),
@@ -891,6 +900,7 @@ async fn edit_tools_checklist(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(TOOL_SAVE_ACTION.to_string())),
             search_value: Some("save tools".to_string()),
+            ..Default::default()
         });
         items.push(InlineListItem {
             title: "Cancel".to_string(),
@@ -899,6 +909,7 @@ async fn edit_tools_checklist(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(TOOL_CANCEL_ACTION.to_string())),
             search_value: Some("cancel".to_string()),
+            ..Default::default()
         });
 
         let selected_item = items.first().and_then(|item| item.selection.clone());
@@ -1001,6 +1012,7 @@ async fn select_native_agent_name(ctx: &mut SlashCommandContext<'_>) -> Result<O
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", AUTHOR_ACTION_PREFIX, spec.name))),
             search_value: Some(format!("{} {} {}", spec.name, spec.description, spec.source.label())),
+            ..Default::default()
         })
         .collect::<Vec<_>>();
     let selected = items.first().and_then(|item| item.selection.clone());
@@ -1199,6 +1211,7 @@ fn memory_item(title: &str, subtitle: &str, scope: Option<SubagentMemoryScope>) 
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(memory_action_key(scope.as_ref()))),
         search_value: Some(format!("{title} {subtitle}")),
+        ..Default::default()
     }
 }
 
@@ -1231,6 +1244,7 @@ fn author_action_item(title: &str, subtitle: &str, badge: Option<&str>, action: 
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{AUTHOR_ACTION_PREFIX}{action}"))),
         search_value: Some(format!("{title} {subtitle}")),
+        ..Default::default()
     }
 }
 

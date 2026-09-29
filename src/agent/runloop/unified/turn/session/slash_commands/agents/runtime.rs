@@ -89,6 +89,7 @@ pub(super) async fn show_threads_modal(mut ctx: SlashCommandContext<'_>) -> Resu
                     "{} {} {} {}",
                     entry.id, entry.display_label, entry.agent_name, entry.description
                 )),
+                ..Default::default()
             })
             .collect::<Vec<_>>();
         let selected = items.first().and_then(|item| item.selection.clone());
@@ -117,6 +118,7 @@ pub(super) async fn show_threads_modal(mut ctx: SlashCommandContext<'_>) -> Resu
                     action: TransientHotkeyAction::GracefulStopSubagent,
                 },
             ],
+            status: None,
         }));
 
         let Some(action) =
@@ -315,7 +317,8 @@ pub(super) async fn show_active_agent_inspector(
                         action: TransientHotkeyAction::GracefulStopSubagent,
                     },
                 ],
-            }));
+    status: None,
+}));
 
         let Some(action) = wait_for_inspector_action(
             ctx.handle,
@@ -442,7 +445,8 @@ pub(super) async fn show_background_subprocess_inspector(
                         action: TransientHotkeyAction::ForceCancelSubagent,
                     },
                 ],
-            }));
+    status: None,
+}));
 
         let Some(action) = wait_for_inspector_action(
             ctx.handle,
@@ -708,6 +712,7 @@ fn active_agent_inspector_items(entry: &SubagentStatusEntry) -> Vec<InlineListIt
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{THREAD_TRANSCRIPT_PREFIX}{}", entry.id))),
             search_value: Some("open transcript".to_string()),
+            ..Default::default()
         });
     }
     items.push(InlineListItem {
@@ -717,6 +722,7 @@ fn active_agent_inspector_items(entry: &SubagentStatusEntry) -> Vec<InlineListIt
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{THREAD_CANCEL_PREFIX}{}", entry.id))),
         search_value: Some("cancel active agent".to_string()),
+        ..Default::default()
     });
     items
 }
@@ -731,6 +737,7 @@ fn background_subprocess_inspector_items(entry: &BackgroundSubprocessEntry) -> V
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SUBPROCESS_TRANSCRIPT_PREFIX}{}", entry.id))),
             search_value: Some("open subprocess transcript".to_string()),
+            ..Default::default()
         });
     }
     if entry.archive_path.is_some() {
@@ -741,6 +748,7 @@ fn background_subprocess_inspector_items(entry: &BackgroundSubprocessEntry) -> V
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SUBPROCESS_ARCHIVE_PREFIX}{}", entry.id))),
             search_value: Some("open subprocess archive".to_string()),
+            ..Default::default()
         });
     }
     items.push(InlineListItem {
@@ -750,6 +758,7 @@ fn background_subprocess_inspector_items(entry: &BackgroundSubprocessEntry) -> V
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{SUBPROCESS_STOP_PREFIX}{}", entry.id))),
         search_value: Some("graceful stop subprocess".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: "Force cancel".to_string(),
@@ -758,6 +767,7 @@ fn background_subprocess_inspector_items(entry: &BackgroundSubprocessEntry) -> V
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{SUBPROCESS_CANCEL_PREFIX}{}", entry.id))),
         search_value: Some("force cancel subprocess".to_string()),
+        ..Default::default()
     });
     items
 }
@@ -832,6 +842,7 @@ async fn confirm_list_action(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("agents:confirm-action".to_string())),
                 search_value: Some("confirm action".to_string()),
+                ..Default::default()
             },
             InlineListItem {
                 title: "Cancel".to_string(),
@@ -840,6 +851,7 @@ async fn confirm_list_action(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("agents:cancel-action".to_string())),
                 search_value: Some("cancel".to_string()),
+                ..Default::default()
             },
         ],
         Some(InlineListSelection::ConfigAction("agents:cancel-action".to_string())),
