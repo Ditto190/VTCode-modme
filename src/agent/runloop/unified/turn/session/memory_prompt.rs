@@ -1,3 +1,5 @@
+use crate::agent::runloop::ui_list;
+use crate::agent::runloop::ui_list::Tone;
 use anyhow::{Context, Result};
 use vtcode_core::llm::provider as uni;
 use vtcode_core::persistent_memory::{
@@ -8,7 +10,7 @@ use vtcode_core::persistent_memory::{
 };
 use vtcode_core::session::SessionId;
 use vtcode_core::utils::ansi::MessageStyle;
-use vtcode_ui::tui::app::{InlineListItem, InlineListSelection, WizardModalMode, WizardStep};
+use vtcode_ui::tui::app::{InlineListSelection, WizardModalMode, WizardStep};
 
 use crate::agent::runloop::slash_commands::SlashCommandOutcome;
 use crate::agent::runloop::unified::display::{display_user_message, reset_inline_input};
@@ -635,24 +637,22 @@ async fn confirm_memory_plan(
         title: "Confirm".to_string(),
         question: format!("Review the normalized memory action below, then confirm.\n\n{body}"),
         items: vec![
-            InlineListItem {
-                title: format!("Confirm {action_label}"),
-                subtitle: Some("Apply the memory change now.".to_string()),
-                badge: Some("Confirm".to_string()),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction(MEMORY_CONFIRM_ACCEPT.to_string())),
-                search_value: Some("confirm accept yes".to_string()),
-                ..Default::default()
-            },
-            InlineListItem {
-                title: "Cancel".to_string(),
-                subtitle: Some("Dismiss without changing memory.".to_string()),
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction(MEMORY_CONFIRM_CANCEL.to_string())),
-                search_value: Some("cancel no dismiss".to_string()),
-                ..Default::default()
-            },
+            ui_list::action(
+                format!("Confirm {action_label}"),
+                "Apply the memory change now.".to_string(),
+                Some("Confirm".to_string()),
+                Tone::Accent,
+                Some(InlineListSelection::ConfigAction(MEMORY_CONFIRM_ACCEPT.to_string())),
+            )
+            .with_search_value("confirm accept yes".to_string()),
+            ui_list::action(
+                "Cancel",
+                "Dismiss without changing memory.".to_string(),
+                None,
+                Tone::Neutral,
+                Some(InlineListSelection::ConfigAction(MEMORY_CONFIRM_CANCEL.to_string())),
+            )
+            .with_search_value("cancel no dismiss".to_string()),
         ],
         completed: false,
         answer: None,
@@ -714,24 +714,22 @@ async fn confirm_memory_cleanup(
             status.cleanup_status.suspicious_facts, status.cleanup_status.suspicious_summary_lines
         ),
         items: vec![
-            InlineListItem {
-                title: "Run cleanup now".to_string(),
-                subtitle: Some("Rewrite durable memory through the LLM-assisted normalization path.".to_string()),
-                badge: Some("Confirm".to_string()),
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction(MEMORY_CLEANUP_ACCEPT.to_string())),
-                search_value: Some("cleanup memory now".to_string()),
-                ..Default::default()
-            },
-            InlineListItem {
-                title: "Cancel".to_string(),
-                subtitle: Some("Leave memory unchanged and stop this mutation.".to_string()),
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::ConfigAction(MEMORY_CLEANUP_CANCEL.to_string())),
-                search_value: Some("cancel cleanup".to_string()),
-                ..Default::default()
-            },
+            ui_list::action(
+                "Run cleanup now",
+                "Rewrite durable memory through the LLM-assisted normalization path.".to_string(),
+                Some("Confirm".to_string()),
+                Tone::Accent,
+                Some(InlineListSelection::ConfigAction(MEMORY_CLEANUP_ACCEPT.to_string())),
+            )
+            .with_search_value("cleanup memory now".to_string()),
+            ui_list::action(
+                "Cancel",
+                "Leave memory unchanged and stop this mutation.".to_string(),
+                None,
+                Tone::Neutral,
+                Some(InlineListSelection::ConfigAction(MEMORY_CLEANUP_CANCEL.to_string())),
+            )
+            .with_search_value("cancel cleanup".to_string()),
         ],
         completed: false,
         answer: None,
@@ -790,19 +788,18 @@ async fn prompt_missing_memory_value(
     let step = WizardStep {
         title: "Missing Detail".to_string(),
         question: prompt.to_string(),
-        items: vec![InlineListItem {
-            title: "Submit".to_string(),
-            subtitle: Some("Press Tab to type the missing detail, then Enter to submit.".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::RequestUserInputAnswer {
-                question_id: MEMORY_MISSING_QUESTION_ID.to_string(),
-                selected: vec![],
-                other: Some(String::new()),
-            }),
-            search_value: Some("submit memory detail".to_string()),
-            ..Default::default()
-        }],
+        items: vec![
+            ui_list::choice(
+                "Submit",
+                Some("Press Tab to type the missing detail, then Enter to submit.".to_string()),
+                Some(InlineListSelection::RequestUserInputAnswer {
+                    question_id: MEMORY_MISSING_QUESTION_ID.to_string(),
+                    selected: vec![],
+                    other: Some(String::new()),
+                }),
+            )
+            .with_search_value("submit memory detail".to_string()),
+        ],
         completed: false,
         answer: None,
         allow_freeform: true,

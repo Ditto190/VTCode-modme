@@ -10,20 +10,18 @@ use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 use super::super::selection::{
     SelectionDetail, reasoning_level_description, reasoning_level_label, service_tier_label,
 };
-use super::{CURRENT_BADGE, KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
+use super::{KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
 use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
 
 fn back_to_model_list_row() -> InlineListItem {
-    InlineListItem {
-        title: "← Back to model list".to_string(),
-        subtitle: Some("Return to step 1 without cancelling the picker.".to_string()),
-        badge: None,
-        indent: 0,
-        selection: Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
-        search_value: Some("back model list".to_string()),
-        badge_tone: vtcode_commons::ui_protocol::InlineTone::Neutral,
-        ..Default::default()
-    }
+    vtcode_ui::design::list::action(
+        "← Back to model list",
+        "Return to step 1 without cancelling the picker.",
+        None,
+        vtcode_commons::ui_protocol::InlineTone::Neutral,
+        Some(InlineListSelection::ConfigAction(super::PICKER_BACK_ACTION.to_string())),
+    )
+    .with_search_value("back model list")
 }
 
 pub(crate) fn render_reasoning_inline(
@@ -33,56 +31,39 @@ pub(crate) fn render_reasoning_inline(
 ) -> Result<()> {
     let mut items = Vec::new();
     items.push(back_to_model_list_row());
-    items.push(InlineListItem {
-        title: format!("Keep current ({})", reasoning_level_label(current)),
-        subtitle: Some(KEEP_CURRENT_DESCRIPTION.to_string()),
-        badge: Some(CURRENT_BADGE.to_string()),
-        indent: 0,
-        selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(current))),
-        search_value: None,
-        badge_tone: vtcode_commons::ui_protocol::InlineTone::Current,
-        ..Default::default()
-    });
+    items.push(vtcode_ui::design::list::current_choice(
+        format!("Keep current ({})", reasoning_level_label(current)),
+        Some(KEEP_CURRENT_DESCRIPTION.to_string()),
+        Some(InlineListSelection::Reasoning(reasoning_to_selection_string(current))),
+    ));
 
     let levels = selection.reasoning_effort_levels();
     if levels.contains(&ReasoningEffortLevel::None) {
-        items.push(InlineListItem {
-            title: reasoning_level_label(ReasoningEffortLevel::None).to_string(),
-            subtitle: Some(reasoning_level_description(ReasoningEffortLevel::None).to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(ReasoningEffortLevel::None))),
-            search_value: None,
-            ..Default::default()
-        });
+        items.push(vtcode_ui::design::list::choice(
+            reasoning_level_label(ReasoningEffortLevel::None),
+            Some(reasoning_level_description(ReasoningEffortLevel::None).to_string()),
+            Some(InlineListSelection::Reasoning(reasoning_to_selection_string(ReasoningEffortLevel::None))),
+        ));
     }
 
     for level in levels.into_iter().filter(|level| *level != ReasoningEffortLevel::None) {
-        items.push(InlineListItem {
-            title: reasoning_level_label(level).to_string(),
-            subtitle: Some(reasoning_level_description(level).to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::Reasoning(reasoning_to_selection_string(level))),
-            search_value: None,
-            ..Default::default()
-        });
+        items.push(vtcode_ui::design::list::choice(
+            reasoning_level_label(level),
+            Some(reasoning_level_description(level).to_string()),
+            Some(InlineListSelection::Reasoning(reasoning_to_selection_string(level))),
+        ));
     }
 
     if let Some(alternative) = selection.reasoning_off_model.as_ref() {
-        items.push(InlineListItem {
-            title: format!("Use {} (reasoning off)", alternative.display_name()),
-            subtitle: Some(format!(
+        items.push(vtcode_ui::design::list::choice(
+            format!("Use {} (reasoning off)", alternative.display_name()),
+            Some(format!(
                 "Switch to {} ({}) without enabling structured reasoning.",
                 alternative.display_name(),
                 alternative.as_str()
             )),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::DisableReasoning),
-            search_value: None,
-            ..Default::default()
-        });
+            Some(InlineListSelection::DisableReasoning),
+        ));
     }
     let mut lines = vec![
         "Step 2 · Reasoning".to_string(),
@@ -223,20 +204,15 @@ pub(crate) fn render_service_tier_inline(
 ) -> Result<()> {
     let items = vec![
         back_to_model_list_row(),
-        InlineListItem {
-            title: format!("Keep current ({})", service_tier_label(current)),
-            subtitle: Some("Retain the existing service tier configuration.".to_string()),
-            badge: Some(CURRENT_BADGE.to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::OpenAIServiceTier(match current {
+        vtcode_ui::design::list::current_choice(
+            format!("Keep current ({})", service_tier_label(current)),
+            Some("Retain the existing service tier configuration.".to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(match current {
                 Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
                 Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
                 None => OpenAIServiceTierChoice::ProjectDefault,
             })),
-            search_value: None,
-            badge_tone: vtcode_commons::ui_protocol::InlineTone::Current,
-            ..Default::default()
-        },
+        ),
         InlineListItem {
             title: "Project default".to_string(),
             subtitle: Some("Do not send service_tier; inherit the OpenAI Project setting.".to_string()),

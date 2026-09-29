@@ -1,3 +1,4 @@
+use crate::agent::runloop::ui_list;
 use crate::agent::runloop::unified::reasoning::model_supports_reasoning;
 use crate::agent::runloop::unified::turn::session::slash_commands::{SlashCommandContext, SlashCommandControl};
 use anyhow::{Context, Result};
@@ -5,7 +6,7 @@ use chrono::{DateTime, Local, Utc};
 use vtcode_core::core::agent::snapshots::{CheckpointRestore, RevertScope, SnapshotManager, SnapshotMetadata};
 use vtcode_core::llm::provider as uni;
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
-use vtcode_ui::tui::app::{InlineHandle, InlineListItem, InlineListSearchConfig, InlineListSelection, RewindAction};
+use vtcode_ui::tui::app::{InlineHandle, InlineListSearchConfig, InlineListSelection, RewindAction};
 
 use super::ui;
 
@@ -169,20 +170,17 @@ fn show_rewind_checkpoint_modal(handle: &InlineHandle, snapshots: &[SnapshotMeta
                 .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
                 .unwrap_or_else(|| snapshot.created_at.to_string());
             let event_text = rewind_checkpoint_title(snapshot);
-            InlineListItem {
-                title: timestamp,
-                subtitle: Some(event_text),
-                badge: Some(format!("turn {}", snapshot.turn_number)),
-                indent: 0,
-                selection: Some(InlineListSelection::RewindCheckpoint(snapshot.turn_number)),
-                search_value: Some(format!(
-                    "{} {} {}",
-                    snapshot.turn_number,
-                    snapshot.prompt_text.clone().unwrap_or_default(),
-                    snapshot.description
-                )),
-                ..Default::default()
-            }
+            ui_list::choice(
+                timestamp,
+                Some(event_text),
+                Some(InlineListSelection::RewindCheckpoint(snapshot.turn_number)),
+            )
+            .with_search_value(format!(
+                "{} {} {}",
+                snapshot.turn_number,
+                snapshot.prompt_text.clone().unwrap_or_default(),
+                snapshot.description
+            ))
         })
         .collect();
     handle.show_list_modal(
@@ -205,42 +203,30 @@ fn show_rewind_checkpoint_modal(handle: &InlineHandle, snapshots: &[SnapshotMeta
 
 fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) {
     let items = vec![
-        InlineListItem {
-            title: "Rewind & Run".to_string(),
-            subtitle: Some("Restore code and conversation, then re-run from this checkpoint.".to_string()),
-            badge: Some("Both".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreBoth)),
-            search_value: Some("rewind run restore both code conversation".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Rewind".to_string(),
-            subtitle: Some("Restore conversation only, keeping current files on disk.".to_string()),
-            badge: Some("Chat".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreConversation)),
-            search_value: Some("rewind restore conversation chat".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Restore code".to_string(),
-            subtitle: Some("Revert tracked file edits but keep the current conversation.".to_string()),
-            badge: Some("Code".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreCode)),
-            search_value: Some("restore code files".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Cancel".to_string(),
-            subtitle: Some("Close the rewind picker without changing anything.".to_string()),
-            badge: Some("Cancel".to_string()),
-            indent: 0,
-            selection: Some(InlineListSelection::RewindAction(RewindAction::NeverMind)),
-            search_value: Some("cancel never mind".to_string()),
-            ..Default::default()
-        },
+        ui_list::choice(
+            "Rewind & Run",
+            Some("Restore code and conversation, then re-run from this checkpoint.".to_string()),
+            Some(InlineListSelection::RewindAction(RewindAction::RestoreBoth)),
+        )
+        .with_search_value("rewind run restore both code conversation".to_string()),
+        ui_list::choice(
+            "Rewind",
+            Some("Restore conversation only, keeping current files on disk.".to_string()),
+            Some(InlineListSelection::RewindAction(RewindAction::RestoreConversation)),
+        )
+        .with_search_value("rewind restore conversation chat".to_string()),
+        ui_list::choice(
+            "Restore code",
+            Some("Revert tracked file edits but keep the current conversation.".to_string()),
+            Some(InlineListSelection::RewindAction(RewindAction::RestoreCode)),
+        )
+        .with_search_value("restore code files".to_string()),
+        ui_list::choice(
+            "Cancel",
+            Some("Close the rewind picker without changing anything.".to_string()),
+            Some(InlineListSelection::RewindAction(RewindAction::NeverMind)),
+        )
+        .with_search_value("cancel never mind".to_string()),
     ];
     handle.show_list_modal(
         format!("Rewind turn {}", snapshot.turn_number),

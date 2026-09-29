@@ -313,7 +313,7 @@ pub(super) fn render_step_one_inline(
 
         // Provider section header (non-selectable) so long model lists group
         // visually by vendor.
-        items.push(InlineListItem::group_header(provider.label()));
+        items.push(vtcode_ui::design::list::group_header(provider.label()));
 
         for idx in provider_model_indexes {
             let Some(option) = options.get(*idx) else {
@@ -321,29 +321,24 @@ pub(super) fn render_step_one_inline(
             };
             let is_current = is_current_model(option.provider, &option.id, current_provider, current_model);
             let description = option.description.trim();
-            items.push(InlineListItem {
-                title: option.display.to_string(),
-                // Capabilities sit in the value column (config-modal pattern);
-                // description stays dimmed underneath.
-                value: static_model_subtitle(option, current_provider, current_model),
-                subtitle: (!description.is_empty()).then(|| description.to_string()),
-                badge: is_current.then(|| CURRENT_BADGE.to_string()),
-                indent: 0,
-                selection: Some(InlineListSelection::Model(*idx)),
-                search_value: Some(model_search_value(
-                    provider,
-                    &option.display,
-                    &option.id,
-                    Some(&option.description),
-                    &static_model_search_terms(&option.model, option.supports_reasoning),
-                )),
-                badge_tone: if is_current {
-                    vtcode_commons::ui_protocol::InlineTone::Current
-                } else {
-                    vtcode_commons::ui_protocol::InlineTone::Accent
-                },
-                ..Default::default()
-            });
+            let mut row = vtcode_ui::design::list::setting(
+                option.display.clone(),
+                static_model_subtitle(option, current_provider, current_model),
+                (!description.is_empty()).then(|| description.to_string()),
+                Some(InlineListSelection::Model(*idx)),
+            );
+            if is_current {
+                row.badge = Some(CURRENT_BADGE.to_string());
+                row.badge_tone = vtcode_commons::ui_protocol::InlineTone::Current;
+            }
+            row.search_value = Some(model_search_value(
+                provider,
+                &option.display,
+                &option.id,
+                Some(&option.description),
+                &static_model_search_terms(&option.model, option.supports_reasoning),
+            ));
+            items.push(row);
         }
 
         if provider.is_dynamic() {
@@ -359,107 +354,98 @@ pub(super) fn render_step_one_inline(
                         }
                         terms
                     };
-                    items.push(InlineListItem {
-                        title: detail.model_display.clone(),
-                        value: dynamic_model_subtitle(
+                    let mut row = vtcode_ui::design::list::setting(
+                        detail.model_display.clone(),
+                        dynamic_model_subtitle(
                             provider,
                             &detail.model_id,
                             detail.reasoning_supported,
                             current_provider,
                             current_model,
                         ),
-                        subtitle: None,
-                        badge: None,
-                        indent: 0,
-                        selection: Some(InlineListSelection::DynamicModel(*entry_index)),
-                        search_value: Some(model_search_value(
-                            provider,
-                            &detail.model_display,
-                            &detail.model_id,
-                            None,
-                            &extra_terms,
-                        )),
-                        badge_tone: vtcode_commons::ui_protocol::InlineTone::Accent,
-                        ..Default::default()
-                    });
+                        None,
+                        Some(InlineListSelection::DynamicModel(*entry_index)),
+                    );
+                    row.search_value =
+                        Some(model_search_value(provider, &detail.model_display, &detail.model_id, None, &extra_terms));
+                    items.push(row);
                 }
             }
 
             if let Some(warning) = dynamic_models.warning_for(provider) {
-                items.push(InlineListItem {
-                    title: format!("{} cache notice", provider.label()),
-                    subtitle: Some(warning.to_string()),
-                    badge: None,
-                    indent: 0,
-                    selection: Some(InlineListSelection::RefreshDynamicModels),
-                    search_value: Some(format!("{} cache", provider.label())),
-                    ..Default::default()
-                });
+                items.push(vtcode_ui::design::list::action(
+                    format!("{} cache notice", provider.label()),
+                    warning,
+                    None,
+                    vtcode_commons::ui_protocol::InlineTone::Warning,
+                    Some(InlineListSelection::RefreshDynamicModels),
+                ));
             }
 
             if dynamic_indexes.is_empty()
                 && let Some(error) = dynamic_models.error_for(provider)
             {
-                items.push(InlineListItem {
-                    title: format!("{} unavailable", provider.label()),
-                    subtitle: Some(error.to_string()),
-                    badge: None,
-                    indent: 0,
-                    selection: Some(InlineListSelection::RefreshDynamicModels),
-                    search_value: Some(format!("{} setup", provider.label().to_ascii_lowercase())),
-                    ..Default::default()
-                });
+                items.push(
+                    vtcode_ui::design::list::action(
+                        format!("{} unavailable", provider.label()),
+                        error,
+                        None,
+                        vtcode_commons::ui_protocol::InlineTone::Warning,
+                        Some(InlineListSelection::RefreshDynamicModels),
+                    )
+                    .with_search_value(format!("{} setup", provider.label().to_ascii_lowercase())),
+                );
             }
         } else if provider == Provider::HuggingFace && provider_model_indexes.is_empty() {
-            items.push(InlineListItem {
-                title: "Custom Hugging Face model".to_string(),
-                subtitle: Some("Enter any HF model id (e.g., huggingface <org>/<model>)".to_string()),
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::CustomModel),
-                search_value: Some("huggingface custom".to_string()),
-                ..Default::default()
-            });
+            items.push(
+                vtcode_ui::design::list::action(
+                    "Custom Hugging Face model",
+                    "Enter any HF model id (e.g., huggingface <org>/<model>)",
+                    None,
+                    vtcode_commons::ui_protocol::InlineTone::Accent,
+                    Some(InlineListSelection::CustomModel),
+                )
+                .with_search_value("huggingface custom"),
+            );
         }
     }
 
     if !custom_providers.is_empty() {
         for (index, selection) in custom_providers.iter().enumerate() {
-            items.push(InlineListItem {
-                title: custom_provider_picker_title(selection).to_string(),
-                value: Some(custom_provider_picker_subtitle(selection, current_provider, current_model)),
-                subtitle: None,
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::CustomProvider(index)),
-                search_value: Some(custom_provider_search_value(selection)),
-                badge_tone: vtcode_commons::ui_protocol::InlineTone::Accent,
-                ..Default::default()
-            });
+            let mut row = vtcode_ui::design::list::setting(
+                custom_provider_picker_title(selection).to_string(),
+                Some(custom_provider_picker_subtitle(selection, current_provider, current_model)),
+                None,
+                Some(InlineListSelection::CustomProvider(index)),
+            );
+            row.search_value = Some(custom_provider_search_value(selection));
+            items.push(row);
         }
     }
 
     items.push(divider_item());
 
-    items.push(InlineListItem {
-        title: "Refresh dynamic model lists".to_string(),
-        subtitle: Some("Re-query Copilot, LM Studio, and Ollama without closing the picker.".to_string()),
-        badge: None,
-        indent: 0,
-        selection: Some(InlineListSelection::RefreshDynamicModels),
-        search_value: Some("refresh dynamic models".to_string()),
-        ..Default::default()
-    });
+    items.push(
+        vtcode_ui::design::list::action(
+            "Refresh dynamic model lists",
+            "Re-query Copilot, LM Studio, and Ollama without closing the picker.",
+            None,
+            vtcode_commons::ui_protocol::InlineTone::Neutral,
+            Some(InlineListSelection::RefreshDynamicModels),
+        )
+        .with_search_value("refresh dynamic models"),
+    );
 
-    items.push(InlineListItem {
-        title: CUSTOM_PROVIDER_TITLE.to_string(),
-        subtitle: Some(CUSTOM_PROVIDER_SUBTITLE.to_string()),
-        badge: None,
-        indent: 0,
-        selection: Some(InlineListSelection::CustomModel),
-        search_value: Some("custom provider".to_string()),
-        ..Default::default()
-    });
+    items.push(
+        vtcode_ui::design::list::action(
+            CUSTOM_PROVIDER_TITLE,
+            CUSTOM_PROVIDER_SUBTITLE,
+            None,
+            vtcode_commons::ui_protocol::InlineTone::Accent,
+            Some(InlineListSelection::CustomModel),
+        )
+        .with_search_value("custom provider"),
+    );
 
     let lines = step_one_header_lines(current_provider, current_model);
 
@@ -606,7 +592,7 @@ const HUGGINGFACE_DOCS_URL: &str = "https://huggingface.co/docs/inference-provid
 /// trailing action rows. An empty title is the canonical untitled divider:
 /// `is_divider_title` accepts it and the renderer expands it to content width.
 pub(super) fn divider_item() -> InlineListItem {
-    InlineListItem::group_divider()
+    vtcode_ui::design::list::group_divider()
 }
 
 fn provider_group_divider_line() -> String {

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::agent::runloop::ui_list;
 use anyhow::Result;
 use tokio::sync::Notify;
 use vtcode_commons::modal_hints::{APPROVAL_NAVIGATE_DENY, APPROVAL_NAVIGATE_STOP};
@@ -18,7 +19,7 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
     max_limit: usize,
     agent_name: Option<&str>,
 ) -> Result<Option<usize>> {
-    use vtcode_ui::tui::app::{InlineListItem, InlineListSelection};
+    use vtcode_ui::tui::app::InlineListSelection;
 
     let description_lines = vec![
         format!("Session tool limit reached: {}", max_limit),
@@ -28,42 +29,25 @@ pub(super) async fn prompt_session_limit_increase<S: UiSession + ?Sized>(
     ];
 
     let options = vec![
-        InlineListItem {
-            title: "+100 tool calls".to_string(),
-            subtitle: Some("Increase the session limit by 100".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::SessionLimitIncrease(100)),
-            search_value: Some("increase 100 hundred plus more".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "+50 tool calls".to_string(),
-            subtitle: Some("Increase the session limit by 50".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::SessionLimitIncrease(50)),
-            search_value: Some("increase 50 fifty plus more".to_string()),
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "".to_string(),
-            subtitle: None,
-            badge: None,
-            indent: 0,
-            selection: None,
-            search_value: None,
-            ..Default::default()
-        },
-        InlineListItem {
-            title: "Deny".to_string(),
-            subtitle: Some("Do not increase limit (stops tool execution)".to_string()),
-            badge: None,
-            indent: 0,
-            selection: Some(InlineListSelection::ToolApproval(false)),
-            search_value: Some("deny no exit stop cancel".to_string()),
-            ..Default::default()
-        },
+        ui_list::choice(
+            "+100 tool calls",
+            Some("Increase the session limit by 100".to_string()),
+            Some(InlineListSelection::SessionLimitIncrease(100)),
+        )
+        .with_search_value("increase 100 hundred plus more".to_string()),
+        ui_list::choice(
+            "+50 tool calls",
+            Some("Increase the session limit by 50".to_string()),
+            Some(InlineListSelection::SessionLimitIncrease(50)),
+        )
+        .with_search_value("increase 50 fifty plus more".to_string()),
+        ui_list::choice("", None, None),
+        ui_list::choice(
+            "Deny",
+            Some("Do not increase limit (stops tool execution)".to_string()),
+            Some(InlineListSelection::ToolApproval(false)),
+        )
+        .with_search_value("deny no exit stop cancel".to_string()),
     ];
 
     prompt_limit_increase_modal(
@@ -166,27 +150,23 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
             } else {
                 format!("Continue with {increment} more tool loops")
             };
-            InlineListItem {
-                title: format!("+{increment} tool loops"),
-                subtitle: Some(subtitle),
-                badge: None,
-                indent: 0,
-                selection: Some(InlineListSelection::SessionLimitIncrease(*increment)),
-                search_value: Some(tool_loop_search_value(*increment)),
-                ..Default::default()
-            }
+            ui_list::choice(
+                format!("+{increment} tool loops"),
+                Some(subtitle),
+                Some(InlineListSelection::SessionLimitIncrease(*increment)),
+            )
+            .with_search_value(tool_loop_search_value(*increment))
         })
         .collect();
     options.push(InlineListItem::group_divider());
-    options.push(InlineListItem {
-        title: "Stop".to_string(),
-        subtitle: Some("Stop the current turn and wait for input".to_string()),
-        badge: None,
-        indent: 0,
-        selection: Some(InlineListSelection::ToolApproval(false)),
-        search_value: Some("stop no exit cancel done".to_string()),
-        ..Default::default()
-    });
+    options.push(
+        ui_list::choice(
+            "Stop",
+            Some("Stop the current turn and wait for input".to_string()),
+            Some(InlineListSelection::ToolApproval(false)),
+        )
+        .with_search_value("stop no exit cancel done".to_string()),
+    );
 
     let default_increment = viable_increments.first().copied().unwrap_or(remaining_headroom);
 
