@@ -1094,6 +1094,49 @@ mod tests {
     }
 
     #[test]
+    fn clear_old_tool_results_default_config_clears_paired_inputs() {
+        // Regression: `clear_tool_inputs` now defaults to true, so the common
+        // request-shaping path must drop stale apply_patch/write_file bodies
+        // together with the stubbed results.
+        let default_clear_tool_inputs =
+            vtcode_config::core::agent::ToolResultClearingConfig::default().clear_tool_inputs;
+        assert!(default_clear_tool_inputs, "config default must clear tool inputs");
+
+        let mut messages = bulky_tool_history(3, 3_000);
+        if let Some(call) = messages
+            .get_mut(1)
+            .and_then(|m| m.tool_calls.as_mut())
+            .and_then(|calls| calls.first_mut())
+            .and_then(|call| call.function.as_mut())
+        {
+            call.arguments = "{\"input\":\"*** Begin Patch\\n*** End Patch\"}".to_string();
+        }
+
+        let cleared = clear_old_tool_results(&messages, 1, 1, 1, default_clear_tool_inputs);
+        let cleared_args = cleared
+            .get(1)
+            .and_then(|m| m.tool_calls.as_ref())
+            .and_then(|calls| calls.first())
+            .and_then(|call| call.function.as_ref())
+            .map(|function| function.arguments.as_str())
+            .unwrap_or_default();
+        assert!(
+            !cleared_args.contains("Begin Patch"),
+            "default-on clearing must drop patch bodies, got {cleared_args:?}"
+        );
+        assert_eq!(cleared_args, CLEARED_TOOL_INPUT_PLACEHOLDER);
+
+        let kept_args = cleared
+            .get(5)
+            .and_then(|m| m.tool_calls.as_ref())
+            .and_then(|calls| calls.first())
+            .and_then(|call| call.function.as_ref())
+            .map(|function| function.arguments.as_str())
+            .unwrap_or_default();
+        assert_eq!(kept_args, "{}", "kept call arguments must stay intact");
+    }
+
+    #[test]
     fn clear_old_tool_results_is_idempotent_on_stubs() {
         let messages = bulky_tool_history(4, 3_000);
         let once = clear_old_tool_results(&messages, 1, 1, 1_000, false);

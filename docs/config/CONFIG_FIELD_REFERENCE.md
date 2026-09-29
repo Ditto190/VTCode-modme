@@ -76,7 +76,7 @@ python3 scripts/generate_config_field_reference.py
 | `agent.harness.skeptic_panel.models` | `array` | no | `[]` | Model identifiers to run as skeptic evaluators (in addition to the primary evaluator). Empty when `enabled = false`. |
 | `agent.harness.skeptic_panel.models[]` | `string` | no | `-` | - |
 | `agent.harness.tool_result_clearing.clear_at_least_tokens` | `integer` | no | `30000` | Native `clear_tool_uses` applies only when the request carries context edits (interactive Anthropic with a capable model); requests that will not (other providers, Anthropic models whose capability profile lacks context edits, and headless `vtcode exec` runs, which never attach context management) get a local request-only stub rewrite with the same bounds. |
-| `agent.harness.tool_result_clearing.clear_tool_inputs` | `boolean` | no | `false` | - |
+| `agent.harness.tool_result_clearing.clear_tool_inputs` | `boolean` | no | `true` | Replace paired `tool_calls[].function.arguments` for stubbed results. Leaving inputs in place keeps full `apply_patch`/`write_file` bodies on every request after the result was already reclaimed. Defaults to `true`; set `false` to opt out. |
 | `agent.harness.tool_result_clearing.enabled` | `boolean` | no | `true` | - |
 | `agent.harness.tool_result_clearing.keep_tool_uses` | `integer` | no | `2` | - |
 | `agent.harness.tool_result_clearing.trigger_tokens` | `integer` | no | `40000` | Lowered from 100000 so research/audit turns clear tool results before they dominate the prompt. |
