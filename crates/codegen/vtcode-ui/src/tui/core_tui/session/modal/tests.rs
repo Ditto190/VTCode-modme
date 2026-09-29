@@ -1468,6 +1468,7 @@ fn apply_search_matches_title_and_description_without_search_value() {
                 indent: 0,
                 selection: Some(InlineListSelection::Model(0)),
                 search_value: None,
+                ..Default::default()
             },
             InlineListItem {
                 title: "Other".to_string(),
@@ -1476,6 +1477,7 @@ fn apply_search_matches_title_and_description_without_search_value() {
                 indent: 0,
                 selection: Some(InlineListSelection::Model(1)),
                 search_value: None,
+                ..Default::default()
             },
         ],
         None,
@@ -1496,6 +1498,7 @@ fn apply_search_prefers_explicit_search_value_over_title() {
             indent: 0,
             selection: Some(InlineListSelection::Model(0)),
             search_value: Some("only-this".to_string()),
+            ..Default::default()
         }],
         None,
     );
