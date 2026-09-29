@@ -30,6 +30,8 @@ pub(super) const CUSTOM_PROVIDER_SUBTITLE: &str = "Provide the provider name and
 const CUSTOM_PROVIDER_BADGE: &str = "Custom";
 const REASONING_OFF_BADGE: &str = "No reasoning";
 const CURRENT_BADGE: &str = "Current";
+/// Selection action for the "← Back to model list" row on follow-up steps.
+pub(super) const PICKER_BACK_ACTION: &str = "model_picker:back";
 const TOOLS_LABEL: &str = "Tools";
 const NO_TOOLS_LABEL: &str = "No tools";
 const CODEX_RUNTIME_NOTE: &str =
@@ -156,15 +158,13 @@ pub(super) fn static_model_search_terms(model: &ModelId, supports_reasoning: boo
 }
 
 fn subtitle_from_segments(current: bool, segments: Vec<String>) -> Option<String> {
-    let mut parts = Vec::new();
-    if current {
-        parts.push(CURRENT_BADGE.to_string());
-    }
-    parts.extend(segments);
-    if parts.is_empty() {
+    // `Current` is a badge (tone `Current`), not subtitle text — metadata
+    // stays dimmed and the eye lands on the badge/value first.
+    let _ = current;
+    if segments.is_empty() {
         None
     } else {
-        Some(parts.join(" • "))
+        Some(segments.join(" • "))
     }
 }
 
@@ -280,7 +280,10 @@ fn should_show_codex_runtime_note(current_provider: &str) -> bool {
 }
 
 pub(super) fn step_one_header_lines(current_provider: &str, current_model: &str) -> Vec<String> {
-    let mut lines = vec![current_model_line(current_provider, current_model)];
+    let mut lines = vec![
+        "Step 1 · Model".to_string(),
+        current_model_line(current_provider, current_model),
+    ];
     if should_show_codex_runtime_note(current_provider) {
         lines.push(CODEX_RUNTIME_NOTE.to_string());
     }
@@ -310,14 +313,26 @@ pub(super) fn render_step_one_inline(
             continue;
         }
 
+        // Provider section header (non-selectable) so long model lists group
+        // visually by vendor.
+        items.push(InlineListItem {
+            title: provider.label().to_string(),
+            ..Default::default()
+        });
+
         for idx in provider_model_indexes {
             let Some(option) = options.get(*idx) else {
                 continue;
             };
+            let is_current = is_current_model(option.provider, &option.id, current_provider, current_model);
             items.push(InlineListItem {
                 title: option.display.to_string(),
                 subtitle: static_model_subtitle(option, current_provider, current_model),
-                badge: Some(provider.label().to_string()),
+                badge: Some(if is_current {
+                    CURRENT_BADGE.to_string()
+                } else {
+                    provider.label().to_string()
+                }),
                 indent: 0,
                 selection: Some(InlineListSelection::Model(*idx)),
                 search_value: Some(model_search_value(
@@ -327,6 +342,12 @@ pub(super) fn render_step_one_inline(
                     Some(&option.description),
                     &static_model_search_terms(&option.model, option.supports_reasoning),
                 )),
+                badge_tone: if is_current {
+                    vtcode_commons::ui_protocol::InlineTone::Current
+                } else {
+                    vtcode_commons::ui_protocol::InlineTone::Neutral
+                },
+                ..Default::default()
             });
         }
 
@@ -362,6 +383,7 @@ pub(super) fn render_step_one_inline(
                             None,
                             &extra_terms,
                         )),
+                        ..Default::default()
                     });
                 }
             }
@@ -374,6 +396,7 @@ pub(super) fn render_step_one_inline(
                     indent: 0,
                     selection: Some(InlineListSelection::RefreshDynamicModels),
                     search_value: Some(format!("{} cache", provider.label())),
+                    ..Default::default()
                 });
             }
 
@@ -387,6 +410,7 @@ pub(super) fn render_step_one_inline(
                     indent: 0,
                     selection: Some(InlineListSelection::RefreshDynamicModels),
                     search_value: Some(format!("{} setup", provider.label().to_ascii_lowercase())),
+                    ..Default::default()
                 });
             }
         } else if provider == Provider::HuggingFace && provider_model_indexes.is_empty() {
@@ -397,6 +421,7 @@ pub(super) fn render_step_one_inline(
                 indent: 0,
                 selection: Some(InlineListSelection::CustomModel),
                 search_value: Some("huggingface custom".to_string()),
+                ..Default::default()
             });
         }
     }
@@ -410,6 +435,7 @@ pub(super) fn render_step_one_inline(
                 indent: 0,
                 selection: Some(InlineListSelection::CustomProvider(index)),
                 search_value: Some(custom_provider_search_value(selection)),
+                ..Default::default()
             });
         }
     }
@@ -423,6 +449,7 @@ pub(super) fn render_step_one_inline(
         indent: 0,
         selection: Some(InlineListSelection::RefreshDynamicModels),
         search_value: Some("refresh dynamic models".to_string()),
+        ..Default::default()
     });
 
     items.push(InlineListItem {
@@ -432,6 +459,7 @@ pub(super) fn render_step_one_inline(
         indent: 0,
         selection: Some(InlineListSelection::CustomModel),
         search_value: Some("custom provider".to_string()),
+        ..Default::default()
     });
 
     let lines = step_one_header_lines(current_provider, current_model);
@@ -441,13 +469,14 @@ pub(super) fn render_step_one_inline(
         placeholder: Some("provider, name, id, or capability".to_string()),
         fuzzy: false,
     };
-    renderer.show_list_modal_with_footer(
+    renderer.show_list_modal_with_status(
         STEP_ONE_TITLE,
         lines,
         items,
         selected,
         Some(search),
         Some(MODEL_PICKER_NAVIGATE_FILTER.to_string()),
+        None,
     );
 
     Ok(())
@@ -585,6 +614,7 @@ pub(super) fn divider_item() -> InlineListItem {
         indent: 0,
         selection: None,
         search_value: None,
+        ..Default::default()
     }
 }
 

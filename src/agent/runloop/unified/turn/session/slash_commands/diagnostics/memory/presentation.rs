@@ -175,6 +175,7 @@ pub(super) fn show_memory_actions_modal(
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{MEMORY_ACTION_PREFIX}toggle_enabled"))),
         search_value: Some("memory enabled disable toggle".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: toggle_title("Auto-write", memory_status.auto_write),
@@ -183,6 +184,7 @@ pub(super) fn show_memory_actions_modal(
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{MEMORY_ACTION_PREFIX}toggle_auto_write"))),
         search_value: Some("memory auto write toggle".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: toggle_title("Lightweight Model For Memory", agent_config.small_model.use_for_memory),
@@ -194,6 +196,7 @@ pub(super) fn show_memory_actions_modal(
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(format!("{MEMORY_ACTION_PREFIX}toggle_small_model"))),
         search_value: Some("memory lightweight model toggle".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: format!("Memory Triage Model ({})", lightweight_route.configured_label),
@@ -214,6 +217,7 @@ pub(super) fn show_memory_actions_modal(
             "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}auto"
         ))),
         search_value: Some("memory triage lightweight model pick".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: "Automatic".to_string(),
@@ -232,6 +236,7 @@ pub(super) fn show_memory_actions_modal(
             "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}auto"
         ))),
         search_value: Some("memory lightweight model automatic".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: "Use main model".to_string(),
@@ -246,6 +251,7 @@ pub(super) fn show_memory_actions_modal(
             "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}main"
         ))),
         search_value: Some("memory lightweight model main".to_string()),
+        ..Default::default()
     });
     items.extend(lightweight_route.choices.iter().map(|model| InlineListItem {
         title: model.clone(),
@@ -260,6 +266,7 @@ pub(super) fn show_memory_actions_modal(
             "{MEMORY_ACTION_PREFIX}{MEMORY_LIGHTWEIGHT_MODEL_PREFIX}{model}"
         ))),
         search_value: Some(format!("memory lightweight triage {model}")),
+        ..Default::default()
     }));
     items.extend([
         InlineListItem {
@@ -274,7 +281,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}set_lines"
             ))),
             search_value: Some("memory startup line limit".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: format!(
                 "Startup Byte Limit ({})",
@@ -287,7 +295,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}set_bytes"
             ))),
             search_value: Some("memory startup byte limit".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: format!(
                 "Instruction Import Depth ({})",
@@ -302,7 +311,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}set_import_depth"
             ))),
             search_value: Some("memory instruction import depth".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Set Directory Override".to_string(),
             subtitle: Some(
@@ -319,7 +329,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}set_directory_override"
             ))),
             search_value: Some("memory directory override set".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Clear Directory Override".to_string(),
             subtitle: Some("Remove the user-level memory directory override.".to_string()),
@@ -329,7 +340,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}clear_directory_override"
             ))),
             search_value: Some("memory directory override clear".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Add Instruction Exclude".to_string(),
             subtitle: Some(format!(
@@ -342,7 +354,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}add_instruction_exclude"
             ))),
             search_value: Some("memory instruction excludes add".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Remove Instruction Exclude".to_string(),
             subtitle: Some("Remove one exclude entry by exact match.".to_string()),
@@ -352,7 +365,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}remove_instruction_exclude"
             ))),
             search_value: Some("memory instruction excludes remove".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: if memory_status.cleanup_status.needed {
                 "Run Legacy Memory Cleanup".to_string()
@@ -370,7 +384,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}cleanup"
             ))),
             search_value: Some("memory cleanup legacy normalize".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Scaffold Missing Memory Files".to_string(),
             subtitle: Some(
@@ -383,7 +398,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}scaffold"
             ))),
             search_value: Some("memory scaffold files".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Rebuild Memory Summary Now".to_string(),
             subtitle: Some(
@@ -396,7 +412,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}rebuild"
             ))),
             search_value: Some("memory rebuild summary".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Batch Extract Memory From Past Sessions".to_string(),
             subtitle: Some(
@@ -409,7 +426,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}rebuild_batch"
             ))),
             search_value: Some("memory batch extract sessions".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Open Raw Settings Section".to_string(),
             subtitle: Some(
@@ -422,7 +440,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}open_settings_section"
             ))),
             search_value: Some("memory open config section".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Open Memory Summary".to_string(),
             subtitle: Some(memory_status.summary_file.display().to_string()),
@@ -432,7 +451,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}open_summary"
             ))),
             search_value: Some("memory open summary file".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Open Memory Directory".to_string(),
             subtitle: Some(memory_status.directory.display().to_string()),
@@ -442,7 +462,8 @@ pub(super) fn show_memory_actions_modal(
                 "{MEMORY_ACTION_PREFIX}open_directory"
             ))),
             search_value: Some("memory open directory".to_string()),
-        },
+    ..Default::default()
+},
         InlineListItem {
             title: "Back".to_string(),
             subtitle: Some("Close memory controls.".to_string()),
@@ -452,7 +473,8 @@ pub(super) fn show_memory_actions_modal(
                 MEMORY_ACTION_BACK.to_string(),
             )),
             search_value: Some("back close cancel".to_string()),
-        },
+    ..Default::default()
+},
     ]);
 
     ctx.renderer.show_list_modal(

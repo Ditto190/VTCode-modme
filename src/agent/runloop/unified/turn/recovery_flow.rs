@@ -218,6 +218,7 @@ pub(crate) async fn execute_recovery_prompt(
                 item.subtitle.clone().unwrap_or_default(),
                 item.badge.clone().unwrap_or_default()
             )),
+            ..Default::default()
         })
         .collect();
 
@@ -244,6 +245,7 @@ pub(crate) async fn execute_recovery_prompt(
             selected,
             search,
             hotkeys: Vec::new(),
+            status: None,
         }),
         ctrl_c_state,
         ctrl_c_notify,
@@ -404,6 +406,7 @@ mod tests {
                     text: None,
                 }),
                 search_value: None,
+                ..Default::default()
             },
             InlineListItem {
                 title: "Skip".to_string(),
@@ -416,6 +419,7 @@ mod tests {
                     text: None,
                 }),
                 search_value: None,
+                ..Default::default()
             },
         ];
 

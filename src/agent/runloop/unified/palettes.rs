@@ -87,6 +87,7 @@ pub(crate) fn show_theme_palette(renderer: &mut AnsiRenderer, mode: ThemePalette
             indent: 0,
             selection: Some(InlineListSelection::Theme(id.to_string())),
             search_value: Some(theme_search_value(id, label)),
+            ..Default::default()
         });
     }
 
@@ -147,6 +148,7 @@ pub(crate) fn show_mode_palette(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{}{}", MODE_ACTION_PREFIX, spec.name))),
             search_value: Some(format!("{} {} agent mode", spec.name, spec.description)),
+            ..Default::default()
         });
     }
 
@@ -230,6 +232,7 @@ pub(crate) fn show_sessions_palette(
             indent: 0,
             selection: Some(InlineListSelection::Session(listing.identifier())),
             search_value: Some(session_search_value(listing, &ended_local.to_string(), &duration_label, tool_count)),
+            ..Default::default()
         });
     }
 
@@ -275,6 +278,7 @@ pub(crate) fn show_fork_mode_palette(renderer: &mut AnsiRenderer, session_id: &s
                 summarize: false,
             }),
             search_value: Some("copy full history fork transcript".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Start summarized fork".to_string(),
@@ -286,6 +290,7 @@ pub(crate) fn show_fork_mode_palette(renderer: &mut AnsiRenderer, session_id: &s
                 summarize: true,
             }),
             search_value: Some("summary summarized compact fork handoff".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -435,7 +440,13 @@ pub(crate) async fn handle_palette_selection(
                 match apply_settings_action(state.as_mut(), action) {
                     Ok(outcome) => {
                         if let Some(message) = outcome.message {
-                            renderer.line(MessageStyle::Info, &message)?;
+                            let tone = outcome.tone.unwrap_or(if outcome.saved {
+                                vtcode_commons::ui_protocol::InlineTone::Success
+                            } else {
+                                vtcode_commons::ui_protocol::InlineTone::Accent
+                            });
+                            state.status = Some(vtcode_commons::ui_protocol::InlineStatus::new(tone, message.clone()));
+                            renderer.line(MessageStyle::Info, &format!("Settings: {message}"))?;
                         }
                         if outcome.saved
                             && let Err(err) = refresh_runtime_config_from_manager(
@@ -449,17 +460,18 @@ pub(crate) async fn handle_palette_selection(
                             )
                             .await
                         {
-                            renderer.line(
-                                MessageStyle::Warning,
-                                &format!("Settings saved, but the running session kept its last valid runtime config: {err:#}"),
-                            )?;
+                            let warning = format!(
+                                "Settings saved, but the running session kept its last valid runtime config: {err:#}"
+                            );
+                            state.status = Some(vtcode_commons::ui_protocol::InlineStatus::warning(warning.clone()));
+                            renderer.line(MessageStyle::Warning, &warning)?;
                         }
                     }
                     Err(err) => {
-                        renderer.line(
-                            MessageStyle::Warning,
-                            &format!("Could not apply settings change; keeping the last valid configuration: {err:#}"),
-                        )?;
+                        let warning =
+                            format!("Could not apply settings change; keeping the last valid configuration: {err:#}");
+                        state.status = Some(vtcode_commons::ui_protocol::InlineStatus::error(warning.clone()));
+                        renderer.line(MessageStyle::Error, &warning)?;
                     }
                 }
             }

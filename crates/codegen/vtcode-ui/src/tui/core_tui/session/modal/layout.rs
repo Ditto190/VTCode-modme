@@ -1,4 +1,4 @@
-use crate::tui::ui::tui::types::SecurePromptConfig;
+use crate::tui::ui::tui::types::{InlineStatus, SecurePromptConfig};
 use ratatui::prelude::*;
 use ratatui_cheese::input::InputStyles;
 
@@ -24,11 +24,19 @@ pub struct ModalRenderStyles {
     pub(crate) instruction_bullet: Style,
     pub(crate) instruction_body: Style,
     pub(crate) hint: Style,
+    /// Semantic tones for badges, values, and the status strip.
+    pub(crate) success: Style,
+    pub(crate) warning: Style,
+    pub(crate) danger: Style,
+    /// Accent emphasis that does not imply selection (values, Current badges).
+    pub(crate) accent: Style,
 }
 
 pub struct ModalBodyContext<'a, 'b> {
     pub(crate) instructions: &'a [String],
     pub(crate) footer_hint: Option<&'a str>,
+    /// Latest apply/save feedback for the status strip.
+    pub(crate) status: Option<&'a InlineStatus>,
     pub(crate) list: Option<&'b mut ModalListState>,
     pub(crate) styles: &'a ModalRenderStyles,
     pub(crate) secure_prompt: Option<&'a SecurePromptConfig>,

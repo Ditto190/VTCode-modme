@@ -267,6 +267,7 @@ where
             selected: Some(InlineListSelection::FileConflictReload),
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         }),
         ctrl_c_state,
         ctrl_c_notify,
@@ -334,6 +335,7 @@ fn conflict_resolution_items(can_show_diff: bool) -> Vec<InlineListItem> {
         indent: 0,
         selection: Some(InlineListSelection::FileConflictReload),
         search_value: Some("reload disk external version".to_string()),
+        ..Default::default()
     });
     if can_show_diff {
         items.push(InlineListItem {
@@ -343,6 +345,7 @@ fn conflict_resolution_items(can_show_diff: bool) -> Vec<InlineListItem> {
             indent: 0,
             selection: Some(InlineListSelection::FileConflictViewDiff),
             search_value: Some("diff compare review changes".to_string()),
+            ..Default::default()
         });
     }
     items.push(InlineListItem {
@@ -352,6 +355,7 @@ fn conflict_resolution_items(can_show_diff: bool) -> Vec<InlineListItem> {
         indent: 0,
         selection: Some(InlineListSelection::FileConflictAbort),
         search_value: Some("abort cancel stop".to_string()),
+        ..Default::default()
     });
     items
 }

@@ -181,6 +181,7 @@ fn show_rewind_checkpoint_modal(handle: &InlineHandle, snapshots: &[SnapshotMeta
                     snapshot.prompt_text.clone().unwrap_or_default(),
                     snapshot.description
                 )),
+                ..Default::default()
             }
         })
         .collect();
@@ -211,6 +212,7 @@ fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) 
             indent: 0,
             selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreBoth)),
             search_value: Some("rewind run restore both code conversation".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Rewind".to_string(),
@@ -219,6 +221,7 @@ fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) 
             indent: 0,
             selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreConversation)),
             search_value: Some("rewind restore conversation chat".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Restore code".to_string(),
@@ -227,6 +230,7 @@ fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) 
             indent: 0,
             selection: Some(InlineListSelection::RewindAction(RewindAction::RestoreCode)),
             search_value: Some("restore code files".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Cancel".to_string(),
@@ -235,6 +239,7 @@ fn show_rewind_action_modal(handle: &InlineHandle, snapshot: &SnapshotMetadata) 
             indent: 0,
             selection: Some(InlineListSelection::RewindAction(RewindAction::NeverMind)),
             search_value: Some("cancel never mind".to_string()),
+            ..Default::default()
         },
     ];
     handle.show_list_modal(

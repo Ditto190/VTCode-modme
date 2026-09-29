@@ -138,6 +138,7 @@ pub(super) fn build_question_items_with_options(
                     other: None,
                 }),
                 search_value: Some(format!("{} {}", opt.label, opt.description)),
+                ..Default::default()
             })
             .collect();
 
@@ -152,6 +153,7 @@ pub(super) fn build_question_items_with_options(
                 other: Some(String::new()),
             }),
             search_value: Some("custom note other custom response free text".to_string()),
+            ..Default::default()
         });
         items
     } else {
@@ -166,6 +168,7 @@ pub(super) fn build_question_items_with_options(
                 other: Some(String::new()),
             }),
             search_value: None,
+            ..Default::default()
         }]
     }
 }

@@ -644,6 +644,7 @@ fn build_tool_permission_options(
             indent: 0,
             selection: Some(InlineListSelection::ToolApproval(true)),
             search_value: Some("approve yes allow once y 1".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: if prompt_kind == ToolPermissionPromptKind::Mcp {
@@ -660,6 +661,7 @@ fn build_tool_permission_options(
             indent: 0,
             selection: Some(InlineListSelection::ToolApprovalSession),
             search_value: Some("session temporary temp 2".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -686,6 +688,7 @@ fn build_tool_permission_options(
             indent: 0,
             selection: Some(InlineListSelection::ToolApprovalPermanent),
             search_value: Some("always permanent forever save 3".to_string()),
+            ..Default::default()
         });
     }
 
@@ -696,6 +699,7 @@ fn build_tool_permission_options(
         indent: 0,
         selection: None,
         search_value: None,
+        ..Default::default()
     });
 
     options.push(InlineListItem {
@@ -717,6 +721,7 @@ fn build_tool_permission_options(
         } else {
             "deny no reject once temporary 4".to_string()
         }),
+        ..Default::default()
     });
 
     if matches!(persistent_approval_target, Some(PersistentApprovalTarget::ToolLevel))
@@ -729,6 +734,7 @@ fn build_tool_permission_options(
             indent: 0,
             selection: Some(InlineListSelection::ToolApproval(false)),
             search_value: Some("deny no reject cancel never always 5".to_string()),
+            ..Default::default()
         });
     }
 
@@ -847,7 +853,8 @@ pub(super) async fn prompt_tool_permission<S: UiSession + ?Sized>(
             selected: Some(default_selection),
             search: None,
             hotkeys,
-        }),
+    status: None,
+}),
         ctrl_c_state,
         ctrl_c_notify,
         |submission| match submission {
@@ -939,6 +946,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
             indent: 0,
             selection: Some(InlineListSelection::ToolApprovalEnable),
             search_value: Some("enable allow fix policy continue yes 1".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "".to_string(),
@@ -947,6 +955,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
             indent: 0,
             selection: None,
             search_value: None,
+            ..Default::default()
         },
         InlineListItem {
             title: "Deny Once".to_string(),
@@ -955,6 +964,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
             indent: 0,
             selection: Some(InlineListSelection::ToolApprovalDenyOnce),
             search_value: Some("deny no reject skip once 2".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -968,6 +978,7 @@ pub(super) async fn prompt_policy_denied_tool<S: UiSession + ?Sized>(
         selected: None,
         search: None,
         hotkeys: Vec::new(),
+        status: None,
     };
 
     let overlay = TransientRequest::List(request);

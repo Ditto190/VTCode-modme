@@ -163,6 +163,7 @@ async fn prompt_source(ctx: &mut SlashCommandContext<'_>) -> Result<Option<Strin
                 other: Some(String::new()),
             }),
             search_value: Some("submit source".to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,
@@ -245,6 +246,7 @@ async fn pick_installed_plugin(
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction(format!("{}{}", PLUGIN_PICK_PREFIX, entry.name))),
                 search_value: Some(format!("{} {} {}", entry.name, entry.description, entry.scope.label())),
+                ..Default::default()
             }
         })
         .collect();
@@ -256,6 +258,7 @@ async fn pick_installed_plugin(
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(PLUGIN_PICK_BACK_ACTION.to_string())),
         search_value: Some("back cancel".to_string()),
+        ..Default::default()
     });
 
     ctx.renderer.show_list_modal(
@@ -293,6 +296,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}list"))),
             search_value: Some("list plugins".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Add plugin".to_string(),
@@ -301,6 +305,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}add"))),
             search_value: Some("install add plugin".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Remove plugin".to_string(),
@@ -309,6 +314,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}remove"))),
             search_value: Some("remove uninstall plugin".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Plugin details".to_string(),
@@ -317,6 +323,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}info"))),
             search_value: Some("details info metadata plugin".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Refresh MCP providers".to_string(),
@@ -325,6 +332,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}refresh"))),
             search_value: Some("refresh mcp providers".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Show help".to_string(),
@@ -333,6 +341,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{PLUGIN_ACTION_PREFIX}help"))),
             search_value: Some("help commands plugin".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Back".to_string(),
@@ -341,6 +350,7 @@ fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(PLUGIN_ACTION_BACK.to_string())),
             search_value: Some("back close".to_string()),
+            ..Default::default()
         },
     ];
 

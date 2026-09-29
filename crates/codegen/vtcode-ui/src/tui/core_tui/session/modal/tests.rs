@@ -16,6 +16,7 @@ fn base_item(title: &str) -> InlineListItem {
         indent: 0,
         selection: None,
         search_value: None,
+        ..Default::default()
     }
 }
 
@@ -53,6 +54,7 @@ fn sample_list_modal() -> ModalState {
         restore_cursor: true,
         search: Some(search_state),
         is_help_modal: false,
+        status: None,
     };
 
     if let Some(list) = modal.list.as_mut()
@@ -592,6 +594,7 @@ fn sample_list_modal_with_count(count: usize) -> ModalState {
         restore_cursor: true,
         search: None,
         is_help_modal: false,
+        status: None,
     }
 }
 
@@ -967,6 +970,7 @@ fn list_modal_space_no_longer_submits_config_action() {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("permissions.default:cycle".to_owned())),
                 search_value: None,
+                ..Default::default()
             }],
             None,
         )),
@@ -975,6 +979,7 @@ fn list_modal_space_no_longer_submits_config_action() {
         restore_cursor: true,
         search: None,
         is_help_modal: false,
+        status: None,
     };
 
     let key = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
@@ -998,6 +1003,7 @@ fn list_modal_alt_d_is_swallowed_without_changing_density() {
                 indent: 0,
                 selection: Some(InlineListSelection::ConfigAction("permissions.default:cycle".to_owned())),
                 search_value: None,
+                ..Default::default()
             }],
             None,
         )),
@@ -1006,6 +1012,7 @@ fn list_modal_alt_d_is_swallowed_without_changing_density() {
         restore_cursor: true,
         search: None,
         is_help_modal: false,
+        status: None,
     };
 
     assert!(modal.list.as_ref().expect("config list should exist").compact_rows());
@@ -1029,6 +1036,7 @@ fn subtitle_lists_default_to_compact_density() {
             indent: 0,
             selection: Some(InlineListSelection::Model(0)),
             search_value: Some("gpt-5".to_owned()),
+            ..Default::default()
         }],
         None,
     );
@@ -1046,6 +1054,7 @@ fn single_line_lists_keep_compact_flag_cleared() {
             indent: 0,
             selection: Some(InlineListSelection::ToolApproval(true)),
             search_value: None,
+            ..Default::default()
         }],
         None,
     );
@@ -1121,6 +1130,7 @@ fn searchless_approval_modal() -> ModalState {
             indent: 0,
             selection: Some(selection),
             search_value: None,
+            ..Default::default()
         }
     }
     ModalState {
@@ -1139,6 +1149,7 @@ fn searchless_approval_modal() -> ModalState {
                     indent: 0,
                     selection: None,
                     search_value: None,
+                    ..Default::default()
                 },
                 option("Deny once", InlineListSelection::Model(2)),
             ],
@@ -1148,6 +1159,7 @@ fn searchless_approval_modal() -> ModalState {
         restore_input: true,
         restore_cursor: true,
         search: None,
+        status: None,
         is_help_modal: false,
     }
 }
@@ -1246,6 +1258,7 @@ fn numbered_shortcuts_gate_covers_empty_and_crowded_lists() {
             indent: 0,
             selection: Some(InlineListSelection::Model(index)),
             search_value: None,
+            ..Default::default()
         })
         .collect();
     let nine = ModalListState::new(nine, None);
@@ -1260,6 +1273,7 @@ fn numbered_shortcuts_gate_covers_empty_and_crowded_lists() {
             indent: 0,
             selection: Some(InlineListSelection::Model(index)),
             search_value: None,
+            ..Default::default()
         })
         .collect::<Vec<_>>();
     ten.push(InlineListItem {
@@ -1269,6 +1283,7 @@ fn numbered_shortcuts_gate_covers_empty_and_crowded_lists() {
         indent: 0,
         selection: None,
         search_value: None,
+        ..Default::default()
     });
     let ten = ModalListState::new(ten, None);
     assert!(!ten.numbered_shortcuts(), "crowded lists offer no digits");

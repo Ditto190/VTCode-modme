@@ -204,7 +204,7 @@ pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<R
         let (list_rows, summary_rows) = wizard
             .steps
             .get(wizard.current_step)
-            .map(|step| (list_desired_rows(&step.list), step.list.summary_line_rows(None)))
+            .map(|step| (list_desired_rows(&step.list), step.list.summary_line_rows(None, false)))
             .unwrap_or((1, 0));
         lines = lines.saturating_add(list_rows);
         lines = lines.saturating_add(summary_rows);
@@ -243,7 +243,7 @@ pub fn split_inline_modal_area(session: &Session, area: Rect) -> (Rect, Option<R
         }
         if let Some(list) = modal.list.as_ref() {
             lines = lines.saturating_add(list_desired_rows(list));
-            lines = lines.saturating_add(list.summary_line_rows(modal.footer_hint.as_deref()));
+            lines = lines.saturating_add(list.summary_line_rows(modal.footer_hint.as_deref(), modal.status.is_some()));
         } else {
             lines = lines.saturating_add(1);
         }
@@ -474,6 +474,7 @@ pub fn render_modal(session: &mut Session, frame: &mut Frame<'_>, area: Rect) {
         ModalBodyContext {
             instructions: &modal.lines,
             footer_hint: modal.footer_hint.as_deref(),
+            status: modal.status.as_ref(),
             list: modal.list.as_mut(),
             styles: &styles,
             secure_prompt: modal.secure_prompt.as_ref(),
@@ -529,6 +530,17 @@ pub(crate) fn modal_render_styles(session: &Session) -> ModalRenderStyles {
         instruction_bullet: header_style,
         instruction_body: default_style,
         hint: muted_style.add_modifier(Modifier::ITALIC),
+        success: session.styles.accent_style().add_modifier(Modifier::BOLD),
+        warning: session.styles.warning_style().add_modifier(Modifier::BOLD),
+        danger: {
+            let color = session.styles.text_fallback(InlineMessageKind::Error);
+            let mut style = session.styles.default_style();
+            if let Some(color) = color {
+                style = style.fg(ratatui_color_from_ansi(color));
+            }
+            style.add_modifier(Modifier::BOLD)
+        },
+        accent: session.styles.modal_list_highlight_style(),
     }
 }
 

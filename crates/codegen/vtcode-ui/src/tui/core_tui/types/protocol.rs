@@ -466,6 +466,20 @@ impl InlineHandle {
         search: Option<InlineListSearchConfig>,
         footer_hint: Option<String>,
     ) {
+        self.show_list_modal_with_status(title, lines, items, selected, search, footer_hint, None);
+    }
+
+    /// Show a list modal with an optional status strip (last action feedback).
+    pub fn show_list_modal_with_status(
+        &self,
+        title: String,
+        lines: Vec<String>,
+        items: Vec<InlineListItem>,
+        selected: Option<InlineListSelection>,
+        search: Option<InlineListSearchConfig>,
+        footer_hint: Option<String>,
+        status: Option<crate::tui::core_tui::types::InlineStatus>,
+    ) {
         self.show_overlay(OverlayRequest::List(ListOverlayRequest {
             title,
             lines,
@@ -474,6 +488,7 @@ impl InlineHandle {
             search,
             footer_hint,
             hotkeys: Vec::new(),
+            status,
         }));
     }
 

@@ -150,6 +150,7 @@ async fn select_subagent_model_target(
                 "{SUBAGENT_MODEL_ACTION_PREFIX}shortcut:{shortcut}"
             ))),
             search_value: Some(format!("{shortcut} shortcut alias delegated model {description}")),
+            ..Default::default()
         });
     }
 
@@ -175,6 +176,7 @@ async fn select_subagent_model_target(
                 Some(&option.description),
                 &static_model_search_terms(&option.model, option.supports_reasoning),
             )),
+            ..Default::default()
         });
     }
 
@@ -212,6 +214,7 @@ async fn select_subagent_model_target(
                 None,
                 &[provider.label().to_string(), "dynamic".to_string()],
             )),
+            ..Default::default()
         });
     }
 
@@ -222,6 +225,7 @@ async fn select_subagent_model_target(
         indent: 0,
         selection: Some(InlineListSelection::RefreshDynamicModels),
         search_value: Some("refresh dynamic local models".to_string()),
+        ..Default::default()
     });
     items.push(InlineListItem {
         title: "Enter exact model id".to_string(),
@@ -230,6 +234,7 @@ async fn select_subagent_model_target(
         indent: 0,
         selection: Some(InlineListSelection::CustomModel),
         search_value: Some("custom manual exact model id".to_string()),
+        ..Default::default()
     });
 
     let selected = preferred_subagent_model_selection(options, dynamic_models, current_model)
@@ -301,6 +306,7 @@ async fn select_subagent_reasoning(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SUBAGENT_REASONING_ACTION_PREFIX}keep"))),
             search_value: Some("keep current reasoning".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Unset reasoning override".to_string(),
@@ -309,6 +315,7 @@ async fn select_subagent_reasoning(
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{SUBAGENT_REASONING_ACTION_PREFIX}unset"))),
             search_value: Some("unset clear reasoning".to_string()),
+            ..Default::default()
         },
     ];
 
@@ -323,6 +330,7 @@ async fn select_subagent_reasoning(
                 level.as_str()
             ))),
             search_value: Some(format!("{} {}", level.as_str(), reasoning_level_label(level))),
+            ..Default::default()
         });
     }
 
@@ -399,7 +407,8 @@ async fn prompt_subagent_model_id(
                         other: Some(String::new()),
                     }),
                     search_value: Some("manual model id".to_string()),
-                }],
+    ..Default::default()
+}],
                 completed: false,
                 answer: None,
                 allow_freeform: true,

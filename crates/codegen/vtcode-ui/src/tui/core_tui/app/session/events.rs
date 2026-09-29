@@ -2035,10 +2035,12 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::Theme("ciapre".to_string())),
                 search_value: None,
+                ..Default::default()
             }],
             selected: Some(InlineListSelection::Theme("ciapre".to_string())),
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         }));
 
         let event = session.process_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -2070,6 +2072,7 @@ mod tests {
                         indent: 0,
                         selection: Some(InlineListSelection::SlashCommand(title.to_string())),
                         search_value: Some(title.to_string()),
+                        ..Default::default()
                     })
                     .collect(),
                 selected: None,
@@ -2079,6 +2082,7 @@ mod tests {
                     fuzzy: false,
                 }),
                 hotkeys: Vec::new(),
+                status: None,
             }));
             session.core.set_input_enabled(true);
             let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -3157,10 +3161,12 @@ mod tests {
                 indent: 0,
                 selection: None,
                 search_value: None,
+                ..Default::default()
             }],
             selected: None,
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         }));
 
         let backend = ratatui::backend::TestBackend::new(80, 24);
@@ -3201,6 +3207,7 @@ mod tests {
                 indent: 0,
                 selection: Some(InlineListSelection::PlanApprovalExecute),
                 search_value: None,
+                ..Default::default()
             }],
             selected: Some(InlineListSelection::PlanApprovalExecute),
             search: None,
@@ -3208,6 +3215,7 @@ mod tests {
                 key: TransientHotkeyKey::CtrlChar('g'),
                 action: TransientHotkeyAction::LaunchEditor,
             }],
+            status: None,
         }));
         assert!(session.has_active_overlay(), "plan approval overlay should be open");
         assert!(

@@ -36,25 +36,27 @@ pub(super) fn section_subtitle(path: &str, value: &TomlValue) -> String {
     parts.join(" • ")
 }
 
-pub(super) fn setting_subtitle(summary: &str, description: &str, adjustable: bool) -> String {
-    let value_display = if adjustable {
-        format!("<- {summary} ->")
-    } else {
-        summary.to_string()
-    };
-    let mut parts = vec![value_display];
+pub(super) fn setting_subtitle(_summary: &str, description: &str, adjustable: bool) -> String {
+    // Value is rendered as an accent `InlineListItem::value`; the subtitle
+    // carries only description (+ adjust hint) so metadata stays dimmed.
+    let mut parts = Vec::new();
+    if adjustable {
+        parts.push("<- adjust ->".to_string());
+    }
     if !description.is_empty() {
         parts.push(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN));
     }
-    parts.join(" • ")
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join(" • ")
+    }
 }
 
-pub(super) fn collection_subtitle(summary: String, description: &str) -> String {
-    let mut parts = vec![summary];
-    if !description.is_empty() {
-        parts.push(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN));
-    }
-    parts.join(" • ")
+/// Description-only subtitle for setting rows that also carry a `value`.
+pub(super) fn setting_description(description: &str, adjustable: bool) -> Option<String> {
+    let sub = setting_subtitle("", description, adjustable);
+    if sub.trim().is_empty() { None } else { Some(sub) }
 }
 
 pub(super) fn search_value_for_missing_doc(path: &str, label: &str, doc: Option<&FieldDoc>) -> String {
@@ -78,10 +80,20 @@ pub(super) fn section_item(label: &str) -> InlineListItem {
         indent: 0,
         selection: None,
         search_value: None,
+        kind: vtcode_commons::ui_protocol::InlineItemKind::Header,
+        ..Default::default()
     }
 }
 
 pub(super) fn action_item(title: &str, subtitle: &str, badge: Option<&str>, action: &str) -> InlineListItem {
+    let tone = match badge {
+        Some("Confirm") | Some("Reset") | Some("Destructive") => vtcode_commons::ui_protocol::InlineTone::Danger,
+        Some("Back") | Some("Cancel") => vtcode_commons::ui_protocol::InlineTone::Neutral,
+        Some("On") => vtcode_commons::ui_protocol::InlineTone::Success,
+        Some("Current") => vtcode_commons::ui_protocol::InlineTone::Current,
+        Some(_) => vtcode_commons::ui_protocol::InlineTone::Accent,
+        None => vtcode_commons::ui_protocol::InlineTone::Neutral,
+    };
     InlineListItem {
         title: title.to_string(),
         subtitle: Some(subtitle.to_string()),
@@ -89,6 +101,9 @@ pub(super) fn action_item(title: &str, subtitle: &str, badge: Option<&str>, acti
         indent: 0,
         selection: Some(InlineListSelection::ConfigAction(action.to_string())),
         search_value: Some(format!("{title} {subtitle}")),
+        badge_tone: tone,
+        kind: vtcode_commons::ui_protocol::InlineItemKind::Action,
+        ..Default::default()
     }
 }
 

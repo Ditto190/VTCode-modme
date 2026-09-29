@@ -13,6 +13,7 @@ fn make_list_item(title: &str, cmd: &str) -> InlineListItem {
         indent: 0,
         selection: Some(InlineListSelection::SlashCommand(cmd.to_string())),
         search_value: Some(title.to_string()),
+        ..Default::default()
     }
 }
 
@@ -26,6 +27,7 @@ fn show_list_modal(session: &mut AppSession, title: &str, lines: Vec<&str>, item
             selected: None,
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })),
     });
 }
@@ -71,6 +73,7 @@ fn show_overlay_with_hint(
             selected,
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })),
     });
 }
@@ -91,6 +94,7 @@ fn show_list_modal_with_hint(
             selected: None,
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })),
     });
 }
@@ -242,6 +246,7 @@ fn floating_modal_clears_stale_buffer_content_before_painting() {
             indent: 0,
             selection: Some(InlineListSelection::SlashCommand("theme".to_string())),
             search_value: Some("Clapre".to_string()),
+            ..Default::default()
         }],
     );
 
@@ -288,10 +293,12 @@ fn selected_modal_row_uses_primary_foreground() {
                 indent: 0,
                 selection: Some(selection.clone()),
                 search_value: Some("Option A".to_string()),
+                ..Default::default()
             }],
             selected: Some(selection),
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })),
     });
 
@@ -328,6 +335,7 @@ fn modal_section_header_uses_foreground_contrast_on_light_theme() {
                 indent: 0,
                 selection: None,
                 search_value: Some("Built-in themes".to_string()),
+                ..Default::default()
             },
             InlineListItem {
                 title: "Clapre".to_string(),
@@ -336,6 +344,7 @@ fn modal_section_header_uses_foreground_contrast_on_light_theme() {
                 indent: 0,
                 selection: Some(InlineListSelection::SlashCommand("theme".to_string())),
                 search_value: Some("Clapre".to_string()),
+                ..Default::default()
             },
         ],
     );
@@ -387,6 +396,7 @@ fn floating_modal_renders_approval_text_without_dim_modifier() {
         indent: 0,
         selection: Some(selection),
         search_value: Some(title.to_string()),
+        ..Default::default()
     };
     session.handle_command(app_types::InlineCommand::ShowTransient {
         request: Box::new(app_types::TransientRequest::List(app_types::ListOverlayRequest {
@@ -410,6 +420,7 @@ fn floating_modal_renders_approval_text_without_dim_modifier() {
             selected: Some(InlineListSelection::ToolApproval(true)),
             search: None,
             hotkeys: Vec::new(),
+            status: None,
         })),
     });
 
@@ -511,6 +522,7 @@ fn inline_modal_height_budgets_list_divider_without_search() {
             indent: 0,
             selection: Some(InlineListSelection::SlashCommand(format!("cmd{index}"))),
             search_value: Some(format!("option {index}")),
+            ..Default::default()
         })
         .collect::<Vec<_>>();
     show_overlay(&mut session, "Pick", vec!["Choose"], items, None);
@@ -560,6 +572,7 @@ fn plan_approval_modal_height_hugs_wrapped_header_without_gap() {
         indent: 0,
         selection: Some(InlineListSelection::SlashCommand(format!("plan{index}"))),
         search_value: Some(title.to_string()),
+        ..Default::default()
     })
     .collect::<Vec<_>>();
     show_overlay_with_hint(
@@ -674,7 +687,7 @@ fn modal_click_on_summary_row_keeps_selection() {
             modal
                 .list
                 .as_ref()
-                .map(|list| list.summary_line_rows(modal.footer_hint.as_deref()))
+                .map(|list| list.summary_line_rows(modal.footer_hint.as_deref(), modal.status.is_some()))
         })
         .unwrap_or(0);
     assert_eq!(info_rows, 1, "footer hint should render one summary row above the list");
@@ -763,6 +776,7 @@ fn wizard_click_below_inline_editor_selects_correct_item() {
                             other: Some(String::new()),
                         }),
                         search_value: Some("other".to_string()),
+                        ..Default::default()
                     },
                     make_list_item("Scope", "scope"),
                     make_list_item("Priority", "priority"),

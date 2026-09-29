@@ -493,6 +493,7 @@ async fn prompt_openai_manual_callback_input(
                 other: Some(String::new()),
             }),
             search_value: Some("submit callback redirect url query string".to_string()),
+            ..Default::default()
         }],
         completed: false,
         answer: None,
@@ -554,6 +555,7 @@ async fn show_oauth_provider_modal(ctx: &mut SlashCommandContext<'_>, action: OA
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{OAUTH_PROVIDER_PREFIX}{COPILOT_PROVIDER}"))),
             search_value: Some("github copilot cli auth".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "OpenAI ChatGPT".to_string(),
@@ -562,6 +564,7 @@ async fn show_oauth_provider_modal(ctx: &mut SlashCommandContext<'_>, action: OA
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{OAUTH_PROVIDER_PREFIX}{OPENAI_PROVIDER}"))),
             search_value: Some("openai chatgpt oauth subscription".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "OpenRouter".to_string(),
@@ -570,6 +573,7 @@ async fn show_oauth_provider_modal(ctx: &mut SlashCommandContext<'_>, action: OA
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{OAUTH_PROVIDER_PREFIX}{OPENROUTER_PROVIDER}"))),
             search_value: Some("openrouter oauth".to_string()),
+            ..Default::default()
         },
         InlineListItem {
             title: "Back".to_string(),
@@ -578,6 +582,7 @@ async fn show_oauth_provider_modal(ctx: &mut SlashCommandContext<'_>, action: OA
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(OAUTH_PROVIDER_BACK.to_string())),
             search_value: Some("back close cancel".to_string()),
+            ..Default::default()
         },
     ];
 

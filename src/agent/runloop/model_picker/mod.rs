@@ -481,6 +481,27 @@ impl ModelPickerState {
                     self.apply_reasoning_choice(renderer, reasoning_from_selection_string(&level))
                 }
                 InlineListSelection::DisableReasoning => self.apply_reasoning_off_choice(renderer),
+                InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {
+                    self.step = PickerStep::AwaitModel;
+                    self.selection = None;
+                    self.selected_reasoning = None;
+                    self.selected_service_tier = None;
+                    self.selected_mimo_auth = None;
+                    if self.settings.inline_enabled {
+                        render_step_one_inline(
+                            renderer,
+                            &self.settings.options,
+                            self.settings.current_reasoning,
+                            &self.dynamic_models,
+                            self.preferred_model_selection(),
+                            &self.settings.current_provider,
+                            &self.settings.current_model,
+                            &self.custom_providers,
+                            &self.settings.provider_order,
+                        )?;
+                    }
+                    Ok(ModelPickerProgress::InProgress)
+                }
                 InlineListSelection::OpenAIServiceTier(_) => {
                     renderer.line(
                         MessageStyle::Error,
@@ -537,6 +558,27 @@ impl ModelPickerState {
                 }
             },
             PickerStep::AwaitServiceTier => match choice {
+                InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {
+                    self.step = PickerStep::AwaitModel;
+                    self.selection = None;
+                    self.selected_reasoning = None;
+                    self.selected_service_tier = None;
+                    self.selected_mimo_auth = None;
+                    if self.settings.inline_enabled {
+                        render_step_one_inline(
+                            renderer,
+                            &self.settings.options,
+                            self.settings.current_reasoning,
+                            &self.dynamic_models,
+                            self.preferred_model_selection(),
+                            &self.settings.current_provider,
+                            &self.settings.current_model,
+                            &self.custom_providers,
+                            &self.settings.provider_order,
+                        )?;
+                    }
+                    Ok(ModelPickerProgress::InProgress)
+                }
                 InlineListSelection::OpenAIServiceTier(choice) => {
                     let service_tier = match choice {
                         OpenAIServiceTierChoice::ProjectDefault => None,
