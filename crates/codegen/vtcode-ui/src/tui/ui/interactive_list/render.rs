@@ -10,7 +10,8 @@ use super::{SelectionEntry, SelectionListState};
 use crate::tui::ui::search::ListSearchFilter;
 
 const CONTROLS_HINT: &str = "↑/↓ j/k to move  •  Home/End to jump  •  Enter/Tab confirm  •  Esc clear/cancel";
-const NUMBER_JUMP_HINT: &str = "Tip: Type to filter  •  number to jump when filter is empty";
+const FILTER_HINT: &str = "Tip: Type to filter  •  number to jump when filter is empty";
+const NUMBER_JUMP_HINT: &str = "Tip: Type number to jump";
 const NO_MATCHES: &str = "No matching options";
 
 mod styles {
@@ -22,6 +23,45 @@ mod styles {
     pub const HIGHLIGHT: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
     pub const SEARCH_LABEL: Style = Style::new().fg(Color::Gray).add_modifier(Modifier::DIM);
     pub const SEARCH_QUERY: Style = Style::new().fg(Color::White);
+}
+
+/// Split the selector chrome into instruction / search / list / footer rows.
+///
+/// `try_layout::<N>` is const-generic on the constraint count: mismatched N
+/// always errors and would leave the picker blank. Keep 3- and 4-row paths
+/// separate (search-off vs search-on).
+pub(super) fn selection_layout(area: Rect, search_enabled: bool, instruction_height: u16) -> (Rect, Rect, Rect, Rect) {
+    let footer_height: u16 = 4;
+    if search_enabled {
+        let [instructions_area, search_area, list_area, footer_area] = area
+            .try_layout(
+                &Layout::vertical([
+                    Constraint::Length(instruction_height.min(area.height.saturating_sub(footer_height + 6))),
+                    Constraint::Length(1),
+                    Constraint::Min(5),
+                    Constraint::Length(footer_height),
+                ])
+                .spacing(-1)
+                .margin(1)
+                .vertical_margin(1),
+            )
+            .unwrap_or([Rect::ZERO; 4]);
+        (instructions_area, search_area, list_area, footer_area)
+    } else {
+        let [instructions_area, list_area, footer_area] = area
+            .try_layout(
+                &Layout::vertical([
+                    Constraint::Length(instruction_height.min(area.height.saturating_sub(footer_height + 5))),
+                    Constraint::Min(5),
+                    Constraint::Length(footer_height),
+                ])
+                .spacing(-1)
+                .margin(1)
+                .vertical_margin(1),
+            )
+            .unwrap_or([Rect::ZERO; 3]);
+        (instructions_area, Rect::ZERO, list_area, footer_area)
+    }
 }
 
 pub(super) fn draw_selection_ui(
@@ -46,29 +86,8 @@ pub(super) fn draw_selection_ui(
             }
             let instruction_lines = instructions.lines().count().max(1) as u16;
             let instruction_height = instruction_lines.saturating_add(2);
-            let search_height: u16 = if state.search_enabled() { 1 } else { 0 };
-            let footer_height: u16 = 4;
-            let vertical = if state.search_enabled() {
-                vec![
-                    Constraint::Length(instruction_height.min(area.height.saturating_sub(footer_height + 6))),
-                    Constraint::Length(search_height),
-                    Constraint::Min(5),
-                    Constraint::Length(footer_height),
-                ]
-            } else {
-                vec![
-                    Constraint::Length(instruction_height.min(area.height.saturating_sub(footer_height + 5))),
-                    Constraint::Min(5),
-                    Constraint::Length(footer_height),
-                ]
-            };
-            let chunks = Layout::vertical(vertical).spacing(-1).margin(1).vertical_margin(1);
-            let chunks = area.try_layout(&chunks).unwrap_or([Rect::ZERO; 4]);
-            let (instructions_area, search_area, list_area, footer_area) = if state.search_enabled() {
-                (chunks[0], chunks[1], chunks[2], chunks[3])
-            } else {
-                (chunks[0], Rect::ZERO, chunks[1], chunks[2])
-            };
+            let (instructions_area, search_area, list_area, footer_area) =
+                selection_layout(area, state.search_enabled(), instruction_height);
 
             let instructions_widget = Paragraph::new(instructions)
                 .block(Block::bordered().title("Instructions").border_type(BorderType::Rounded))
@@ -150,7 +169,14 @@ pub(super) fn draw_selection_ui(
 
             summary_lines.push(Line::from(""));
             summary_lines.push(Line::from(CONTROLS_HINT));
-            summary_lines.push(Line::from(Span::styled(NUMBER_JUMP_HINT, styles::DESCRIPTION)));
+            summary_lines.push(Line::from(Span::styled(
+                if state.search_enabled() {
+                    FILTER_HINT
+                } else {
+                    NUMBER_JUMP_HINT
+                },
+                styles::DESCRIPTION,
+            )));
 
             let footer = Paragraph::new(summary_lines)
                 .block(Block::bordered().title("Selection").border_type(BorderType::Rounded))
@@ -177,4 +203,27 @@ pub(super) fn filter_entries(entries: &[SelectionEntry], query: &str, fuzzy: boo
     let mut filter = ListSearchFilter::new(query, fuzzy);
     let haystacks: Vec<String> = entries.iter().map(entry_haystack).collect();
     filter.filter_haystacks(&haystacks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_layout_three_row_path_is_not_blank() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (instructions, search, list, footer) = selection_layout(area, false, 3);
+        assert_eq!(search, Rect::ZERO, "no search row when disabled");
+        assert!(instructions.height > 0, "instructions visible: {instructions:?}");
+        assert!(list.height > 0, "list visible: {list:?}");
+        assert!(footer.height > 0, "footer visible: {footer:?}");
+    }
+
+    #[test]
+    fn selection_layout_four_row_path_reserves_search_row() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (instructions, search, list, footer) = selection_layout(area, true, 3);
+        assert!(search.height > 0, "search row visible: {search:?}");
+        assert!(instructions.height > 0 && list.height > 0 && footer.height > 0);
+    }
 }

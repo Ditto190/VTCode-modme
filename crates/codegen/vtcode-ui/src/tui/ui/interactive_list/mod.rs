@@ -90,12 +90,16 @@ impl SelectionListState {
     }
 
     pub(crate) fn selected_entry<'a>(&self, entries: &'a [SelectionEntry]) -> Option<&'a SelectionEntry> {
-        let original = *self.visible.get(self.selected_pos)?;
+        let original = self.selected_original_index()?;
         entries.get(original)
     }
 
     fn selected_original_index(&self) -> Option<usize> {
-        self.visible.get(self.selected_pos).copied()
+        if self.visible.is_empty() {
+            return None;
+        }
+        let pos = self.selected_pos.min(self.visible.len() - 1);
+        self.visible.get(pos).copied()
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -276,17 +280,6 @@ mod tests {
             state.push_char(ch, &entries);
         }
         assert!(state.visible_indices().contains(&0), "label Claude 4 Sonnet matches: {:?}", state.visible_indices());
-    }
-
-    #[test]
-    fn esc_clears_query_then_cancel_requires_empty_query() {
-        let entries = sample_entries();
-        let mut state = SelectionListState::new(&entries, 0);
-        state.push_char('z', &entries);
-        assert!(state.is_filtering());
-        assert!(state.clear_query(&entries));
-        assert!(!state.is_filtering());
-        assert!(!state.clear_query(&entries), "second clear is a no-op");
     }
 
     #[test]

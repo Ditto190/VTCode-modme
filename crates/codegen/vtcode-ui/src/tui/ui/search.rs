@@ -190,11 +190,6 @@ impl ListSearchFilter {
         !self.query.is_empty()
     }
 
-    #[must_use]
-    pub(crate) fn query(&self) -> &str {
-        &self.query
-    }
-
     /// Match a prebuilt haystack (modal `search_value`, already lowercased).
     pub(crate) fn matches_haystack(&mut self, haystack: &str) -> bool {
         if !self.is_active() {
@@ -207,12 +202,6 @@ impl ListSearchFilter {
         } else {
             exact_terms_match(&self.query, haystack)
         }
-    }
-
-    /// Match a structured candidate using title + description + keywords.
-    pub(crate) fn matches(&mut self, candidate: &SearchCandidate<'_>) -> bool {
-        let haystack = candidate.haystack();
-        self.matches_haystack(&haystack)
     }
 
     /// Indices of matching candidates in original order.
