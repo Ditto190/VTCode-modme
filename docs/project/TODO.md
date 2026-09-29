@@ -1,1 +1,1 @@
-implement /config options searchs functionality to allow users to quickly find and access specific configuration options within the TUI. Ensure the search is responsive and provides relevant results as the user types.
+Implement responsive search for TUI configuration options in VT Code by extending the shared common modal with a reusable search text field that filters options as users type using relevant labels, descriptions, and keywords, while preserving keyboard navigation, focus, scrolling, selection, existing modal behavior, and test coverage.
