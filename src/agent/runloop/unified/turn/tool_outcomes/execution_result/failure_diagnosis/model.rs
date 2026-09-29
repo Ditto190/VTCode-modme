@@ -1,5 +1,6 @@
 //! Lightweight provider routing and strict diagnosis parsing.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -25,6 +26,13 @@ struct ModelDiagnosis {
     next_action: String,
 }
 
+fn diagnosis_memo_key(tool_name: &str, evidence: &str) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    tool_name.hash(&mut hasher);
+    evidence.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub(super) async fn diagnose_with_optional_model(
     ctx: &mut TurnProcessingContext<'_>,
     tool_name: &str,
@@ -36,6 +44,18 @@ pub(super) async fn diagnose_with_optional_model(
         return fallback;
     }
 
+    // Fix-verify loops re-hit the same failure shape. Reuse the first
+    // diagnosis and stop spending model calls once the per-turn budget is
+    // gone — each failure otherwise adds 1-2 hidden LLM round-trips.
+    let memo_key = diagnosis_memo_key(tool_name, evidence);
+    if let Some((observed, likely_cause, next_action)) = ctx.harness_state.failure_diagnosis_memo_get(memo_key) {
+        return ToolFailureDiagnosis::new(observed, likely_cause, next_action);
+    }
+    if !ctx.harness_state.can_spend_failure_diagnosis_model_call() {
+        return fallback;
+    }
+    ctx.harness_state.record_failure_diagnosis_model_call();
+
     let resolution = resolve_lightweight_route(ctx.config, ctx.vt_cfg, LightweightFeature::ToolFailureDiagnosis, None);
     if let Some(warning) = &resolution.warning {
         tracing::warn!(warning = %warning, tool = %tool_name, "tool failure diagnosis route adjusted");
@@ -44,6 +64,10 @@ pub(super) async fn diagnose_with_optional_model(
     match diagnose_with_route(ctx, &resolution.primary, evidence).await {
         Ok(raw) => {
             if let Some(diagnosis) = parse_model_diagnosis(&raw) {
+                ctx.harness_state.failure_diagnosis_memo_put(
+                    memo_key,
+                    (diagnosis.observed.clone(), diagnosis.likely_cause.clone(), diagnosis.next_action.clone()),
+                );
                 return diagnosis;
             }
             tracing::warn!(tool = %tool_name, "tool failure diagnosis returned invalid or unsafe JSON; using deterministic fallback");
@@ -61,6 +85,10 @@ pub(super) async fn diagnose_with_optional_model(
         match diagnose_with_route(ctx, fallback_route, evidence).await {
             Ok(raw) => {
                 if let Some(diagnosis) = parse_model_diagnosis(&raw) {
+                    ctx.harness_state.failure_diagnosis_memo_put(
+                        memo_key,
+                        (diagnosis.observed.clone(), diagnosis.likely_cause.clone(), diagnosis.next_action.clone()),
+                    );
                     return diagnosis;
                 }
                 tracing::warn!(tool = %tool_name, "tool failure diagnosis fallback returned invalid or unsafe JSON");

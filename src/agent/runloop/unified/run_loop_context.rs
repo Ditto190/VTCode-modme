@@ -591,6 +591,14 @@ pub(crate) struct HarnessTurnState {
     file_read_path_counts: HashMap<String, usize>,
     pub(crate) seen_successful_readonly_signatures: HashSet<String>,
     streamed_tool_call_item_ids: HashMap<String, StreamedToolCallItem>,
+    /// Turn-local memo of failure diagnoses keyed by `(tool, evidence)` hash.
+    /// Fix-verify loops re-hit the same failure shape; skip the extra
+    /// lightweight LLM round-trip after the first diagnosis. Values are
+    /// bounded `(observed, likely_cause, next_action)` triples.
+    failure_diagnosis_memo: HashMap<u64, (String, String, String)>,
+    /// Cap on model-backed diagnosis calls per turn. After this, deterministic
+    /// fallbacks only — failure-heavy loops must not multiply model calls.
+    failure_diagnosis_model_calls: u32,
     pub stop_hook_active: bool,
     pub seen_task_tracker_create_signatures: HashSet<String>,
     pub recently_written_files: HashSet<String>,
@@ -750,6 +758,8 @@ impl HarnessTurnState {
             file_read_path_counts: HashMap::new(),
             seen_successful_readonly_signatures: HashSet::new(),
             streamed_tool_call_item_ids: HashMap::new(),
+            failure_diagnosis_memo: HashMap::new(),
+            failure_diagnosis_model_calls: 0,
             stop_hook_active: false,
             seen_task_tracker_create_signatures: HashSet::new(),
             recently_written_files: HashSet::new(),
@@ -901,6 +911,31 @@ impl HarnessTurnState {
         self.model_visible_output_bytes = self
             .model_visible_output_bytes
             .saturating_add(u64::try_from(model_visible_output_bytes).unwrap_or(u64::MAX));
+    }
+
+    /// Return a memoized failure-diagnosis triple for `(tool, evidence)`.
+    pub(crate) fn failure_diagnosis_memo_get(&self, key: u64) -> Option<(String, String, String)> {
+        self.failure_diagnosis_memo.get(&key).cloned()
+    }
+
+    /// Store a failure-diagnosis triple. Memo is bounded so a pathological
+    /// failure storm cannot grow the turn state without limit.
+    pub(crate) fn failure_diagnosis_memo_put(&mut self, key: u64, triple: (String, String, String)) {
+        const MAX_MEMO: usize = 32;
+        if self.failure_diagnosis_memo.len() >= MAX_MEMO {
+            self.failure_diagnosis_memo.clear();
+        }
+        self.failure_diagnosis_memo.insert(key, triple);
+    }
+
+    /// Whether another model-backed diagnosis is allowed this turn.
+    pub(crate) fn can_spend_failure_diagnosis_model_call(&self) -> bool {
+        self.failure_diagnosis_model_calls < 3
+    }
+
+    /// Count a model-backed diagnosis attempt (success or failure).
+    pub(crate) fn record_failure_diagnosis_model_call(&mut self) {
+        self.failure_diagnosis_model_calls = self.failure_diagnosis_model_calls.saturating_add(1);
     }
 
     /// Test-only execution-budget shorthand so exec-mode tests avoid
@@ -3399,5 +3434,19 @@ mod tests {
         // Explicit opt-out restores prompting in full-auto runs.
         cfg.automation.full_auto.auto_grant_tool_limits = false;
         assert!(!full_auto_loop_grants_enabled(true, Some(&cfg)));
+    }
+
+    #[test]
+    fn failure_diagnosis_memo_round_trips_and_caps_model_calls() {
+        let mut state = HarnessTurnState::new(TurnRunId("r".into()), TurnId("t".into()), 4, 60, 1);
+        assert!(state.failure_diagnosis_memo_get(7).is_none());
+        state.failure_diagnosis_memo_put(7, ("obs".into(), "cause".into(), "act".into()));
+        assert_eq!(state.failure_diagnosis_memo_get(7), Some(("obs".into(), "cause".into(), "act".into())));
+
+        assert!(state.can_spend_failure_diagnosis_model_call());
+        for _ in 0..3 {
+            state.record_failure_diagnosis_model_call();
+        }
+        assert!(!state.can_spend_failure_diagnosis_model_call(), "per-turn model diagnosis budget must stop at 3");
     }
 }
