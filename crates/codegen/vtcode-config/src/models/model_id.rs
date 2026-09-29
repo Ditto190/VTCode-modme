@@ -48,6 +48,8 @@ pub enum ModelId {
     /// Claude Sonnet 5 - The best combination of speed and intelligence with adaptive thinking on by default
     #[default]
     ClaudeSonnet5,
+    /// Claude Sonnet 5.5 - Latest Sonnet: best speed/intelligence balance, 1M context, 128K output, `between_tools` as the lowest thinking setting, default effort high
+    ClaudeSonnet55,
     /// Claude Fable 5 - Anthropic's most capable widely released model for demanding reasoning and long-horizon agentic work
     ClaudeFable5,
     /// Claude Fable 5.1 - successor to Fable 5 for demanding reasoning and long-horizon agentic work, 1M context, adaptive thinking always on, cache reads at 1/4 cost
@@ -96,6 +98,8 @@ pub enum ModelId {
     MergeGatewayAnthropicClaudeOpus55,
     /// Anthropic Claude Sonnet 5 through Merge Gateway
     MergeGatewayAnthropicClaudeSonnet5,
+    /// Anthropic Claude Sonnet 5.5 through Merge Gateway
+    MergeGatewayAnthropicClaudeSonnet55,
     /// Google Gemini 3.6 Flash through Merge Gateway
     /// Google Gemini 3.7 Flash through Merge Gateway
     /// DeepSeek V4.1 Flash through Merge Gateway

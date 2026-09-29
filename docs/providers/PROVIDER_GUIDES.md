@@ -233,7 +233,7 @@ replace the retained evidence or expose provider chain-of-thought.
 
 -   **Provider key:** `anthropic` (env: `ANTHROPIC_API_KEY`)
 -   **Default model:** `claude-sonnet-5`
--   **Curated models:** `claude-sonnet-5`, `claude-fable-5`, `claude-mythos-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, and `claude-haiku-4-5`
+-   **Curated models:** `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-fable-5-1`, `claude-mythos-5`, `claude-mythos-5-1`, `claude-opus-5`, `claude-opus-5-5`, `claude-opus-4-8`, `claude-sonnet-4-6`, and `claude-haiku-4-5`
 -   Collapsed or bounded tool output is disclosed to every provider/model with the fixed turn-scoped notice. Anthropic wire routes use `clear_at: "next_user_message"` plus the required beta only when the selected provider/model capability allows it; unsupported Claude models and other routes use ordinary top-level system/history mapping.
 -   Key management and defaults mirror the Gemini/OpenAI flow in [Getting Started](../user-guide/getting-started.md#api-requirements).
 -   Supported model IDs live in [`crates/codegen/vtcode-config/src/constants/models/anthropic.rs`](../../crates/codegen/vtcode-config/src/constants/models/anthropic.rs).
@@ -293,7 +293,7 @@ replace the retained evidence or expose provider chain-of-thought.
 -   **Authentication:** `MERGE_GATEWAY_API_KEY` (Bearer token; create a key in the [Merge dashboard](https://dashboard.merge.dev/))
 -   **Base URL:** `https://api-gateway.merge.dev/v1` (native Responses), override with `MERGE_GATEWAY_BASE_URL`; explicit `/v1/openai` selects legacy Chat Completions
 -   **Default model:** `default_routing`
--   **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `anthropic/claude-opus-5-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`, `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `meta/muse-spark-1.1`, `zai/glm-5.3-flash`, `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-6-astra`, `openai/gpt-6-sol`, and `openai/gpt-6-luna`
+-   **Curated picker models:** `openai/gpt-5.5`, `anthropic/claude-opus-5`, `anthropic/claude-opus-5-5`, `anthropic/claude-sonnet-5`, `anthropic/claude-sonnet-5-5`, `google/gemini-3.6-flash`, `google/gemini-3.7-flash`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4-flash-0731`, `xai/grok-4.6`, `qwen/qwen3.8-max`, `minimax/minimax-h3`, `moonshot/kimi-k3`, `thinkingmachines/inkling`, `meta/muse-spark-1.1`, `zai/glm-5.3-flash`, `zai/glm-5.3-flashx`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-terra`, `openai/gpt-6-astra`, `openai/gpt-6-sol`, and `openai/gpt-6-luna`
 -   **Features:** Native Responses, streaming, tool calling, structured outputs, authenticated paginated model catalog, cache-backed picker metadata, and arbitrary explicit Merge route IDs
 -   **Limitations:** Reasoning controls remain route-specific and are not inferred generically; routing metadata and billed cost remain outside VT Code's normalized response fields. Explicit `/v1/openai` endpoints retain the legacy compatibility path.
 

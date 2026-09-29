@@ -65,8 +65,8 @@ This document serves as an index of all VT Code documentation. When users ask qu
 
 - **File**: `docs/development/EXTENDED_THINKING.md`
   - **Content**: Anthropic Thinking in VT Code
-  - **Topics**: Compact Runtime Matrix, Configuration, Adaptive Thinking Behavior, Feature Compatibility, Disabling Thinking
-  - **User Questions**: "What can you tell me about Anthropic Thinking in VT Code?", "How does Compact Runtime Matrix work?", "How does Configuration work?"
+  - **Topics**: Compact Runtime Matrix, Turning up-front thinking off, Configuration, Adaptive Thinking Behavior, Feature Compatibility
+  - **User Questions**: "What can you tell me about Anthropic Thinking in VT Code?", "How does Compact Runtime Matrix work?", "How does Turning up-front thinking off work?"
 
 - **File**: `docs/development/CPP_CORE_GUIDELINES_ADOPTION.md`
   - **Content**: C++ Core Guidelines Adoption
@@ -962,6 +962,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Migrating to Claude Opus 5.5 in VT Code
   - **Topics**: Quick navigation, Model comparison, Where to make changes in VT Code, Opus 5 → Opus 5.5, Opus 4.8 → Opus 5.5
   - **User Questions**: "What can you tell me about Migrating to Claude Opus 5.5 in VT Code?", "How does Quick navigation work?", "How does Model comparison work?"
+
+- **File**: `docs/build-with-claude/migrating-to-claude-sonnet-5-5.md`
+  - **Content**: Migrating to Claude Sonnet 5.5 in VT Code
+  - **Topics**: Quick navigation, Model comparison, Where to make changes in VT Code, Sonnet 5 → Sonnet 5.5, Sonnet 4.6 → Sonnet 5.5
+  - **User Questions**: "What can you tell me about Migrating to Claude Sonnet 5.5 in VT Code?", "How does Quick navigation work?", "How does Model comparison work?"
 
 - **File**: `docs/installation/NATIVE_INSTALLERS.md`
   - **Content**: Native Installers

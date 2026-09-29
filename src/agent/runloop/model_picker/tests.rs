@@ -545,8 +545,10 @@ fn openai_codex_reasoning_helpers_match_supported_variants() {
     assert!(!supports_xhigh_reasoning("gpt-5.1-codex-max"));
 
     assert!(supports_xhigh_reasoning("claude-sonnet-5"));
+    assert!(supports_xhigh_reasoning("claude-sonnet-5-5"));
     assert!(supports_xhigh_reasoning("claude-fable-5"));
     assert!(supports_max_reasoning("claude-sonnet-5"));
+    assert!(supports_max_reasoning("claude-sonnet-5-5"));
     assert!(supports_max_reasoning("claude-fable-5"));
     // The GPT-5.6 family supports Max adaptive reasoning.
     assert!(supports_max_reasoning("gpt-5.6-sol"));

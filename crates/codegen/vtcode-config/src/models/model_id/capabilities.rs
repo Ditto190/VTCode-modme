@@ -320,6 +320,7 @@ impl ModelId {
                 | ModelId::MergeGatewayOpenAIGpt6Sol
                 | ModelId::MergeGatewayOpenAIGpt6Luna
                 | ModelId::ClaudeSonnet5
+                | ModelId::ClaudeSonnet55
                 | ModelId::ClaudeFable5
                 | ModelId::ClaudeFable51
                 | ModelId::ClaudeOpus5
@@ -391,6 +392,7 @@ impl ModelId {
             ModelId::OpenAIGptOss20b | ModelId::OpenAIGptOss120b => "5",
             // Anthropic generations
             ModelId::ClaudeSonnet5 => "5",
+            ModelId::ClaudeSonnet55 => "5.5",
             ModelId::ClaudeFable5 => "5",
             ModelId::ClaudeFable51 => "5.1",
             ModelId::ClaudeOpus5 => "5",
@@ -446,6 +448,7 @@ impl ModelId {
             ModelId::MergeGatewayAnthropicClaudeOpus5 => "5",
             ModelId::MergeGatewayAnthropicClaudeOpus55 => "5.5",
             ModelId::MergeGatewayAnthropicClaudeSonnet5 => "5",
+            ModelId::MergeGatewayAnthropicClaudeSonnet55 => "5.5",
             ModelId::MergeGatewayAnthropicClaudeFable51 => "5.1",
             ModelId::MergeGatewayAnthropicClaudeHaiku4520251001 => "4.5",
             ModelId::MergeGatewayMinimaxH3 => "H3",

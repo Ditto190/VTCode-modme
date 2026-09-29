@@ -12,8 +12,9 @@ pub enum ThinkingDisplayMode {
     /// Thinking blocks are returned with an empty `thinking` field (default on Claude Opus 4.7).
     Omitted,
     /// Only the short progress updates written between tool calls come back as
-    /// text; reasoning stays hidden (Claude Opus 5.5, Claude Fable 5.x). Sent
-    /// with the `thinking-display-updates-2026-08-18` beta.
+    /// text; reasoning stays hidden (Claude Sonnet 5.5, Claude Opus 5.5,
+    /// Claude Fable 5.x). Sent with the `thinking-display-updates-2026-08-18`
+    /// beta.
     Updates,
     /// Catch-all for unknown display modes added by the Anthropic API.
     #[serde(other)]
@@ -490,7 +491,8 @@ pub struct AnthropicConfig {
     ///   - "summarized": Thinking blocks contain summarized text (default on Opus 4.6 and earlier).
     ///   - "omitted": Thinking blocks have an empty `thinking` field (default on Opus 4.7+).
     ///   - "updates": Only the progress updates between tool calls are returned as text
-    ///     (Claude Opus 5.5 and Claude Fable 5.x; the VT Code default on Claude Opus 5.5).
+    ///     (Claude Sonnet 5.5, Claude Opus 5.5 and Claude Fable 5.x; the VT Code
+    ///     default on Claude Sonnet 5.5 and Claude Opus 5.5).
     ///     Ignored on models without progress updates.
     ///
     /// When set, this overrides the model-specific default.

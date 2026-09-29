@@ -123,8 +123,8 @@ fn keep_latest_collapsed_tool_output_notice(messages: &mut Vec<uni::Message>) {
 fn append_collapsed_tool_output_notice(ctx: &mut TurnProcessingContext<'_>) {
     let output_mode = ctx.vt_cfg.map(|config| config.ui.tool_output_mode);
     // Copies already sent are never removed or moved: on models that bind
-    // replayed thinking to the exact prior prefix (Claude Opus 5.5, Claude
-    // Fable 5.1) and for every prompt cache, deleting an earlier copy edits a
+    // replayed thinking to the exact prior prefix (Claude Sonnet 5.5, Claude
+    // Opus 5.5, Claude Fable 5.1) and for every prompt cache, deleting an
     // prefix that later turns were produced against. Earlier turns' copies are
     // cleared by the provider (`clear_at`) or collapsed to one copy per
     // request on other routes; see `keep_latest_collapsed_tool_output_notice`.

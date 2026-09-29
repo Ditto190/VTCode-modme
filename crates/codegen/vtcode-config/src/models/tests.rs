@@ -244,7 +244,7 @@ fn test_models_for_provider() {
     let anthropic_models = ModelId::models_for_provider(Provider::Anthropic);
     assert!(anthropic_models.contains(&ModelId::ClaudeOpus5));
     assert!(anthropic_models.contains(&ModelId::ClaudeSonnet5));
-    assert!(anthropic_models.contains(&ModelId::ClaudeSonnet5));
+    assert!(anthropic_models.contains(&ModelId::ClaudeSonnet55));
     assert!(!anthropic_models.contains(&ModelId::GPT56Sol));
 
     let deepseek_models = ModelId::models_for_provider(Provider::DeepSeek);
@@ -266,7 +266,7 @@ fn test_models_for_provider() {
     assert!(nvidia_models.contains(&ModelId::NvidiaNemotron3Super120bA12b));
 
     let merge_gateway_models = ModelId::models_for_provider(Provider::MergeGateway);
-    assert_eq!(merge_gateway_models.len(), 23);
+    assert_eq!(merge_gateway_models.len(), 24);
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayDefaultRouting));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayGoogleGemini38Flash));
     assert!(merge_gateway_models.contains(&ModelId::MergeGatewayAnthropicClaudeFable51));
@@ -556,6 +556,7 @@ fn test_all_models_have_non_empty_metadata_and_parse() {
             ModelId::MergeGatewayAnthropicClaudeOpus5
             | ModelId::MergeGatewayAnthropicClaudeOpus55
             | ModelId::MergeGatewayAnthropicClaudeSonnet5
+            | ModelId::MergeGatewayAnthropicClaudeSonnet55
             | ModelId::MergeGatewayGoogleGemini38Flash
             | ModelId::MergeGatewayMetaMuseSpark13
             | ModelId::MergeGatewayOpenAIGpt6Astra

@@ -156,6 +156,13 @@ model_id_table! {
         display: "Claude Sonnet 5",
         description: "Anthropic's best combination of speed and intelligence with adaptive thinking on by default, 1M context, and new tokenizer",
     },
+    ClaudeSonnet55 {
+        provider: Anthropic,
+        id: models::CLAUDE_SONNET_5_5,
+        parse: [models::CLAUDE_SONNET_5_5],
+        display: "Claude Sonnet 5.5",
+        description: "Latest Anthropic Sonnet with the best combination of speed and intelligence, adaptive thinking on by default, 1M context, 128K output, and `between_tools` as the lowest thinking setting",
+    },
     ClaudeFable5 {
         provider: Anthropic,
         id: models::CLAUDE_FABLE_5,
@@ -300,6 +307,13 @@ model_id_table! {
         parse: [models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5],
         display: "Claude Sonnet 5 (Merge Gateway)",
         description: "Anthropic Claude Sonnet 5 accessed through Merge Gateway's OpenAI-compatible endpoint",
+    },
+    MergeGatewayAnthropicClaudeSonnet55 {
+        provider: MergeGateway,
+        id: models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5_5,
+        parse: [models::merge_gateway::ANTHROPIC_CLAUDE_SONNET_5_5],
+        display: "Claude Sonnet 5.5 (Merge Gateway)",
+        description: "Anthropic Claude Sonnet 5.5 accessed through Merge Gateway's OpenAI-compatible endpoint",
     },
     MergeGatewayDeepseekFlash {
         provider: MergeGateway,
@@ -807,6 +821,7 @@ mod tests {
                 ModelId::MergeGatewayAnthropicClaudeOpus5
                     | ModelId::MergeGatewayAnthropicClaudeOpus55
                     | ModelId::MergeGatewayAnthropicClaudeSonnet5
+                    | ModelId::MergeGatewayAnthropicClaudeSonnet55
                     | ModelId::MergeGatewayGoogleGemini38Flash
                     | ModelId::MergeGatewayMetaMuseSpark13
                     | ModelId::MergeGatewayOpenAIGpt6Astra

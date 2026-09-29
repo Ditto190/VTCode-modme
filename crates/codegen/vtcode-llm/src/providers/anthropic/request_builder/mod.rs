@@ -293,10 +293,9 @@ pub(crate) fn convert_to_anthropic_format(
     let fallback_rejects_sampling = fallbacks.as_ref().is_some_and(|fallbacks| {
         fallbacks.models().iter().any(|fb| {
             rejects_sampling(&fb.model, ctx.model)
-                || fb
-                    .thinking
-                    .as_ref()
-                    .is_some_and(|thinking| !matches!(thinking, ThinkingConfig::Disabled))
+                || fb.thinking.as_ref().is_some_and(|thinking| {
+                    !matches!(thinking, ThinkingConfig::Disabled | ThinkingConfig::BetweenTools)
+                })
         })
     });
     let effective_temperature =

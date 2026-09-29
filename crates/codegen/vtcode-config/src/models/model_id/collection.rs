@@ -29,6 +29,7 @@ impl ModelId {
             ModelId::OpenAIGptOss120b,
             // Anthropic models
             ModelId::ClaudeSonnet5,
+            ModelId::ClaudeSonnet55,
             ModelId::ClaudeFable5,
             ModelId::ClaudeFable51,
             ModelId::ClaudeOpus5,
@@ -53,6 +54,7 @@ impl ModelId {
             ModelId::MergeGatewayAnthropicClaudeOpus5,
             ModelId::MergeGatewayAnthropicClaudeOpus55,
             ModelId::MergeGatewayAnthropicClaudeSonnet5,
+            ModelId::MergeGatewayAnthropicClaudeSonnet55,
             ModelId::MergeGatewayXaiGrok46,
             ModelId::MergeGatewayXaiGrok47,
             ModelId::MergeGatewayMinimaxH3,

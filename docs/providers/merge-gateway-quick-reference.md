@@ -23,6 +23,7 @@ openai/gpt-5.5
 anthropic/claude-opus-5
 anthropic/claude-opus-5-5
 anthropic/claude-sonnet-5
+anthropic/claude-sonnet-5-5
 google/gemini-3.6-flash
 google/gemini-3.7-flash
 deepseek/deepseek-v4-pro-0813

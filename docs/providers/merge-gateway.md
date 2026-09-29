@@ -57,6 +57,7 @@ vtcode --provider merge-gateway --model anthropic/claude-opus-5
 | `anthropic/claude-opus-5` | 1M | Yes | Anthropic route |
 | `anthropic/claude-opus-5-5` | 1M | Yes | Anthropic route |
 | `anthropic/claude-sonnet-5` | 1M | Yes | Anthropic route |
+| `anthropic/claude-sonnet-5-5` | 1M | Yes | Anthropic route, adaptive thinking on by default, forced `tool_choice` rejected |
 | `google/gemini-3.6-flash` | 1M | Yes | Google route |
 | `google/gemini-3.7-flash` | 1M | Yes | Google route |
 | `deepseek/deepseek-v4-pro-0813` | 1M | No | DeepSeek route |
