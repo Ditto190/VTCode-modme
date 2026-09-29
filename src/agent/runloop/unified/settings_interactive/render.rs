@@ -49,16 +49,7 @@ pub(super) fn search_value_for_missing_doc(path: &str, label: &str, doc: Option<
 }
 
 pub(super) fn section_item(label: &str) -> InlineListItem {
-    InlineListItem {
-        title: label.to_string(),
-        subtitle: None,
-        badge: None,
-        indent: 0,
-        selection: None,
-        search_value: None,
-        kind: vtcode_commons::ui_protocol::InlineItemKind::Header,
-        ..Default::default()
-    }
+    InlineListItem::group_header(label)
 }
 
 /// Action row with default tone: badgeful rows get Accent, badgeless Neutral.

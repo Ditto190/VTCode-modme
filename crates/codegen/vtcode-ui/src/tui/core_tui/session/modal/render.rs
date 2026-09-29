@@ -1234,14 +1234,19 @@ pub fn modal_list_item_lines(
         ));
     }
 
-    // Group spacing without per-item cost: headers (Actions, Quick Access,
-    // Sections, Settings) get one blank row above so dense subtitle lists
-    // stay scannable within the multiline row cap.
+    // Shared group rhythm: blank line above and below every group header so
+    // sections stay scannable in dense subtitle lists (settings, model picker,
+    // permission groups). Dividers keep a single full-width rule.
     let mut lines = Vec::new();
-    if item.is_header() && visible_index > 0 {
+    if item.is_header() {
+        if visible_index > 0 {
+            lines.push(Line::default());
+        }
+        lines.push(Line::from(primary_spans));
         lines.push(Line::default());
+    } else {
+        lines.push(Line::from(primary_spans));
     }
-    lines.push(Line::from(primary_spans));
 
     if let Some(subtitle) = &item.subtitle {
         let indent_width = item.indent as usize * 2;
@@ -2161,5 +2166,38 @@ mod tests {
         assert_ne!(current, danger, "tones must be distinguishable");
         assert_eq!(current, styles.accent.add_modifier(Modifier::BOLD));
         assert_eq!(danger, styles.danger);
+    }
+
+    #[test]
+    fn group_headers_add_spacing_above_and_below() {
+        let styles = modal_render_styles();
+        let list = ModalListState::new(
+            vec![
+                InlineListItem::group_header("Anthropic"),
+                InlineListItem {
+                    title: "Claude".to_string(),
+                    subtitle: Some("desc".to_string()),
+                    selection: Some(InlineListSelection::Model(0)),
+                    ..Default::default()
+                },
+                InlineListItem::group_header("OpenAI"),
+                InlineListItem {
+                    title: "GPT".to_string(),
+                    subtitle: Some("desc".to_string()),
+                    selection: Some(InlineListSelection::Model(1)),
+                    ..Default::default()
+                },
+            ],
+            None,
+        );
+        // First header: no leading blank, but trailing blank before items.
+        let h0 = modal_list_item_lines(&list, 0, 0, &styles, 60, None, false, None);
+        assert_eq!(h0.len(), 2, "first header is title + trailing gap: {h0:?}");
+        // Later header: blank above and below.
+        let h1 = modal_list_item_lines(&list, 2, 2, &styles, 60, None, false, None);
+        assert_eq!(h1.len(), 3, "later header is gap + title + gap: {h1:?}");
+        // Item rows stay title + subtitle (no extra blank in compact lists).
+        let item = modal_list_item_lines(&list, 1, 1, &styles, 60, None, false, None);
+        assert_eq!(item.len(), 2, "title + subtitle only: {item:?}");
     }
 }

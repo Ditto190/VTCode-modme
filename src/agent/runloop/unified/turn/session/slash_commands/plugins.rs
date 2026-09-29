@@ -289,6 +289,7 @@ async fn pick_installed_plugin(
 
 fn show_plugins_manager_actions_modal(ctx: &mut SlashCommandContext<'_>) {
     let items = vec![
+        InlineListItem::group_header("Actions"),
         InlineListItem {
             title: "List plugins".to_string(),
             subtitle: Some("Show all installed plugins".to_string()),

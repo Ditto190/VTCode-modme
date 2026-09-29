@@ -129,7 +129,7 @@ pub(crate) fn render_slash_palette(session: &mut Session, frame: &mut Frame<'_>,
 
 fn slash_palette_instructions(session: &Session) -> Vec<Line<'static>> {
     vec![Line::from(vec![Span::styled(
-        "↑↓ Navigate · Enter apply · Esc dismiss".to_owned(),
+        "↑↓ Navigate · Enter run · Tab complete · Esc dismiss".to_owned(),
         session.core.styles.default_style(),
     )])]
 }
@@ -308,10 +308,9 @@ pub(super) fn apply_selected_slash_suggestion(session: &mut Session) -> bool {
 }
 
 fn autocomplete_slash_suggestion(session: &mut Session) -> bool {
-    // Tab accepts the currently highlighted suggestion, matching Enter.
-    // Both populate the composer (with a trailing space) and dismiss the
-    // palette so the user can review, edit, or cancel before submitting
-    // with a second Enter press.
+    // Tab only completes the highlighted suggestion into the composer (with
+    // a trailing space) and dismisses the palette so the user can review,
+    // type args, or cancel before submitting with Enter.
     apply_selected_slash_suggestion(session)
 }
 
@@ -362,18 +361,22 @@ pub(super) fn try_handle_slash_navigation(
         KeyCode::Tab => autocomplete_slash_suggestion(session),
         KeyCode::BackTab => move_slash_selection_up(session),
         KeyCode::Enter => {
-            // Only plain Enter accepts the highlighted suggestion into the
-            // composer. Modified Enter (Shift/Ctrl/Alt/Cmd) falls through to
-            // the normal handler for newline, steering, or queue behavior.
+            // Only plain Enter accepts the highlighted suggestion. Modified
+            // Enter (Shift/Ctrl/Alt/Cmd) falls through to the normal handler
+            // for newline, steering, or queue behavior.
             if has_control || has_alt || has_command || key.modifiers.contains(KeyModifiers::SHIFT) {
                 return false;
             }
 
-            // Accept into the input box without submitting: dismiss the
-            // palette and leave `/command ` editable so users can review,
-            // modify (type args, Backspace), or cancel (Esc) before pressing
-            // Enter a second time to execute.
-            apply_selected_slash_suggestion(session)
+            // Single-Enter ergonomics: complete the highlighted suggestion
+            // into the composer, then fall through to the normal Enter
+            // submit path in the same keypress so the command runs
+            // immediately. Returning false lets `process_key` continue to
+            // the generic Enter arm (busy-steer/queue/block/help-modal
+            // checks + Submit). Tab remains the complete-without-run
+            // path for editing args before submitting.
+            apply_selected_slash_suggestion(session);
+            return false;
         }
         KeyCode::Esc => {
             clear_slash_suggestions(session);
@@ -390,14 +393,14 @@ pub(super) fn try_handle_slash_navigation(
     handled
 }
 
-/// Slash commands that submit directly on the confirming (second) Enter, without
-/// requiring a follow-up confirmation or argument prompt.
+/// Slash commands that submit directly on Enter, without requiring a
+/// follow-up confirmation or argument prompt.
 ///
-/// The palette itself never submits: first Enter/Tab only accepts the
-/// highlighted suggestion into the composer (`/command `) and dismisses the
-/// palette for review/edit/cancel. This set decides the second-Enter path —
-/// immediate commands submit even while busy, others go through the
-/// queue/block handling.
+/// Enter completes the highlighted suggestion into the composer
+/// (`/command `) and falls through to the normal submit path in the same
+/// keypress. Tab remains complete-without-run for editing args. This set
+/// decides the submit path — immediate commands submit even while busy,
+/// others go through the queue/block handling.
 ///
 /// Kept as a single source of truth so the matcher cannot drift from the set
 /// of commands that behave this way.

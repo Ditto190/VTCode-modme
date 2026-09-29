@@ -177,15 +177,7 @@ pub(super) async fn prompt_tool_loop_limit_increase<S: UiSession + ?Sized>(
             }
         })
         .collect();
-    options.push(InlineListItem {
-        title: "".to_string(),
-        subtitle: None,
-        badge: None,
-        indent: 0,
-        selection: None,
-        search_value: None,
-        ..Default::default()
-    });
+    options.push(InlineListItem::group_divider());
     options.push(InlineListItem {
         title: "Stop".to_string(),
         subtitle: Some("Stop the current turn and wait for input".to_string()),

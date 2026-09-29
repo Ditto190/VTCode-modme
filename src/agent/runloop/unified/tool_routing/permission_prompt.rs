@@ -692,15 +692,7 @@ fn build_tool_permission_options(
         });
     }
 
-    options.push(InlineListItem {
-        title: "".to_string(),
-        subtitle: None,
-        badge: None,
-        indent: 0,
-        selection: None,
-        search_value: None,
-        ..Default::default()
-    });
+    options.push(InlineListItem::group_divider());
 
     options.push(InlineListItem {
         title: if prompt_kind == ToolPermissionPromptKind::Mcp {

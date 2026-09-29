@@ -130,6 +130,24 @@ impl InlineListItem {
         Self { title: title.into(), selection, ..Self::default() }
     }
 
+    /// Shared group header: bold title, blank spacing above and below.
+    /// Use for every grouped modal list so sections read the same way.
+    #[must_use]
+    pub fn group_header(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            kind: InlineItemKind::Header,
+            ..Self::default()
+        }
+    }
+
+    /// Full-width rule between option groups (approve vs deny, lists vs actions).
+    #[must_use]
+    pub fn group_divider() -> Self {
+        // Empty title is the canonical untitled divider (`is_divider_title`).
+        Self::default()
+    }
+
     #[must_use]
     pub fn with_subtitle(mut self, subtitle: impl Into<String>) -> Self {
         self.subtitle = Some(subtitle.into());

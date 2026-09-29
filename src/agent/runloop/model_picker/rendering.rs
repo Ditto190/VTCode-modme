@@ -313,11 +313,7 @@ pub(super) fn render_step_one_inline(
 
         // Provider section header (non-selectable) so long model lists group
         // visually by vendor.
-        items.push(InlineListItem {
-            title: provider.label().to_string(),
-            kind: vtcode_commons::ui_protocol::InlineItemKind::Header,
-            ..Default::default()
-        });
+        items.push(InlineListItem::group_header(provider.label()));
 
         for idx in provider_model_indexes {
             let Some(option) = options.get(*idx) else {
@@ -610,15 +606,7 @@ const HUGGINGFACE_DOCS_URL: &str = "https://huggingface.co/docs/inference-provid
 /// trailing action rows. An empty title is the canonical untitled divider:
 /// `is_divider_title` accepts it and the renderer expands it to content width.
 pub(super) fn divider_item() -> InlineListItem {
-    InlineListItem {
-        title: String::new(),
-        subtitle: None,
-        badge: None,
-        indent: 0,
-        selection: None,
-        search_value: None,
-        ..Default::default()
-    }
+    InlineListItem::group_divider()
 }
 
 fn provider_group_divider_line() -> String {

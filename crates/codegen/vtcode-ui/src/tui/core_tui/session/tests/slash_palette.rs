@@ -24,18 +24,10 @@ fn busy_slash_palette_stop_accepts_then_interrupts_on_second_enter() {
         assert!(event.is_none());
     }
 
-    // First Enter accepts into the composer for review instead of executing.
-    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(accept.is_none(), "first Enter should accept, not submit");
-    assert_eq!(session.core.input_manager.content(), "/stop ");
-    assert!(
-        session.slash_palette.suggestions().is_empty(),
-        "palette should dismiss after accept for visual feedback"
-    );
-
-    // Second Enter executes the reviewed command.
+    // Single-Enter ergonomics: Enter completes + submits in one keypress.
     let event = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(event, Some(app_types::InlineEvent::Interrupt)));
+    assert!(session.slash_palette.suggestions().is_empty(), "palette should dismiss after submit");
 }
 
 #[test]
@@ -52,18 +44,10 @@ fn slash_palette_enter_accepts_immediate_command_for_review() {
         assert!(event.is_none());
     }
 
-    // First Enter populates the input box without submitting.
-    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(accept.is_none(), "first Enter should accept, not submit");
-    assert_eq!(session.core.input_manager.content(), "/new ");
-    assert!(
-        session.slash_palette.suggestions().is_empty(),
-        "palette should dismiss after accept for visual feedback"
-    );
-
-    // User can review/edit, then second Enter submits.
+    // Single-Enter ergonomics: Enter completes + submits in one keypress.
     let submit = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(submit, Some(app_types::InlineEvent::Submit(value)) if value.trim() == "/new"));
+    assert!(session.slash_palette.suggestions().is_empty(), "palette should dismiss after submit");
 }
 
 #[test]
@@ -80,13 +64,11 @@ fn slash_palette_enter_accepts_review_for_review() {
         assert!(event.is_none());
     }
 
-    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(accept.is_none(), "first Enter should accept, not submit");
-    assert_eq!(session.core.input_manager.content(), "/review ");
-    assert!(session.slash_palette.suggestions().is_empty());
-
+    // Single-Enter ergonomics: Enter completes + submits in one keypress,
+    // even for arg-capable commands (backend handles defaults/pickers).
     let submit = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(submit, Some(app_types::InlineEvent::Submit(value)) if value.trim() == "/review"));
+    assert!(session.slash_palette.suggestions().is_empty());
 }
 
 #[test]
@@ -121,7 +103,9 @@ fn slash_palette_accepted_input_remains_editable_and_cancellable() {
     ] {
         let _ = session.process_key(key);
     }
-    let accept = session.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    // Tab is the complete-without-run path: it populates the composer and
+    // dismisses the palette so the user can edit args before submitting.
+    let accept = session.process_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     assert!(accept.is_none());
     assert_eq!(session.core.input_manager.content(), "/new ");
 
