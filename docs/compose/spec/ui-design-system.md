@@ -1,14 +1,34 @@
 ---
 feature: ui-design-system
-status: designed
+status: delivered
 updated: 2026-09-29
 branch: compose/ui-design-system
-commits:
+commits: b2efeb1b6..ac8905a82
 ---
 
 # Canonical TUI Design System in vtcode-ui
 
 ## Report
+
+**What was built** — `vtcode_ui::design` is the canonical TUI design system for list UIs. `design::list` provides the row factory (`group_header`, `group_divider`, `hint`, `setting`, `action`, `choice`, `current_choice`); `design::keys` owns keyboard/interaction copy (`list_hint()`, `choice_hint()`); `design::constants::VALUE_COL` drives the value column. Wire types stay in `vtcode_commons::ui_protocol`.
+
+Settings, model picker, slash-command menus (plugins, skills, agents, oauth, mcp, secrets, …), palettes, permission/limit prompts, and most plan/inline/request_user_input surfaces build rows through those factories (via `src/agent/runloop/ui_list`). Group rhythm (blank above and below headers) and value-column alignment live in one renderer. Footer hints and standalone-picker keys come from `design::keys`.
+
+**Verification** — commands run and observed results:
+
+- `./scripts/check-dev.sh` — PASS
+- `cargo nextest run -p vtcode-ui` — PASS (1446)
+- `cargo nextest run -p vtcode` feature filters (settings/model/palette/plugin/permission/limit/subagent/memory/plan/skills) — PASS (390–722 per filter; 2942 on the broader run)
+- Design-kit unit tests (`design::list`, `design::keys`) — PASS
+- Independent review + re-review — no remaining criticals
+
+**Journey log** —
+
+1. Protocol types stay in `vtcode-commons`; only factories/layout/keys belong in `vtcode-ui` — that dependency direction is load-bearing.
+2. Mechanical `InlineListItem` → builder conversion needs struct-aware parsing; regexes that match `Some("lit")` also hit match patterns (`Some("run")`) — always constrain to struct-literal fields.
+3. `action()` arity: description is `impl Into<String>`, badge is `Option<String>` — mixed `&str`/`String` call sites need one shape, not three.
+4. Imports used only in `#[cfg(test)]` must live inside the test module or `-D unused-imports` fails the non-test build.
+5. Residual raw literals are mostly dynamic/conditional rows (permission session/deny, url_guard, request_user_input) — safe follow-up polish, not behavior risk.
 
 ## [S1] Problem
 
@@ -98,8 +118,8 @@ Remove after migration: settings `section_item`/`action_item*` wrappers (re-expo
 
 ## Tasks
 
-- [ ] T1: `vtcode-ui::design::list` + `design::keys` (+ `VALUE_COL`) with unit tests for row kind/tone/value defaults — acceptance: crate exports the API; tests pin group_header kind, setting value, action tone (covers: S2)
-- [ ] T2: Migrate settings palette + model picker onto `design::list` and `design::keys` — acceptance: no raw `InlineListItem {` literals in those modules except tests; existing settings/model tests pass (covers: S2; depends: T1)
-- [ ] T3: Migrate slash-command menus (plugins, skills, agents, workspace, oauth, mcp, secrets, …) + palettes + permission/limit + plan/inline/request_user_input onto `design::list` — acceptance: compile; targeted tests for those flows pass (covers: S2; depends: T1)
-- [ ] T4: Unify interactive_list hints/keys with `design::keys`; delete dead local builders/footer constants — acceptance: one source for keyboard copy; rg shows no duplicate nav hint strings outside `design::keys` + tests (covers: S2; depends: T2, T3)
-- [ ] T5: Docs (`docs/development/tui-design-system.md`) + full verification — acceptance: `./scripts/check-dev.sh` green; `cargo nextest run -p vtcode-ui` green; settings/model/slash tests green (covers: S2)
+- [x] T1: `vtcode-ui::design::list` + `design::keys` (+ `VALUE_COL`) with unit tests for row kind/tone/value defaults — acceptance: crate exports the API; tests pin group_header kind, setting value, action tone (covers: S2)
+- [x] T2: Migrate settings palette + model picker onto `design::list` and `design::keys` — acceptance: no raw `InlineListItem {` literals in those modules except tests; existing settings/model tests pass (covers: S2; depends: T1)
+- [x] T3: Migrate slash-command menus (plugins, skills, agents, workspace, oauth, mcp, secrets, …) + palettes + permission/limit + plan/inline/request_user_input onto `design::list` — acceptance: compile; targeted tests for those flows pass (covers: S2; depends: T1)
+- [x] T4: Unify interactive_list hints/keys with `design::keys`; delete dead local builders/footer constants — acceptance: one source for keyboard copy; rg shows no duplicate nav hint strings outside `design::keys` + tests (covers: S2; depends: T2, T3)
+- [x] T5: Docs (`docs/development/tui-design-system.md`) + full verification — acceptance: `./scripts/check-dev.sh` green; `cargo nextest run -p vtcode-ui` green; settings/model/slash tests green (covers: S2)
