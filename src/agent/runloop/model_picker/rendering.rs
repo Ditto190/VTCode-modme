@@ -27,7 +27,6 @@ const STEP_THREE_TITLE: &str = "Service Tier";
 
 pub(super) const CUSTOM_PROVIDER_TITLE: &str = "Custom provider + model";
 pub(super) const CUSTOM_PROVIDER_SUBTITLE: &str = "Provide the provider name and model identifier manually.";
-const CUSTOM_PROVIDER_BADGE: &str = "Custom";
 const REASONING_OFF_BADGE: &str = "No reasoning";
 const CURRENT_BADGE: &str = "Current";
 /// Selection action for the "← Back to model list" row on follow-up steps.
@@ -317,6 +316,7 @@ pub(super) fn render_step_one_inline(
         // visually by vendor.
         items.push(InlineListItem {
             title: provider.label().to_string(),
+            kind: vtcode_commons::ui_protocol::InlineItemKind::Header,
             ..Default::default()
         });
 
@@ -325,14 +325,14 @@ pub(super) fn render_step_one_inline(
                 continue;
             };
             let is_current = is_current_model(option.provider, &option.id, current_provider, current_model);
+            let description = option.description.trim();
             items.push(InlineListItem {
                 title: option.display.to_string(),
-                subtitle: static_model_subtitle(option, current_provider, current_model),
-                badge: Some(if is_current {
-                    CURRENT_BADGE.to_string()
-                } else {
-                    provider.label().to_string()
-                }),
+                // Capabilities sit in the value column (config-modal pattern);
+                // description stays dimmed underneath.
+                value: static_model_subtitle(option, current_provider, current_model),
+                subtitle: (!description.is_empty()).then(|| description.to_string()),
+                badge: is_current.then(|| CURRENT_BADGE.to_string()),
                 indent: 0,
                 selection: Some(InlineListSelection::Model(*idx)),
                 search_value: Some(model_search_value(
@@ -345,7 +345,7 @@ pub(super) fn render_step_one_inline(
                 badge_tone: if is_current {
                     vtcode_commons::ui_protocol::InlineTone::Current
                 } else {
-                    vtcode_commons::ui_protocol::InlineTone::Neutral
+                    vtcode_commons::ui_protocol::InlineTone::Accent
                 },
                 ..Default::default()
             });
@@ -366,14 +366,15 @@ pub(super) fn render_step_one_inline(
                     };
                     items.push(InlineListItem {
                         title: detail.model_display.clone(),
-                        subtitle: dynamic_model_subtitle(
+                        value: dynamic_model_subtitle(
                             provider,
                             &detail.model_id,
                             detail.reasoning_supported,
                             current_provider,
                             current_model,
                         ),
-                        badge: Some(provider.label().to_string()),
+                        subtitle: None,
+                        badge: None,
                         indent: 0,
                         selection: Some(InlineListSelection::DynamicModel(*entry_index)),
                         search_value: Some(model_search_value(
@@ -383,6 +384,7 @@ pub(super) fn render_step_one_inline(
                             None,
                             &extra_terms,
                         )),
+                        badge_tone: vtcode_commons::ui_protocol::InlineTone::Accent,
                         ..Default::default()
                     });
                 }
@@ -392,7 +394,7 @@ pub(super) fn render_step_one_inline(
                 items.push(InlineListItem {
                     title: format!("{} cache notice", provider.label()),
                     subtitle: Some(warning.to_string()),
-                    badge: Some("Action".to_string()),
+                    badge: None,
                     indent: 0,
                     selection: Some(InlineListSelection::RefreshDynamicModels),
                     search_value: Some(format!("{} cache", provider.label())),
@@ -406,7 +408,7 @@ pub(super) fn render_step_one_inline(
                 items.push(InlineListItem {
                     title: format!("{} unavailable", provider.label()),
                     subtitle: Some(error.to_string()),
-                    badge: Some("Action".to_string()),
+                    badge: None,
                     indent: 0,
                     selection: Some(InlineListSelection::RefreshDynamicModels),
                     search_value: Some(format!("{} setup", provider.label().to_ascii_lowercase())),
@@ -417,7 +419,7 @@ pub(super) fn render_step_one_inline(
             items.push(InlineListItem {
                 title: "Custom Hugging Face model".to_string(),
                 subtitle: Some("Enter any HF model id (e.g., huggingface <org>/<model>)".to_string()),
-                badge: Some("Custom".to_string()),
+                badge: None,
                 indent: 0,
                 selection: Some(InlineListSelection::CustomModel),
                 search_value: Some("huggingface custom".to_string()),
@@ -430,11 +432,13 @@ pub(super) fn render_step_one_inline(
         for (index, selection) in custom_providers.iter().enumerate() {
             items.push(InlineListItem {
                 title: custom_provider_picker_title(selection).to_string(),
-                subtitle: Some(custom_provider_picker_subtitle(selection, current_provider, current_model)),
-                badge: Some("Custom".to_string()),
+                value: Some(custom_provider_picker_subtitle(selection, current_provider, current_model)),
+                subtitle: None,
+                badge: None,
                 indent: 0,
                 selection: Some(InlineListSelection::CustomProvider(index)),
                 search_value: Some(custom_provider_search_value(selection)),
+                badge_tone: vtcode_commons::ui_protocol::InlineTone::Accent,
                 ..Default::default()
             });
         }
@@ -445,7 +449,7 @@ pub(super) fn render_step_one_inline(
     items.push(InlineListItem {
         title: "Refresh dynamic model lists".to_string(),
         subtitle: Some("Re-query Copilot, LM Studio, and Ollama without closing the picker.".to_string()),
-        badge: Some("Action".to_string()),
+        badge: None,
         indent: 0,
         selection: Some(InlineListSelection::RefreshDynamicModels),
         search_value: Some("refresh dynamic models".to_string()),
@@ -455,7 +459,7 @@ pub(super) fn render_step_one_inline(
     items.push(InlineListItem {
         title: CUSTOM_PROVIDER_TITLE.to_string(),
         subtitle: Some(CUSTOM_PROVIDER_SUBTITLE.to_string()),
-        badge: Some(CUSTOM_PROVIDER_BADGE.to_string()),
+        badge: None,
         indent: 0,
         selection: Some(InlineListSelection::CustomModel),
         search_value: Some("custom provider".to_string()),

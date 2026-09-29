@@ -527,16 +527,7 @@ fn modal_list_summary_line(
             ));
         }
     } else {
-        spans.push(Span::styled(
-            format!(
-                "{} {} {} {}",
-                ui::MODAL_LIST_SUMMARY_MATCHES_LABEL,
-                matches,
-                ui::MODAL_LIST_SUMMARY_TOTAL_LABEL,
-                total
-            ),
-            styles.detail,
-        ));
+        spans.push(Span::styled(format!("{matches} / {total}"), styles.detail));
     }
 
     if spans.is_empty() {
@@ -1222,7 +1213,7 @@ pub fn modal_list_item_lines(
         // Pad short titles so values line up as a column when possible.
         let title_width: usize = item.title.chars().count();
         let target = 28usize;
-        if item.kind == InlineItemKind::Setting && title_width < target {
+        if title_width < target {
             primary_spans.push(Span::raw(" ".repeat(target - title_width)));
         } else {
             primary_spans.push(Span::raw("  "));
@@ -2052,7 +2043,7 @@ mod tests {
             .expect("summary should exist");
         let text = line_text(&summary);
 
-        assert!(text.contains("Matches 1 of 1"));
+        assert!(text.contains("1 / 1"), "quiet match counter: {text}");
         assert!(!text.contains("gpt"));
         assert!(!text.contains("Filter:"));
     }
