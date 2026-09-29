@@ -922,13 +922,15 @@ impl Session {
             return Some(preview.placeholder);
         }
 
-        let line_count = content.split('\n').count();
-        if line_count >= ui::INLINE_PASTE_COLLAPSE_LINE_THRESHOLD {
-            let char_count = content.chars().count();
-            return Some(format!("[Pasted Content {char_count} chars]"));
-        }
-
         if let Some(compact) = compact_image_placeholders(content) {
+            // `compact_image_placeholders` returns the full content with image
+            // paths substituted. Never render it unbounded: large inputs are
+            // already collapsed by `input_compact_preview` above, so this is
+            // only a safety net for small embeds.
+            if compact.chars().count() >= ui::INLINE_INPUT_COMPACT_CHAR_THRESHOLD {
+                let char_count = content.chars().count();
+                return Some(format!("[Pasted Content {char_count} chars]"));
+            }
             return Some(compact);
         }
 
@@ -937,28 +939,11 @@ impl Session {
 
     fn input_compact_preview(&self) -> Option<CompactInputPreview> {
         let content = self.input_manager.content();
-        let range = self.input_manager.compact_paste_range()?;
-        if range.start >= range.end
-            || range.end > content.len()
-            || !content.is_char_boundary(range.start)
-            || !content.is_char_boundary(range.end)
-        {
-            return None;
+        if let Some(preview) = compact_paste_range_preview(content, self.input_manager.compact_paste_range()) {
+            return Some(preview);
         }
 
-        let pasted = &content[range.clone()];
-        if pasted.split('\n').count() < ui::INLINE_PASTE_COLLAPSE_LINE_THRESHOLD {
-            return None;
-        }
-
-        let before = compact_inline_segment(&content[..range.start]);
-        let after_lines = content[range.end..].split('\n').map(compact_inline_segment).collect();
-        let char_count = pasted.chars().count();
-        Some(CompactInputPreview {
-            before,
-            placeholder: format!("[Pasted Content {char_count} chars]"),
-            after_lines,
-        })
+        generic_large_input_preview(content, self.input_manager.attachments().len())
     }
 
     pub(crate) fn visible_inline_prompt_suggestion_suffix(&self) -> Option<String> {
@@ -1656,6 +1641,198 @@ fn compact_inline_segment(content: &str) -> String {
         .chars()
         .map(|ch| if ch == '\n' || ch == '\r' { ' ' } else { ch })
         .collect()
+}
+
+/// Number of image tokens visible in composer text.
+///
+/// Counts clipboard `[Image #N]` placeholders, inline `data:image/…` payloads,
+/// and image file-path matches. Used with the attachment count to decide when
+/// the composer should collapse to a summary instead of showing full text.
+fn count_input_image_tokens(content: &str) -> usize {
+    let placeholder_count = content.matches("[Image #").count();
+    let inline_data_count = content.matches("data:image/").count();
+    let path_count = IMAGE_PATH_INLINE_REGEX.captures_iter(content).count();
+    placeholder_count.saturating_add(inline_data_count).saturating_add(path_count)
+}
+
+/// Number of `@file` reference tokens in composer text.
+fn count_input_file_tokens(content: &str) -> usize {
+    tokenize_input(content)
+        .iter()
+        .filter(|token| token.kind == InputTokenKind::FileReference)
+        .count()
+}
+
+/// Effective image count for collapse decisions: the larger of visible text
+/// tokens and live attachments, so orphaned-attachment payloads still collapse
+/// while deleted placeholders do not double-count.
+fn effective_image_count(content: &str, attachment_count: usize) -> usize {
+    count_input_image_tokens(content).max(attachment_count)
+}
+
+/// Measured size of composer (or pasted) text for collapse decisions.
+///
+/// Dimension key: `char_count` is Unicode scalar count, `line_count` is
+/// logical `\n` lines, `image_count` covers `[Image #N]` + `data:image/` +
+/// image paths (+ attachments via [`InputSizeMetrics::of_content`]),
+/// `file_count` is `@file` tokens. Single source of truth so the paste gate,
+/// the generic preview gate, and the paste-tracking gate cannot drift apart.
+struct InputSizeMetrics {
+    char_count: usize,
+    line_count: usize,
+    image_count: usize,
+    file_count: usize,
+}
+
+impl InputSizeMetrics {
+    fn of_text(text: &str) -> Self {
+        Self {
+            char_count: text.chars().count(),
+            line_count: text.split('\n').count(),
+            image_count: count_input_image_tokens(text),
+            file_count: count_input_file_tokens(text),
+        }
+    }
+
+    fn of_content(content: &str, attachment_count: usize) -> Self {
+        Self {
+            char_count: content.chars().count(),
+            line_count: content.split('\n').count(),
+            image_count: effective_image_count(content, attachment_count),
+            file_count: count_input_file_tokens(content),
+        }
+    }
+
+    fn should_collapse(&self) -> bool {
+        self.line_count >= ui::INLINE_PASTE_COLLAPSE_LINE_THRESHOLD
+            || self.char_count >= ui::INLINE_INPUT_COMPACT_CHAR_THRESHOLD
+            || self.image_count >= ui::INLINE_INPUT_COMPACT_IMAGE_THRESHOLD
+            || self.file_count >= ui::INLINE_INPUT_COMPACT_FILE_TOKEN_THRESHOLD
+    }
+
+    fn placeholder(&self) -> String {
+        format_large_input_placeholder(self.char_count, self.line_count, self.image_count, self.file_count)
+    }
+}
+
+/// Summary placeholder for large composer content.
+///
+/// Dimension key: `char_count` is Unicode scalar count, `line_count` is
+/// logical `\n` lines, `image_count` covers `[Image #N]` + `data:image/` +
+/// image paths + attachments, `file_count` is `@file` tokens. Keeps the
+/// legacy `[Pasted Content N chars]` prefix so existing transcript/status
+/// matching keeps working, appending line/image/file details when present.
+fn format_large_input_placeholder(
+    char_count: usize,
+    line_count: usize,
+    image_count: usize,
+    file_count: usize,
+) -> String {
+    let mut placeholder = format!("[Pasted Content {char_count} chars");
+    if line_count > 1 {
+        let _ = write!(placeholder, ", {line_count} lines");
+    }
+    if image_count > 0 {
+        let label = if image_count == 1 { "image" } else { "images" };
+        let _ = write!(placeholder, ", {image_count} {label}");
+    }
+    if file_count > 0 {
+        let label = if file_count == 1 { "file" } else { "files" };
+        let _ = write!(placeholder, ", {file_count} {label}");
+    }
+    placeholder.push(']');
+    placeholder
+}
+
+/// Paste-range preview, extended beyond the legacy line-count gate.
+///
+/// Collapses when the pasted slice itself is large by lines, chars, images,
+/// or file tokens. `before` keeps the last head-chars of the previous content
+/// and each `after` line keeps its first head-chars, so surrounding context
+/// stays visible but bounded while the pasted block becomes one marker.
+fn compact_paste_range_preview(content: &str, range: Option<std::ops::Range<usize>>) -> Option<CompactInputPreview> {
+    let range = range?;
+    if range.start >= range.end
+        || range.end > content.len()
+        || !content.is_char_boundary(range.start)
+        || !content.is_char_boundary(range.end)
+    {
+        return None;
+    }
+
+    let pasted = &content[range.clone()];
+    let pasted_metrics = InputSizeMetrics::of_text(pasted);
+    if !pasted_metrics.should_collapse() {
+        return None;
+    }
+
+    let head_chars = ui::INLINE_INPUT_COMPACT_PREVIEW_HEAD_CHARS;
+    let before_src = &content[..range.start];
+    let before = compact_inline_segment(&before_src[last_n_chars_start(before_src, head_chars)..]);
+    let after_lines = content[range.end..]
+        .split('\n')
+        .map(|line| compact_inline_segment(&line[..first_n_chars_end(line, head_chars)]))
+        .collect();
+    Some(CompactInputPreview {
+        before,
+        placeholder: pasted_metrics.placeholder(),
+        after_lines,
+    })
+}
+
+/// Generic preview for large composer content without a qualifying paste range.
+///
+/// Covers typed large inputs, single-line floods (minified JSON/base64), and
+/// token floods (many `[Image #N]` / `@file`). For char-large content shows a
+/// truncated head, the summary placeholder, and a truncated tail so previous
+/// content is summarized rather than rendered in full. For token-only floods
+/// (short text but many images/files) shows just the placeholder to avoid
+/// echoing the token list twice.
+fn generic_large_input_preview(content: &str, attachment_count: usize) -> Option<CompactInputPreview> {
+    let metrics = InputSizeMetrics::of_content(content, attachment_count);
+    if !metrics.should_collapse() {
+        return None;
+    }
+
+    let head_chars = ui::INLINE_INPUT_COMPACT_PREVIEW_HEAD_CHARS;
+    let tail_chars = ui::INLINE_INPUT_COMPACT_PREVIEW_TAIL_CHARS;
+    let char_large = metrics.char_count > head_chars.saturating_add(tail_chars);
+    let (before, after_lines) = if char_large {
+        let before = compact_inline_segment(&content[..first_n_chars_end(content, head_chars)]);
+        let tail = &content[last_n_chars_start(content, tail_chars)..];
+        (before, vec![compact_inline_segment(tail)])
+    } else {
+        (String::new(), Vec::new())
+    };
+    Some(CompactInputPreview {
+        before,
+        placeholder: metrics.placeholder(),
+        after_lines,
+    })
+}
+
+/// Whether pasted text should be tracked as a collapsible block.
+///
+/// Mirrors the preview gate so char-large, image-heavy, and file-heavy pastes
+/// collapse the same way line-heavy pastes already do.
+pub(crate) fn should_track_compact_paste(pasted: &str) -> bool {
+    InputSizeMetrics::of_text(pasted).should_collapse()
+}
+
+/// End byte index of the first `n` chars (char-boundary safe, no allocation).
+fn first_n_chars_end(content: &str, n: usize) -> usize {
+    content.char_indices().nth(n).map_or(content.len(), |(idx, _)| idx)
+}
+
+/// Start byte index of the last `n` chars (char-boundary safe, no allocation).
+fn last_n_chars_start(content: &str, n: usize) -> usize {
+    if n == 0 {
+        return content.len();
+    }
+    match content.char_indices().rev().nth(n) {
+        Some((idx, ch)) => idx + ch.len_utf8(),
+        None => 0,
+    }
 }
 
 fn display_width_for_char_range(content: &str, char_count: usize) -> u16 {

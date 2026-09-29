@@ -47,6 +47,18 @@ pub fn effective_transcript_bottom_padding(viewport_rows: usize) -> usize {
 pub const INLINE_PREVIEW_MAX_CHARS: usize = 56;
 pub const INLINE_PREVIEW_ELLIPSIS: &str = crate::design::constants::INLINE_PREVIEW_ELLIPSIS;
 pub const INLINE_PASTE_COLLAPSE_LINE_THRESHOLD: usize = 10;
+/// Collapse the composer when pasted/typed text reaches this char count,
+/// even when the line count stays below the paste threshold (e.g. minified
+/// JSON, base64 image data, long single-line file-token lists).
+pub const INLINE_INPUT_COMPACT_CHAR_THRESHOLD: usize = 1000;
+/// Collapse the composer when this many image tokens/attachments are present
+/// (`[Image #N]`, `data:image/…`, or image file paths).
+pub const INLINE_INPUT_COMPACT_IMAGE_THRESHOLD: usize = 3;
+/// Collapse the composer when this many `@file` reference tokens are present.
+pub const INLINE_INPUT_COMPACT_FILE_TOKEN_THRESHOLD: usize = 5;
+/// Head/tail snippet sizes for the generic large-input summary preview.
+pub const INLINE_INPUT_COMPACT_PREVIEW_HEAD_CHARS: usize = 120;
+pub const INLINE_INPUT_COMPACT_PREVIEW_TAIL_CHARS: usize = 120;
 pub const INLINE_JSON_TAIL_LINES: usize = 30;
 pub const INLINE_JSON_COLLAPSE_LINE_THRESHOLD: usize = 200;
 pub const HEADER_HIGHLIGHT_PREVIEW_MAX_CHARS: usize = 48;

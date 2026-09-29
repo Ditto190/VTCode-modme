@@ -9,6 +9,7 @@ mod history;
 mod image_paste;
 mod input_navigation;
 mod jump_to_last_change;
+mod large_input;
 mod local_agents;
 mod misc;
 mod overlay_list;

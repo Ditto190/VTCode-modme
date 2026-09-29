@@ -167,7 +167,9 @@ impl Session {
     ///
     /// This preserves the full block (including large multi-line pastes) so the
     /// agent receives the exact content instead of dropping line breaks after
-    /// hitting the interactive input's visual limit.
+    /// hitting the interactive input's visual limit. Large pastes — by lines,
+    /// chars, images, or file tokens — are tracked as a collapsible block so
+    /// the composer summarizes previous content instead of showing full text.
     pub(crate) fn insert_paste_text(&mut self, text: &str) {
         let sanitized: String = text.chars().filter(|&ch| ch != '\r' && ch != '\u{7f}').collect();
 
@@ -180,9 +182,9 @@ impl Session {
             .selection_range()
             .map_or_else(|| self.input_manager.cursor(), |(start, _)| start);
         let paste_end = paste_start.saturating_add(sanitized.len());
-        let line_count = sanitized.split('\n').count();
+        let should_collapse = super::input::should_track_compact_paste(&sanitized);
         self.input_manager.insert_text(&sanitized);
-        if line_count >= ui::INLINE_PASTE_COLLAPSE_LINE_THRESHOLD {
+        if should_collapse {
             self.input_manager.set_compact_paste_range(paste_start..paste_end);
         }
         self.refresh_input_edit_state();
@@ -494,6 +496,7 @@ impl Session {
     pub(crate) fn navigate_history_previous(&mut self) -> bool {
         if let Some(previous) = self.input_manager.go_to_previous_history() {
             self.input_manager.apply_history_entry(previous);
+            self.input_compact_mode = self.input_compact_placeholder().is_some();
             true
         } else {
             false
@@ -504,6 +507,7 @@ impl Session {
     pub(crate) fn navigate_history_next(&mut self) -> bool {
         if let Some(next) = self.input_manager.go_to_next_history() {
             self.input_manager.apply_history_entry(next);
+            self.input_compact_mode = self.input_compact_placeholder().is_some();
             true
         } else {
             false
