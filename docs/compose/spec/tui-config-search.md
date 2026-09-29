@@ -3,7 +3,7 @@ feature: tui-config-search
 status: delivered
 updated: 2026-09-26
 branch: compose/tui-config-search
-commits:
+commits: cbcdb8e15..97fcfeacd
 ---
 
 # Responsive TUI Configuration Search
