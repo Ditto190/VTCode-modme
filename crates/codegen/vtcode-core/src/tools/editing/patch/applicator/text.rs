@@ -9,16 +9,7 @@ use super::super::semantic::{resolve_semantic_match, semantic_anchor_term};
 use super::io::AtomicWriter;
 use super::{PatchChunk, PatchError};
 
-/// Bound model-facing error echoes of patch context/snippet text. The model
-/// already has the patch payload; re-echoing multi-KB chunks in the failure
-/// message doubles the tokens of the failed attempt.
-fn condense_error_echo(text: &str) -> String {
-    if text.len() > 500 {
-        vtcode_commons::preview::condense_text_bytes(text, 250, 250)
-    } else {
-        text.to_string()
-    }
-}
+use vtcode_commons::preview::condense_error_echo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LineEnding {

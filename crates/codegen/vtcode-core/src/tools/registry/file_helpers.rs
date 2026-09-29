@@ -185,14 +185,8 @@ fn edit_not_found_error(
     } else {
         current_content.to_owned()
     };
-    // The model already has old_str; re-echoing a multi-KB paste into the
-    // error doubles the tokens of the failed attempt. Keep a disambiguating
-    // head/tail only.
-    let old_preview = if effective_old_str.len() > 500 {
-        vtcode_commons::preview::condense_text_bytes(effective_old_str, 250, 250)
-    } else {
-        effective_old_str.to_owned()
-    };
+    // The model already has old_str; keep only a disambiguating head/tail.
+    let old_preview = vtcode_commons::preview::condense_error_echo(effective_old_str);
 
     let numbering_note = if stripped_old || stripped_new {
         "\n\nNote: line-number prefixes were stripped before matching."

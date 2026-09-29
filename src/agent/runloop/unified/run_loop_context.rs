@@ -591,11 +591,11 @@ pub(crate) struct HarnessTurnState {
     file_read_path_counts: HashMap<String, usize>,
     pub(crate) seen_successful_readonly_signatures: HashSet<String>,
     streamed_tool_call_item_ids: HashMap<String, StreamedToolCallItem>,
-    /// Turn-local memo of failure diagnoses keyed by `(tool, evidence)` hash.
+    /// Turn-local memo of failure diagnoses keyed by `(tool, evidence)`.
     /// Fix-verify loops re-hit the same failure shape; skip the extra
     /// lightweight LLM round-trip after the first diagnosis. Values are
     /// bounded `(observed, likely_cause, next_action)` triples.
-    failure_diagnosis_memo: HashMap<u64, (String, String, String)>,
+    failure_diagnosis_memo: HashMap<(String, String), (String, String, String)>,
     /// Cap on model-backed diagnosis calls per turn. After this, deterministic
     /// fallbacks only — failure-heavy loops must not multiply model calls.
     failure_diagnosis_model_calls: u32,
@@ -914,13 +914,13 @@ impl HarnessTurnState {
     }
 
     /// Return a memoized failure-diagnosis triple for `(tool, evidence)`.
-    pub(crate) fn failure_diagnosis_memo_get(&self, key: u64) -> Option<(String, String, String)> {
-        self.failure_diagnosis_memo.get(&key).cloned()
+    pub(crate) fn failure_diagnosis_memo_get(&self, key: &(String, String)) -> Option<(String, String, String)> {
+        self.failure_diagnosis_memo.get(key).cloned()
     }
 
     /// Store a failure-diagnosis triple. Memo is bounded so a pathological
     /// failure storm cannot grow the turn state without limit.
-    pub(crate) fn failure_diagnosis_memo_put(&mut self, key: u64, triple: (String, String, String)) {
+    pub(crate) fn failure_diagnosis_memo_put(&mut self, key: (String, String), triple: (String, String, String)) {
         const MAX_MEMO: usize = 32;
         if self.failure_diagnosis_memo.len() >= MAX_MEMO {
             self.failure_diagnosis_memo.clear();
@@ -3439,9 +3439,11 @@ mod tests {
     #[test]
     fn failure_diagnosis_memo_round_trips_and_caps_model_calls() {
         let mut state = HarnessTurnState::new(TurnRunId("r".into()), TurnId("t".into()), 4, 60, 1);
-        assert!(state.failure_diagnosis_memo_get(7).is_none());
-        state.failure_diagnosis_memo_put(7, ("obs".into(), "cause".into(), "act".into()));
-        assert_eq!(state.failure_diagnosis_memo_get(7), Some(("obs".into(), "cause".into(), "act".into())));
+        let key = ("exec_command".to_string(), "exit 1".to_string());
+        let lookup = ("exec_command".to_string(), "exit 1".to_string());
+        assert!(state.failure_diagnosis_memo_get(&lookup).is_none());
+        state.failure_diagnosis_memo_put(key, ("obs".into(), "cause".into(), "act".into()));
+        assert_eq!(state.failure_diagnosis_memo_get(&lookup), Some(("obs".into(), "cause".into(), "act".into())));
 
         assert!(state.can_spend_failure_diagnosis_model_call());
         for _ in 0..3 {

@@ -1,6 +1,5 @@
 //! Lightweight provider routing and strict diagnosis parsing.
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -26,11 +25,8 @@ struct ModelDiagnosis {
     next_action: String,
 }
 
-fn diagnosis_memo_key(tool_name: &str, evidence: &str) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
-    tool_name.hash(&mut hasher);
-    evidence.hash(&mut hasher);
-    hasher.finish()
+fn diagnosis_memo_key(tool_name: &str, evidence: &str) -> (String, String) {
+    (tool_name.to_string(), evidence.to_string())
 }
 
 pub(super) async fn diagnose_with_optional_model(
@@ -48,27 +44,23 @@ pub(super) async fn diagnose_with_optional_model(
     // diagnosis and stop spending model calls once the per-turn budget is
     // gone — each failure otherwise adds 1-2 hidden LLM round-trips.
     let memo_key = diagnosis_memo_key(tool_name, evidence);
-    if let Some((observed, likely_cause, next_action)) = ctx.harness_state.failure_diagnosis_memo_get(memo_key) {
+    if let Some((observed, likely_cause, next_action)) = ctx.harness_state.failure_diagnosis_memo_get(&memo_key) {
         return ToolFailureDiagnosis::new(observed, likely_cause, next_action);
     }
     if !ctx.harness_state.can_spend_failure_diagnosis_model_call() {
         return fallback;
     }
-    ctx.harness_state.record_failure_diagnosis_model_call();
 
     let resolution = resolve_lightweight_route(ctx.config, ctx.vt_cfg, LightweightFeature::ToolFailureDiagnosis, None);
     if let Some(warning) = &resolution.warning {
         tracing::warn!(warning = %warning, tool = %tool_name, "tool failure diagnosis route adjusted");
     }
 
+    ctx.harness_state.record_failure_diagnosis_model_call();
     match diagnose_with_route(ctx, &resolution.primary, evidence).await {
         Ok(raw) => {
             if let Some(diagnosis) = parse_model_diagnosis(&raw) {
-                ctx.harness_state.failure_diagnosis_memo_put(
-                    memo_key,
-                    (diagnosis.observed.clone(), diagnosis.likely_cause.clone(), diagnosis.next_action.clone()),
-                );
-                return diagnosis;
+                return store_memoized(ctx.harness_state, memo_key, diagnosis);
             }
             tracing::warn!(tool = %tool_name, "tool failure diagnosis returned invalid or unsafe JSON; using deterministic fallback");
         }
@@ -81,15 +73,14 @@ pub(super) async fn diagnose_with_optional_model(
         }
     }
 
-    if let Some(fallback_route) = resolution.fallback.as_ref() {
+    if let Some(fallback_route) = resolution.fallback.as_ref()
+        && ctx.harness_state.can_spend_failure_diagnosis_model_call()
+    {
+        ctx.harness_state.record_failure_diagnosis_model_call();
         match diagnose_with_route(ctx, fallback_route, evidence).await {
             Ok(raw) => {
                 if let Some(diagnosis) = parse_model_diagnosis(&raw) {
-                    ctx.harness_state.failure_diagnosis_memo_put(
-                        memo_key,
-                        (diagnosis.observed.clone(), diagnosis.likely_cause.clone(), diagnosis.next_action.clone()),
-                    );
-                    return diagnosis;
+                    return store_memoized(ctx.harness_state, memo_key, diagnosis);
                 }
                 tracing::warn!(tool = %tool_name, "tool failure diagnosis fallback returned invalid or unsafe JSON");
             }
@@ -103,7 +94,21 @@ pub(super) async fn diagnose_with_optional_model(
         }
     }
 
-    fallback
+    // Memoize the deterministic fallback too: a repeated identical failure
+    // must not re-spend model calls after the routes already failed once.
+    store_memoized(ctx.harness_state, memo_key, fallback)
+}
+
+fn store_memoized(
+    state: &mut crate::agent::runloop::unified::run_loop_context::HarnessTurnState,
+    memo_key: (String, String),
+    diagnosis: ToolFailureDiagnosis,
+) -> ToolFailureDiagnosis {
+    state.failure_diagnosis_memo_put(
+        memo_key,
+        (diagnosis.observed.clone(), diagnosis.likely_cause.clone(), diagnosis.next_action.clone()),
+    );
+    diagnosis
 }
 
 async fn diagnose_with_route(

@@ -14,6 +14,10 @@ use vtcode_commons::walk::build_default_walker;
 /// serializes the entire workspace tree into one tool result and is then
 /// fuse-truncated mid-structure (unusable) or floods the model context.
 const TREE_MAX_NODES: usize = 200;
+/// Per-directory child cap. Intentionally not `ListInput::max_items` (default
+/// 20) — that field is a flat list/page size; coupling it to tree made the
+/// default tree far sparser than the pre-cap behavior.
+const TREE_MAX_PER_DIR: usize = 50;
 
 pub(super) async fn execute_tree_view(tool: &FileOpsTool, input: &ListInput) -> Result<Value> {
     let search_path = tool.normalize_list_path(input).await?;
@@ -90,15 +94,8 @@ pub(super) async fn execute_tree_view(tool: &FileOpsTool, input: &ListInput) -> 
 
     let mut budget = TREE_MAX_NODES;
     let mut truncated = false;
-    let tree_structure = build_tree_structure(
-        tool,
-        &search_path,
-        &dir_contents,
-        input.include_hidden,
-        input.max_items,
-        &mut budget,
-        &mut truncated,
-    );
+    let tree_structure =
+        build_tree_structure(tool, &search_path, &dir_contents, input.include_hidden, &mut budget, &mut truncated);
 
     let mut response = json!({
         "success": true,
@@ -110,7 +107,7 @@ pub(super) async fn execute_tree_view(tool: &FileOpsTool, input: &ListInput) -> 
     if truncated {
         response["tree_truncated"] = Value::Bool(true);
         response["tree_note"] = Value::String(format!(
-            "tree capped at {TREE_MAX_NODES} nodes; use mode=list/recursive with max_items for the remainder"
+            "tree truncated (max {TREE_MAX_NODES} nodes / {TREE_MAX_PER_DIR} per directory); use mode=list or mode=recursive for the remainder"
         ));
     }
     Ok(response)
@@ -121,7 +118,6 @@ fn build_tree_structure(
     base_path: &Path,
     dir_contents: &HashMap<String, Vec<(String, String)>>,
     include_hidden: bool,
-    max_per_dir: usize,
     budget: &mut usize,
     truncated: &mut bool,
 ) -> Value {
@@ -134,9 +130,12 @@ fn build_tree_structure(
     let mut items = Vec::new();
 
     if let Some(contents) = dir_contents.get(&relative_path) {
-        let cap = max_per_dir.max(1);
+        let cap = TREE_MAX_PER_DIR;
         let mut emitted = 0usize;
         for (name, entry_type) in contents {
+            if !include_hidden && name.starts_with('.') {
+                continue;
+            }
             if *budget == 0 {
                 *truncated = true;
                 break;
@@ -144,9 +143,6 @@ fn build_tree_structure(
             if emitted >= cap {
                 *truncated = true;
                 break;
-            }
-            if !include_hidden && name.starts_with('.') {
-                continue;
             }
 
             let item = if entry_type == "directory" {
@@ -160,9 +156,12 @@ fn build_tree_structure(
                 *budget = budget.saturating_sub(1);
                 let sub_children = if let Some(sub_contents) = dir_contents.get(&sub_relative_path) {
                     let mut sub_items = Vec::new();
-                    let sub_cap = max_per_dir.max(1);
+                    let sub_cap = TREE_MAX_PER_DIR;
                     let mut sub_emitted = 0usize;
                     for (sub_name, sub_type) in sub_contents {
+                        if !include_hidden && sub_name.starts_with('.') {
+                            continue;
+                        }
                         if *budget == 0 {
                             *truncated = true;
                             break;
@@ -170,9 +169,6 @@ fn build_tree_structure(
                         if sub_emitted >= sub_cap {
                             *truncated = true;
                             break;
-                        }
-                        if !include_hidden && sub_name.starts_with('.') {
-                            continue;
                         }
                         *budget = budget.saturating_sub(1);
                         sub_emitted += 1;
@@ -233,37 +229,61 @@ mod tests {
 
     #[test]
     fn tree_structure_caps_nodes_and_flags_truncation() {
+        // Root has 6 directories × 50 children = 6 dir nodes + 300 file nodes.
+        // Budget (200) must stop before the full fan-out and flag truncation.
         let tool = test_tool();
-        let contents = flat_dir_entries(500);
+        let mut contents = HashMap::new();
+        let mut root = Vec::new();
+        for d in 0..6 {
+            let name = format!("d{d}");
+            root.push((name.clone(), "directory".to_string()));
+            let children: Vec<(String, String)> =
+                (0..50).map(|i| (format!("{name}/f{i:02}.rs"), "file".to_string())).collect();
+            contents.insert(name, children);
+        }
+        contents.insert(String::new(), root);
+
         let mut budget = TREE_MAX_NODES;
         let mut truncated = false;
-        let tree = build_tree_structure(
-            &tool,
-            Path::new("/workspace"),
-            &contents,
-            true,
-            usize::MAX,
-            &mut budget,
-            &mut truncated,
-        );
+        let tree = build_tree_structure(&tool, Path::new("/workspace"), &contents, true, &mut budget, &mut truncated);
 
         let items = tree.as_array().expect("tree is an array");
-        assert!(items.len() <= TREE_MAX_NODES, "emitted {} nodes", items.len());
         assert!(truncated, "overflow must be flagged");
-        assert_eq!(items.len(), TREE_MAX_NODES);
+        let mut nodes = 0usize;
+        for item in items {
+            nodes += 1;
+            if let Some(children) = item.get("children").and_then(Value::as_array) {
+                nodes += children.len();
+            }
+        }
+        assert!(nodes <= TREE_MAX_NODES, "emitted {nodes} nodes");
+        assert!(nodes >= TREE_MAX_NODES.saturating_sub(1), "budget should be nearly exhausted, got {nodes}");
     }
 
     #[test]
     fn tree_structure_respects_per_dir_cap() {
         let tool = test_tool();
-        let contents = flat_dir_entries(50);
+        let contents = flat_dir_entries(TREE_MAX_PER_DIR + 20);
         let mut budget = TREE_MAX_NODES;
         let mut truncated = false;
-        let tree =
-            build_tree_structure(&tool, Path::new("/workspace"), &contents, true, 10, &mut budget, &mut truncated);
+        let tree = build_tree_structure(&tool, Path::new("/workspace"), &contents, true, &mut budget, &mut truncated);
 
         let items = tree.as_array().expect("tree is an array");
-        assert_eq!(items.len(), 10);
+        assert_eq!(items.len(), TREE_MAX_PER_DIR);
         assert!(truncated);
+    }
+
+    #[test]
+    fn tree_ignores_list_max_items_for_per_dir_children() {
+        // tree previously ignored ListInput::max_items; keep that so the list
+        // default of 20 does not silently sparsify directory trees.
+        let tool = test_tool();
+        let contents = flat_dir_entries(40);
+        let mut budget = TREE_MAX_NODES;
+        let mut truncated = false;
+        let tree = build_tree_structure(&tool, Path::new("/workspace"), &contents, true, &mut budget, &mut truncated);
+        let items = tree.as_array().expect("tree is an array");
+        assert_eq!(items.len(), 40, "40 children fit under TREE_MAX_PER_DIR");
+        assert!(!truncated);
     }
 }
