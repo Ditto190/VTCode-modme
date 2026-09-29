@@ -187,6 +187,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Topics**: Audit packs
   - **User Questions**: "What can you tell me about Session Event Persistence?", "How does Audit packs work?"
 
+- **File**: `docs/development/tui-list-search.md`
+  - **Content**: TUI list search
+  - **Topics**: Surfaces, interactive_list keys, Config option keywords
+  - **User Questions**: "What can you tell me about TUI list search?", "How does Surfaces work?", "How does interactive_list keys work?"
+
 - **File**: `docs/development/TUI_ONLY_REFACTORING.md`
   - **Content**: TUI-Only Tool Permission Refactoring
   - **Topics**: Overview, Problem Statement, Solution, Usage, Backward Compatibility
@@ -1062,6 +1067,11 @@ This document serves as an index of all VT Code documentation. When users ask qu
   - **Content**: Registry-Light Critical Path
   - **Topics**: Report, [S1] Problem, [S2] Design, Tasks
   - **User Questions**: "What can you tell me about Registry-Light Critical Path?", "How does Report work?", "How does [S1] Problem work?"
+
+- **File**: `docs/compose/spec/tui-config-search.md`
+  - **Content**: Responsive TUI Configuration Search
+  - **Topics**: Report, [S1] Problem, [S2] Design, [S3] Out of Scope, Tasks
+  - **User Questions**: "What can you tell me about Responsive TUI Configuration Search?", "How does Report work?", "How does [S1] Problem work?"
 
 - **File**: `docs/compose/spec/risk-audit-deferred-items.md`
   - **Content**: Risk-Audit Deferred Items

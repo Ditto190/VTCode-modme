@@ -515,14 +515,26 @@ impl ModalListItem {
         self.selection.is_none() && !self.is_divider
     }
 
+    /// Lowercased match corpus: caller `search_value` when present, else
+    /// title + subtitle so labels and descriptions stay searchable.
+    fn search_haystack(&self) -> std::borrow::Cow<'_, str> {
+        if let Some(value) = self.search_value.as_deref() {
+            return std::borrow::Cow::Borrowed(value);
+        }
+        let mut parts = vec![self.title.as_str()];
+        if let Some(subtitle) = self.subtitle.as_deref() {
+            parts.push(subtitle);
+        }
+        std::borrow::Cow::Owned(normalize_query(&parts.join(" ")))
+    }
+
     fn matches(&self, query: &str) -> bool {
         if query.is_empty() {
             return true;
         }
-        let Some(value) = self.search_value.as_ref() else {
-            return false;
-        };
-        exact_terms_match(query, value)
+        // `search_value` is already lowercased at construction; avoid
+        // re-normalizing a query or allocating a filter per row.
+        exact_terms_match(query, &self.search_haystack())
     }
 }
 
@@ -979,7 +991,8 @@ impl ModalListState {
                 continue;
             }
 
-            let score = item.search_value.as_deref().and_then(|value| query.score(value));
+            let haystack = item.search_haystack();
+            let score = query.score(&haystack);
 
             if item.is_header() {
                 if let Some(block) = open_block.take() {
