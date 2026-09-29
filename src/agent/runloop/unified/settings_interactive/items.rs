@@ -8,8 +8,8 @@ use super::docs::{FIELD_DOCS, FieldDoc};
 use super::mutations::resolve_cycle_options;
 use super::path::{PathToken, get_node, parse_path_tokens, path_with_key};
 use super::render::{
-    action_item, display_title, search_value_for_missing_doc, search_value_with_content, section_item,
-    section_subtitle, setting_description, summarize_value,
+    action_item, action_item_with_tone, display_title, search_value_for_missing_doc, search_value_with_content,
+    section_item, setting_description, summarize_value,
 };
 use super::{
     ACTION_BACK, ACTION_CONFIGURE_EDITOR, ACTION_PICK_MAIN_MODEL, ACTION_PREFIX_ARRAY_ADD, ACTION_PREFIX_ARRAY_POP,
@@ -177,23 +177,31 @@ pub(super) fn build_settings_items(state: &SettingsPaletteState, draft: &TomlVal
 
     if state.view_path.as_deref() == Some(RESET_CONFIRMATION_VIEW) {
         items.push(section_item("Confirm reset"));
-        items.push(action_item(
+        items.push(action_item_with_tone(
             "Reset everything",
             "Clear every setting in the current write target (credentials are preserved)",
             Some("Destructive"),
             ACTION_RESET_CONFIRM,
+            vtcode_commons::ui_protocol::InlineTone::Danger,
         ));
-        items.push(action_item(
+        items.push(action_item_with_tone(
             "Keep settings",
             "Return to the settings sections without changing configuration",
             Some("Cancel"),
             ACTION_RESET_CANCEL,
+            vtcode_commons::ui_protocol::InlineTone::Neutral,
         ));
         return Ok(items);
     }
 
     if let Some(view_path) = state.view_path.as_deref() {
-        items.push(action_item("← Back", "Return to the previous settings view", None, ACTION_BACK));
+        items.push(action_item_with_tone(
+            "← Back",
+            "Return to the previous settings view",
+            None,
+            ACTION_BACK,
+            vtcode_commons::ui_protocol::InlineTone::Neutral,
+        ));
         items.push(action_item(
             "Reload configuration",
             "Reload effective values from current configuration files",
@@ -756,7 +764,8 @@ fn item_for_value(label: &str, path: &str, value: &TomlValue, draft_root: &TomlV
         },
         TomlValue::Table(_) => InlineListItem {
             title,
-            subtitle: Some(section_subtitle(path, value)),
+            value: Some(summary),
+            subtitle: setting_description(&description, false),
             badge: None,
             indent: 0,
             selection: Some(InlineListSelection::ConfigAction(format!("{ACTION_PREFIX_OPEN}{path}"))),

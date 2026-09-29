@@ -301,6 +301,31 @@ impl ModelPickerState {
         Ok(())
     }
 
+    /// Follow-up steps return to the model list without cancelling the picker.
+    fn back_to_model_list(&mut self, renderer: &mut AnsiRenderer) -> Result<ModelPickerProgress> {
+        self.step = PickerStep::AwaitModel;
+        self.selection = None;
+        self.selected_reasoning = None;
+        self.selected_service_tier = None;
+        self.selected_mimo_auth = None;
+        self.pending_api_key = None;
+        self.pending_credential_source = None;
+        if self.settings.inline_enabled {
+            render_step_one_inline(
+                renderer,
+                &self.settings.options,
+                self.settings.current_reasoning,
+                &self.dynamic_models,
+                self.preferred_model_selection(),
+                &self.settings.current_provider,
+                &self.settings.current_model,
+                &self.custom_providers,
+                &self.settings.provider_order,
+            )?;
+        }
+        Ok(ModelPickerProgress::InProgress)
+    }
+
     pub async fn handle_input(
         &mut self,
         renderer: &mut AnsiRenderer,
@@ -482,25 +507,7 @@ impl ModelPickerState {
                 }
                 InlineListSelection::DisableReasoning => self.apply_reasoning_off_choice(renderer),
                 InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {
-                    self.step = PickerStep::AwaitModel;
-                    self.selection = None;
-                    self.selected_reasoning = None;
-                    self.selected_service_tier = None;
-                    self.selected_mimo_auth = None;
-                    if self.settings.inline_enabled {
-                        render_step_one_inline(
-                            renderer,
-                            &self.settings.options,
-                            self.settings.current_reasoning,
-                            &self.dynamic_models,
-                            self.preferred_model_selection(),
-                            &self.settings.current_provider,
-                            &self.settings.current_model,
-                            &self.custom_providers,
-                            &self.settings.provider_order,
-                        )?;
-                    }
-                    Ok(ModelPickerProgress::InProgress)
+                    self.back_to_model_list(renderer)
                 }
                 InlineListSelection::OpenAIServiceTier(_) => {
                     renderer.line(
@@ -559,25 +566,7 @@ impl ModelPickerState {
             },
             PickerStep::AwaitServiceTier => match choice {
                 InlineListSelection::ConfigAction(action) if action == rendering::PICKER_BACK_ACTION => {
-                    self.step = PickerStep::AwaitModel;
-                    self.selection = None;
-                    self.selected_reasoning = None;
-                    self.selected_service_tier = None;
-                    self.selected_mimo_auth = None;
-                    if self.settings.inline_enabled {
-                        render_step_one_inline(
-                            renderer,
-                            &self.settings.options,
-                            self.settings.current_reasoning,
-                            &self.dynamic_models,
-                            self.preferred_model_selection(),
-                            &self.settings.current_provider,
-                            &self.settings.current_model,
-                            &self.custom_providers,
-                            &self.settings.provider_order,
-                        )?;
-                    }
-                    Ok(ModelPickerProgress::InProgress)
+                    self.back_to_model_list(renderer)
                 }
                 InlineListSelection::OpenAIServiceTier(choice) => {
                     let service_tier = match choice {

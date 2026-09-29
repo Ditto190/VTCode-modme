@@ -25,18 +25,8 @@ fn ends_with_quoted_map_key(path: &str) -> bool {
     path.rfind("[\"").is_some_and(|start| path[start..].ends_with("\"]"))
 }
 
-pub(super) fn section_subtitle(path: &str, value: &TomlValue) -> String {
-    let heading = heading_for_path(path);
-    let count = count_leaf_entries(value);
-    let mut parts = Vec::new();
-    if !heading.summary.is_empty() {
-        parts.push(truncate_middle(heading.summary.as_ref(), SETTINGS_SUBTITLE_MAX_LEN));
-    }
-    parts.push(format!("{} setting{}", count, if count == 1 { "" } else { "s" }));
-    parts.join(" • ")
-}
-
-pub(super) fn setting_subtitle(_summary: &str, description: &str, adjustable: bool) -> String {
+/// Description-only subtitle for setting rows that also carry a `value`.
+pub(super) fn setting_description(description: &str, adjustable: bool) -> Option<String> {
     // Value is rendered as an accent `InlineListItem::value`; the subtitle
     // carries only description (+ adjust hint) so metadata stays dimmed.
     let mut parts = Vec::new();
@@ -47,16 +37,10 @@ pub(super) fn setting_subtitle(_summary: &str, description: &str, adjustable: bo
         parts.push(truncate_middle(description, SETTINGS_SUBTITLE_MAX_LEN));
     }
     if parts.is_empty() {
-        String::new()
+        None
     } else {
-        parts.join(" • ")
+        Some(parts.join(" • "))
     }
-}
-
-/// Description-only subtitle for setting rows that also carry a `value`.
-pub(super) fn setting_description(description: &str, adjustable: bool) -> Option<String> {
-    let sub = setting_subtitle("", description, adjustable);
-    if sub.trim().is_empty() { None } else { Some(sub) }
 }
 
 pub(super) fn search_value_for_missing_doc(path: &str, label: &str, doc: Option<&FieldDoc>) -> String {
@@ -85,15 +69,24 @@ pub(super) fn section_item(label: &str) -> InlineListItem {
     }
 }
 
+/// Action row with default tone: badgeful rows get Accent, badgeless Neutral.
+/// Prefer [`action_item_with_tone`] when the tone is semantic (danger/current).
 pub(super) fn action_item(title: &str, subtitle: &str, badge: Option<&str>, action: &str) -> InlineListItem {
-    let tone = match badge {
-        Some("Confirm") | Some("Reset") | Some("Destructive") => vtcode_commons::ui_protocol::InlineTone::Danger,
-        Some("Back") | Some("Cancel") => vtcode_commons::ui_protocol::InlineTone::Neutral,
-        Some("On") => vtcode_commons::ui_protocol::InlineTone::Success,
-        Some("Current") => vtcode_commons::ui_protocol::InlineTone::Current,
-        Some(_) => vtcode_commons::ui_protocol::InlineTone::Accent,
-        None => vtcode_commons::ui_protocol::InlineTone::Neutral,
+    let tone = if badge.is_some() {
+        vtcode_commons::ui_protocol::InlineTone::Accent
+    } else {
+        vtcode_commons::ui_protocol::InlineTone::Neutral
     };
+    action_item_with_tone(title, subtitle, badge, action, tone)
+}
+
+pub(super) fn action_item_with_tone(
+    title: &str,
+    subtitle: &str,
+    badge: Option<&str>,
+    action: &str,
+    tone: vtcode_commons::ui_protocol::InlineTone,
+) -> InlineListItem {
     InlineListItem {
         title: title.to_string(),
         subtitle: Some(subtitle.to_string()),
