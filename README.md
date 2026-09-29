@@ -189,7 +189,8 @@ Layer-by-layer details: [Architecture guide](./docs/ARCHITECTURE.md).
 
 ## Usage
 
-One binary: TUI, session tools, provider integrations, and an eval runner.
+Everything ships in the one binary: the TUI, headless runs, session tools,
+provider management, and an eval runner.
 
 ### Commands
 
@@ -213,7 +214,7 @@ For session lifecycle and day-to-day operations:
 | `vtcode exec resume`                 | Continue a finished headless run with a follow-up prompt: `--last` or a session id    |
 | `vtcode schedule`                    | Durable recurring prompts, by cron or one-shot; `install-service` survives restarts   |
 | `vtcode secret`                      | Store provider API keys in your OS keyring, never in shell history or workspace files |
-| `vtcode login`                       | OAuth sign-in for ChatGPT and GitHub Copilot; see [OAuth authentication](./docs/guides/oauth-authentication.md) |
+| `vtcode login`                       | OAuth sign-in for ChatGPT and GitHub Copilot                                          |
 | `vtcode auth`                        | Show authentication status for one provider or all supported providers               |
 | `vtcode models`                      | Inspect, test, and compare providers and models                                       |
 | `vtcode snapshots` / `vtcode revert` | List and roll back to workspace snapshots                                             |
@@ -222,16 +223,20 @@ For session lifecycle and day-to-day operations:
 | `vtcode skills` / `vtcode plugins`   | Manage skills and agent plugins                                                       |
 | `vtcode mcp`                         | Connect and manage MCP servers                                                        |
 
-More: `vtcode config`, `vtcode dependencies`, `vtcode acp`, `vtcode a2a`,
-`vtcode webmcp`, `vtcode session-store`, `vtcode schema` (built-in tool
-schemas), `vtcode analyze` (workspace structure/security/performance),
-`vtcode check` (built-in repository checks), `vtcode pods` (run local
-models), `vtcode app-server` (Codex app-server proxy),
-`vtcode anthropic-api` (Anthropic API compatibility server),
-`vtcode cleanup-snapshots` (prune old snapshots),
-`vtcode background-subagent` (manage background subagents),
-`vtcode update` (binary updates), `vtcode logout` (clear stored
-credentials), and `vtcode man` (man pages).
+Also available:
+
+- **Analysis and checks:** `vtcode analyze` (workspace structure, security,
+  performance), `vtcode check` (built-in repository checks), `vtcode schema`
+  (built-in tool schemas).
+- **Servers and protocols:** `vtcode acp`, `vtcode a2a`, `vtcode webmcp`,
+  `vtcode app-server` (Codex app-server proxy), `vtcode anthropic-api`
+  (Anthropic API compatibility server).
+- **Models and agents:** `vtcode pods` (run local models),
+  `vtcode background-subagent` (manage background subagents).
+- **Housekeeping:** `vtcode config`, `vtcode dependencies`,
+  `vtcode session-store`, `vtcode cleanup-snapshots` (prune old snapshots),
+  `vtcode update`, `vtcode logout` (clear stored credentials), `vtcode man`.
+
 Full list: `vtcode --help` or the [command reference](./docs/user-guide/commands.md).
 
 ### Everyday recipes
