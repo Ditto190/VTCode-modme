@@ -1,1 +1,0 @@
-Implement responsive search for TUI configuration options in VT Code by extending the shared common modal with a reusable search text field that filters options as users type using relevant labels, descriptions, and keywords, while preserving keyboard navigation, focus, scrolling, selection, existing modal behavior, and test coverage.
