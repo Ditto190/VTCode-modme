@@ -29,6 +29,14 @@ const MEMORY_CONFIRM_CANCEL: &str = "memory.confirm.cancel";
 const MEMORY_CLEANUP_ACCEPT: &str = "memory.cleanup.accept";
 const MEMORY_CLEANUP_CANCEL: &str = "memory.cleanup.cancel";
 const MEMORY_MATCH_PREVIEW_LIMIT: usize = 5;
+const MEMORY_DISABLED_HINT: &str = "Persistent memory is disabled. Use `/config memory` to enable it.";
+
+fn persistent_memory_enabled(ctx: &InteractionLoopContext<'_>) -> bool {
+    ctx.vt_cfg
+        .as_ref()
+        .map(vtcode_core::config::loader::VTCodeConfig::persistent_memory_enabled)
+        .unwrap_or(true)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MemoryPromptIntent {
@@ -85,17 +93,8 @@ pub(crate) async fn handle_memory_prompt(
         MemoryPromptIntent::Show => handle_show_memory_intent(ctx, state).await,
         MemoryPromptIntent::Remember { request } => {
             let prior_assistant_reply = prior_assistant_reply_for_memory_request(&request, ctx.conversation_history);
-            if !ctx
-                .vt_cfg
-                .as_ref()
-                .map(vtcode_core::config::loader::VTCodeConfig::persistent_memory_enabled)
-                .unwrap_or(true)
-            {
-                respond_to_memory_prompt(
-                    ctx,
-                    input,
-                    "Persistent memory is disabled. Use `/config memory` or `/config memory` to enable it.",
-                )?;
+            if !persistent_memory_enabled(ctx) {
+                respond_to_memory_prompt(ctx, input, MEMORY_DISABLED_HINT)?;
                 return Ok(Some(InteractionOutcome::DirectToolHandled));
             }
 
@@ -168,17 +167,8 @@ pub(crate) async fn handle_memory_prompt(
             Ok(Some(InteractionOutcome::DirectToolHandled))
         }
         MemoryPromptIntent::Forget { request } => {
-            if !ctx
-                .vt_cfg
-                .as_ref()
-                .map(vtcode_core::config::loader::VTCodeConfig::persistent_memory_enabled)
-                .unwrap_or(true)
-            {
-                respond_to_memory_prompt(
-                    ctx,
-                    input,
-                    "Persistent memory is disabled. Use `/config memory` or `/config memory` to enable it.",
-                )?;
+            if !persistent_memory_enabled(ctx) {
+                respond_to_memory_prompt(ctx, input, MEMORY_DISABLED_HINT)?;
                 return Ok(Some(InteractionOutcome::DirectToolHandled));
             }
 
