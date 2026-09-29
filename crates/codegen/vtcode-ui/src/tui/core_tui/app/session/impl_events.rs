@@ -26,6 +26,15 @@ impl Session {
         events::process_key_with_clipboard_image_reader(self, key, image_reader)
     }
 
+    #[cfg(test)]
+    pub(crate) fn process_key_with_clipboard_text_reader(
+        &mut self,
+        key: KeyEvent,
+        text_reader: impl FnMut() -> Result<String, crate::tui::core_tui::session::clipboard_image::ClipboardTextError>,
+    ) -> Option<InlineEvent> {
+        events::process_key_with_clipboard_text_reader(self, key, text_reader)
+    }
+
     fn input_area_contains(&self, column: u16, row: u16) -> bool {
         self.core.input_area().is_some_and(|area| {
             row >= area.y

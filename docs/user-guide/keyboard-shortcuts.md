@@ -88,7 +88,8 @@ On terminals that send the legacy control-code aliases, the same behavior is rea
 | macOS default | `Option+Enter` |
 | Native/configured | `Shift+Enter` (Ghostty, Kitty, WezTerm, iTerm2, Warp natively; `/terminal-setup` for VS Code, Alacritty, Zed) |
 | Control sequence | `Ctrl+J` |
-| Paste | Paste directly (large inputs collapse to `[Pasted Content N chars, M lines, K images, J files]` once text reaches 10+ lines, 1000+ chars, 3+ images, or 5+ `@file` tokens; shows head + tail snippets, click to expand for editing; one `Backspace` at block end removes the block) |
+| Paste | Paste directly (large inputs collapse to `[Pasted Content N chars, M lines, K images, J files]` once text reaches 10+ lines, 1000+ chars, 3+ images, or 5+ `@file` tokens; shows head + tail snippets, click or paste again to expand for editing; one `Backspace` at block end removes the block) |
+| `Shift+Ctrl+V` | Paste clipboard text as raw full content, bypassing the collapse marker entirely |
 
 ## Quick commands
 

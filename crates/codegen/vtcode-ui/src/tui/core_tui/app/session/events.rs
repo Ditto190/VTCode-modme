@@ -13,7 +13,9 @@ use crate::tui::core_tui::runner::TuiSessionDriver;
 use crate::tui::core_tui::session::action::{
     Action, is_double_escape_press, is_readline_editing_key, normalize_terminal_control_event,
 };
-use crate::tui::core_tui::session::clipboard_image::{ClipboardImageError, read_clipboard_image};
+use crate::tui::core_tui::session::clipboard_image::{
+    ClipboardImageError, ClipboardTextError, read_clipboard_image, read_clipboard_text,
+};
 use crate::tui::core_tui::session::modal;
 use crate::tui::core_tui::session::modal::{ModalKeyModifiers, ModalListKeyResult};
 use crate::tui::core_tui::session::mode_switch_guard::{self};
@@ -195,10 +197,56 @@ fn push_warning_line(session: &mut Session, text: &'static str) {
     session.mark_dirty();
 }
 
-fn is_image_paste_shortcut(key: &KeyEvent, has_control: bool, has_alt: bool, has_command: bool) -> bool {
+fn is_image_paste_shortcut(
+    key: &KeyEvent,
+    has_control: bool,
+    has_alt: bool,
+    has_command: bool,
+    has_shift: bool,
+) -> bool {
     matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
         && !has_command
+        && !has_shift
         && ((has_control && !has_alt) || (has_alt && !has_control))
+}
+
+fn raw_text_paste_warning(error: ClipboardTextError) -> &'static str {
+    match error {
+        ClipboardTextError::NoText => "No text found in clipboard.",
+        ClipboardTextError::ClipboardUnavailable => {
+            "Clipboard text paste is unavailable in this terminal or desktop session."
+        }
+        ClipboardTextError::WslFallbackFailure => "Could not read clipboard text from Windows via PowerShell.",
+    }
+}
+
+/// Shift+Ctrl+V (or Shift+Alt+V) pastes clipboard text verbatim: full raw
+/// content with no collapse marker, even for large pastes.
+fn is_raw_text_paste_shortcut(
+    key: &KeyEvent,
+    has_control: bool,
+    has_alt: bool,
+    has_command: bool,
+    has_shift: bool,
+) -> bool {
+    matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+        && has_shift
+        && !has_command
+        && ((has_control && !has_alt) || (has_alt && !has_control))
+}
+
+fn handle_raw_text_paste_shortcut_with(
+    session: &mut Session,
+    mut text_reader: impl FnMut() -> Result<String, ClipboardTextError>,
+) {
+    match text_reader() {
+        Ok(text) => {
+            session.core.insert_raw_paste_text(&text);
+            session.update_input_triggers();
+            session.mark_dirty();
+        }
+        Err(error) => push_warning_line(session, raw_text_paste_warning(error)),
+    }
 }
 
 fn handle_image_paste_shortcut_with(
@@ -226,7 +274,7 @@ fn handle_image_paste_shortcut_with(
 }
 
 pub(super) fn process_key(session: &mut Session, key: KeyEvent) -> Option<InlineEvent> {
-    process_key_with_clipboard_image_reader(session, key, read_clipboard_image)
+    process_key_with_clipboard_readers(session, key, read_clipboard_image, read_clipboard_text)
 }
 
 /// Key handler for a secure-prompt modal (text-only, masked input such as an
@@ -398,6 +446,24 @@ pub(super) fn process_key_with_clipboard_image_reader(
     key: KeyEvent,
     image_reader: impl FnMut() -> Result<ContentPart, ClipboardImageError>,
 ) -> Option<InlineEvent> {
+    process_key_with_clipboard_readers(session, key, image_reader, read_clipboard_text)
+}
+
+#[cfg(test)]
+pub(super) fn process_key_with_clipboard_text_reader(
+    session: &mut Session,
+    key: KeyEvent,
+    text_reader: impl FnMut() -> Result<String, ClipboardTextError>,
+) -> Option<InlineEvent> {
+    process_key_with_clipboard_readers(session, key, read_clipboard_image, text_reader)
+}
+
+fn process_key_with_clipboard_readers(
+    session: &mut Session,
+    key: KeyEvent,
+    image_reader: impl FnMut() -> Result<ContentPart, ClipboardImageError>,
+    text_reader: impl FnMut() -> Result<String, ClipboardTextError>,
+) -> Option<InlineEvent> {
     let key = normalize_terminal_control_event(key);
     let modifiers = key.modifiers;
     let has_control = modifiers.contains(KeyModifiers::CONTROL);
@@ -419,7 +485,14 @@ pub(super) fn process_key_with_clipboard_image_reader(
         return None;
     }
 
-    if is_image_paste_shortcut(&key, has_control, has_alt, has_command) {
+    if is_raw_text_paste_shortcut(&key, has_control, has_alt, has_command, has_shift) {
+        if session.core.input_enabled() {
+            handle_raw_text_paste_shortcut_with(session, text_reader);
+        }
+        return None;
+    }
+
+    if is_image_paste_shortcut(&key, has_control, has_alt, has_command, has_shift) {
         if session.core.input_enabled() {
             handle_image_paste_shortcut_with(session, image_reader);
         }

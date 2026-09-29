@@ -191,6 +191,81 @@ fn paste_with_large_before_context_truncates_far_head() {
 }
 
 #[test]
+fn second_paste_expands_to_full_content() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let first = (0..11).map(|i| format!("paste-{i}")).collect::<Vec<_>>().join("\n");
+    session.insert_paste_text(&first);
+    assert!(session.input_compact_mode);
+
+    let rendered = text_content(&session.build_input_widget_data(VIEW_WIDTH, VIEW_ROWS).text);
+    assert!(rendered.contains("[Pasted Content"), "got: {rendered}");
+    assert!(!rendered.contains("paste-0"));
+
+    session.insert_paste_text("more");
+    assert!(!session.input_compact_mode);
+
+    // Expanded view is still height-windowed to the last lines (pre-existing
+    // `visible_input_window` cap), so assert the visible tail plus no marker.
+    let rendered = text_content(&session.build_input_widget_data(VIEW_WIDTH, VIEW_ROWS).text);
+    assert!(rendered.contains("paste-10"), "got: {rendered}");
+    assert!(rendered.contains("more"), "got: {rendered}");
+    assert!(!rendered.contains("[Pasted Content"), "got: {rendered}");
+    assert_eq!(session.input_manager.content(), format!("{first}more"));
+}
+
+#[test]
+fn third_paste_collapses_again() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let first = (0..11).map(|i| format!("paste-{i}")).collect::<Vec<_>>().join("\n");
+    session.insert_paste_text(&first);
+    session.insert_paste_text("more");
+    assert!(!session.input_compact_mode);
+
+    session.insert_paste_text("again");
+    assert!(session.input_compact_mode);
+
+    let rendered = text_content(&session.build_input_widget_data(VIEW_WIDTH, VIEW_ROWS).text);
+    assert!(rendered.contains("[Pasted Content"), "got: {rendered}");
+    assert_eq!(session.input_manager.content(), format!("{first}moreagain"));
+}
+
+#[test]
+fn backspace_in_expanded_view_deletes_single_char() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let pasted = (0..11).map(|i| format!("paste-{i}")).collect::<Vec<_>>().join("\n");
+    session.insert_paste_text(&pasted);
+    assert!(session.input_compact_mode);
+
+    // Simulate click-to-expand: full text visible, cursor at the block end.
+    session.input_compact_mode = false;
+    session.delete_char();
+
+    let expected = pasted[..pasted.len() - 1].to_string();
+    assert_eq!(session.input_manager.content(), expected);
+    assert!(session.input_manager.compact_paste_range().is_none());
+}
+
+#[test]
+fn line_clear_in_expanded_view_clears_only_cursor_line() {
+    let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
+    let lines: Vec<String> = (0..11).map(|i| format!("paste-{i}")).collect();
+    session.insert_paste_text(&lines.join("\n"));
+    assert!(session.input_compact_mode);
+
+    // Simulate click-to-expand, then park the cursor inside "paste-5".
+    session.input_compact_mode = false;
+    let line_start = lines[..5].iter().map(|line| line.len() + 1).sum::<usize>();
+    session.input_manager.set_cursor(line_start + 1);
+    session.clear_current_line_or_all();
+
+    let mut expected = lines.clone();
+    // Line clear removes the line's text but keeps its newline (same as
+    // normal multiline editing), leaving an empty line behind.
+    expected[5] = String::new();
+    assert_eq!(session.input_manager.content(), expected.join("\n"));
+}
+
+#[test]
 fn paste_with_large_single_line_after_truncates_far_tail() {
     let mut session = Session::new(InlineTheme::default(), None, VIEW_ROWS);
     let pasted = (0..11).map(|i| format!("paste-{i}")).collect::<Vec<_>>().join("\n");

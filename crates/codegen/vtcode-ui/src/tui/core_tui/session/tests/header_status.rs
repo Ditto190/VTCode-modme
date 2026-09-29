@@ -86,7 +86,7 @@ fn copy_notification_renders_in_input_status_line() {
 }
 
 #[test]
-fn copy_notification_expires_after_five_seconds() {
+fn copy_notification_expires_after_duration() {
     let mut session = fresh_session();
     session.show_copy_notification();
     session.copy_notification_until = Some(Instant::now().checked_sub(Duration::from_secs(1)).unwrap());

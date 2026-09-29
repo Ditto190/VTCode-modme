@@ -17,6 +17,12 @@ fn is_word_separator(ch: char) -> bool {
     WORD_SEPARATORS.contains(ch)
 }
 
+/// Strip carriage returns and DEL bytes from pasted text so terminal and
+/// clipboard pastes land verbatim without control-code side effects.
+fn sanitize_pasted_text(text: &str) -> String {
+    text.chars().filter(|&ch| ch != '\r' && ch != '\u{7f}').collect()
+}
+
 fn is_separator_piece(piece: &str) -> bool {
     piece.chars().all(is_word_separator)
 }
@@ -170,13 +176,16 @@ impl Session {
     /// hitting the interactive input's visual limit. Large pastes — by lines,
     /// chars, images, or file tokens — are tracked as a collapsible block so
     /// the composer summarizes previous content instead of showing full text.
+    /// Pasting while already collapsed expands to the full text instead, so
+    /// paste-once summarizes and paste-twice reviews the complete content.
     pub(crate) fn insert_paste_text(&mut self, text: &str) {
-        let sanitized: String = text.chars().filter(|&ch| ch != '\r' && ch != '\u{7f}').collect();
+        let sanitized = sanitize_pasted_text(text);
 
         if sanitized.is_empty() {
             return;
         }
 
+        let was_collapsed = self.input_compact_mode;
         let paste_start = self
             .input_manager
             .selection_range()
@@ -188,6 +197,26 @@ impl Session {
             self.input_manager.set_compact_paste_range(paste_start..paste_end);
         }
         self.refresh_input_edit_state();
+        if was_collapsed && self.input_compact_placeholder().is_some() {
+            self.input_compact_mode = false;
+        }
+    }
+
+    /// Insert pasted text verbatim, bypassing collapse tracking.
+    ///
+    /// Shift+Ctrl+V pastes clipboard text as raw full content: no compact
+    /// block is tracked and the composer stays expanded so nothing is
+    /// summarized away, no matter how large the pasted text is.
+    pub(crate) fn insert_raw_paste_text(&mut self, text: &str) {
+        let sanitized = sanitize_pasted_text(text);
+
+        if sanitized.is_empty() {
+            return;
+        }
+
+        self.input_manager.insert_text(&sanitized);
+        self.refresh_input_edit_state();
+        self.input_compact_mode = false;
     }
 
     pub(crate) fn apply_suggested_prompt(&mut self, text: String) {
@@ -238,10 +267,13 @@ impl Session {
     /// Delete the character before the cursor (backspace)
     pub(crate) fn delete_char(&mut self) {
         // One Backspace right after a collapsed multi-line paste removes the
-        // whole inserted block instead of peeling single characters. When the
+        // whole inserted block instead of peeling single characters. This only
+        // applies while collapsed: in the expanded full-text view Backspace
+        // peels one character like normal multiline editing. When the
         // user has an active selection, the selection must win (it removes
         // exactly what the user highlighted).
-        if let Some(range) = self.input_manager.compact_paste_range()
+        if self.input_compact_mode
+            && let Some(range) = self.input_manager.compact_paste_range()
             && range.end > range.start
             && self.input_manager.selection_range().is_none()
             && self.input_manager.cursor() == range.end
@@ -431,7 +463,9 @@ impl Session {
     /// Dimension key: `line_start..line_end` are byte offsets of the cursor's
     /// logical line; `clear_start..clear_end` expands that range to cover an
     /// overlapping compact paste block (`[Pasted Content N chars]`) so a
-    /// collapsed multi-line paste is removed atomically. Image placeholders
+    /// collapsed multi-line paste is removed atomically. The expansion only
+    /// applies while collapsed; in the expanded full-text view line clears
+    /// behave like normal multiline editing. Image placeholders
     /// (`[Image #N]`) live inside their line, so line deletion already covers
     /// them; single-line clears go through [`InputManager::clear`] which also
     /// drops attachments and compact state.
@@ -455,7 +489,8 @@ impl Session {
         let mut clear_start = line_start.min(content_len);
         let mut clear_end = line_end.min(content_len);
 
-        if let Some(range) = self.input_manager.compact_paste_range()
+        if self.input_compact_mode
+            && let Some(range) = self.input_manager.compact_paste_range()
             && range.start < range.end
         {
             // Clamp stale ranges to current content before expanding.
