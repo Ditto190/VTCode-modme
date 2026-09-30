@@ -2,6 +2,18 @@
 
 All notable changes to vtcode will be documented in this file.
 ## 0.169.2 - 2026-09-24
+## 0.171.1 - 2026-09-30
+
+### Highlights
+#### Bug Fixes
+
+- Gate cache breakpoints on native backends, map Merge service tiers (f1f731ba) 
+- Tier-aware retries and Merge capability fast-fail (70fff2c2) 
+- Merge capability retry, tier mapping, and tier-reset persistence (1ad1fdc3) 
+#### Features
+
+- Gate ultrafast tier on native OpenAI across picker and wire (cd838ff1) 
+### Other Changes
 ## 0.171.0 - 2026-09-29
 
 ### Highlights
