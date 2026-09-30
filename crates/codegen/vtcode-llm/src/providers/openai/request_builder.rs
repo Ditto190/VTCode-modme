@@ -113,10 +113,13 @@ pub(crate) struct ResponsesRequestContext<'a> {
     pub include_prompt_cache_retention: bool,
     pub prompt_cache_retention: Option<&'a str>,
     /// Emit explicit `prompt_cache_breakpoint` markers on the stable prefix.
-    /// Native OpenAI (and the ChatGPT backend) honor them; third-party
+    /// Only native api.openai.com honors them: third-party
     /// Responses-compatible endpoints (e.g. Merge Gateway via a base-URL
-    /// override) reject the field with 400 `invalid_parameter`, so the
-    /// provider sets this only for first-party backends.
+    /// override) reject the field with 400 `invalid_parameter`, and the
+    /// ChatGPT subscription backend rejects it with 400
+    /// `prompt_cache_breakpoint is not supported on this model` (observed
+    /// live on `gpt-6.1-sol`). Implicit breakpoints still cover the latest
+    /// message on those backends.
     pub include_explicit_cache_breakpoints: bool,
     pub default_service_tier: Option<&'a str>,
     pub default_response_store: Option<bool>,
