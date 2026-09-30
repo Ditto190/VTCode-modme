@@ -16,6 +16,7 @@ use vtcode_core::utils::ansi::AnsiRenderer;
 use vtcode_ui::tui::app::{InlineHandle, InlineSession};
 
 use self::options::{MODEL_OPTIONS, build_filtered_options, find_option_index, option_indexes_for_provider};
+use super::selection::available_service_tiers;
 
 fn has_model(options: &[ModelOption], model: ModelId) -> bool {
     let id = model.as_str();
@@ -613,6 +614,51 @@ fn build_result_uses_selected_flex_service_tier() {
 
     assert_eq!(result.service_tier, Some(OpenAIServiceTier::Flex));
     assert!(result.service_tier_changed);
+}
+
+#[test]
+fn available_service_tiers_hides_ultrafast_outside_native_openai() {
+    fn detail(provider: Option<Provider>, model: &str, supported: bool) -> SelectionDetail {
+        SelectionDetail {
+            provider_key: String::new(),
+            provider_label: String::new(),
+            provider_enum: provider,
+            model_id: model.to_string(),
+            model_display: model.to_string(),
+            known_model: true,
+            context_window: None,
+            reasoning_supported: false,
+            reasoning_effort_supported: false,
+            reasoning_optional: false,
+            reasoning_off_model: None,
+            service_tier_supported: supported,
+            requires_api_key: false,
+            uses_chatgpt_auth: false,
+            env_key: String::new(),
+            mimo_auth_method: None,
+        }
+    }
+
+    use OpenAIServiceTier::{Flex, Priority, Ultrafast};
+
+    // Native OpenAI offers every tier on supported models.
+    assert_eq!(
+        available_service_tiers(&detail(Some(Provider::OpenAI), "gpt-6.1-sol", true)),
+        vec![None, Some(Flex), Some(Priority), Some(Ultrafast)]
+    );
+    // Merge Gateway and other compatibles offer flex/priority but never ultrafast.
+    assert_eq!(
+        available_service_tiers(&detail(Some(Provider::MergeGateway), "openai/gpt-6.1-sol", true)),
+        vec![None, Some(Flex), Some(Priority)]
+    );
+    assert_eq!(
+        available_service_tiers(&detail(Some(Provider::XAI), "grok-4.7", true)),
+        vec![None, Some(Flex), Some(Priority)]
+    );
+    // Custom providers (no builtin enum) never offer ultrafast.
+    assert_eq!(available_service_tiers(&detail(None, "my-model", true)), vec![None, Some(Flex), Some(Priority)]);
+    // Routes without tier support offer nothing.
+    assert!(available_service_tiers(&detail(Some(Provider::Anthropic), "claude-sonnet-5", false)).is_empty());
 }
 
 #[test]

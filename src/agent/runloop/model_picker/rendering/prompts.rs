@@ -8,7 +8,8 @@ use vtcode_core::ui::{InlineListItem, InlineListSelection, OpenAIServiceTierChoi
 use vtcode_core::utils::ansi::{AnsiRenderer, MessageStyle};
 
 use super::super::selection::{
-    SelectionDetail, reasoning_level_description, reasoning_level_label, service_tier_label,
+    SelectionDetail, available_service_tiers, reasoning_level_description, reasoning_level_label,
+    service_tier_choice_meta, service_tier_label,
 };
 use super::{KEEP_CURRENT_DESCRIPTION, STEP_THREE_TITLE, STEP_TWO_TITLE};
 use vtcode_commons::modal_hints::MODEL_PICKER_FOLLOW_UP_HINT;
@@ -202,39 +203,31 @@ pub(crate) fn render_service_tier_inline(
     selection: &SelectionDetail,
     current: Option<OpenAIServiceTier>,
 ) -> Result<()> {
-    let items = vec![
+    fn to_choice(tier: Option<OpenAIServiceTier>) -> OpenAIServiceTierChoice {
+        match tier {
+            Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
+            Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
+            Some(OpenAIServiceTier::Ultrafast) => OpenAIServiceTierChoice::Ultrafast,
+            None => OpenAIServiceTierChoice::ProjectDefault,
+        }
+    }
+
+    let mut items = vec![
         back_to_model_list_row(),
         vtcode_ui::design::list::current_choice(
             format!("Keep current ({})", service_tier_label(current)),
             Some("Retain the existing service tier configuration.".to_string()),
-            Some(InlineListSelection::OpenAIServiceTier(match current {
-                Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
-                Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
-                Some(OpenAIServiceTier::Ultrafast) => OpenAIServiceTierChoice::Ultrafast,
-                None => OpenAIServiceTierChoice::ProjectDefault,
-            })),
-        ),
-        vtcode_ui::design::list::choice(
-            "Project default",
-            Some("Do not send service_tier; inherit the OpenAI Project setting.".to_string()),
-            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::ProjectDefault)),
-        ),
-        vtcode_ui::design::list::choice(
-            "Flex",
-            Some("Send service_tier=flex for lower-cost, lower-priority processing.".to_string()),
-            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Flex)),
-        ),
-        vtcode_ui::design::list::choice(
-            "Priority",
-            Some("Send service_tier=priority for lower and more consistent latency.".to_string()),
-            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Priority)),
-        ),
-        vtcode_ui::design::list::choice(
-            "Ultrafast",
-            Some("Send service_tier=ultrafast for fastest processing at higher cost (US/global only).".to_string()),
-            Some(InlineListSelection::OpenAIServiceTier(OpenAIServiceTierChoice::Ultrafast)),
+            Some(InlineListSelection::OpenAIServiceTier(to_choice(current))),
         ),
     ];
+    for tier in available_service_tiers(selection) {
+        let (title, subtitle) = service_tier_choice_meta(tier);
+        items.push(vtcode_ui::design::list::choice(
+            title,
+            Some(subtitle.to_string()),
+            Some(InlineListSelection::OpenAIServiceTier(to_choice(tier))),
+        ));
+    }
 
     renderer.show_list_modal_with_footer(
         STEP_THREE_TITLE,
@@ -243,12 +236,7 @@ pub(crate) fn render_service_tier_inline(
             "Applies only to OpenAI-compatible models that support service tiers.".to_string(),
         ],
         items,
-        Some(InlineListSelection::OpenAIServiceTier(match current {
-            Some(OpenAIServiceTier::Flex) => OpenAIServiceTierChoice::Flex,
-            Some(OpenAIServiceTier::Priority) => OpenAIServiceTierChoice::Priority,
-            Some(OpenAIServiceTier::Ultrafast) => OpenAIServiceTierChoice::Ultrafast,
-            None => OpenAIServiceTierChoice::ProjectDefault,
-        })),
+        Some(InlineListSelection::OpenAIServiceTier(to_choice(current))),
         None,
         Some(MODEL_PICKER_FOLLOW_UP_HINT.to_string()),
     );
@@ -260,10 +248,27 @@ pub(crate) fn prompt_service_tier_plain(
     selection: &SelectionDetail,
     current: Option<OpenAIServiceTier>,
 ) -> Result<()> {
+    let mut options: Vec<&str> = available_service_tiers(selection)
+        .into_iter()
+        .map(|tier| match tier {
+            None => "default",
+            Some(OpenAIServiceTier::Flex) => "flex",
+            Some(OpenAIServiceTier::Priority) => "priority",
+            Some(OpenAIServiceTier::Ultrafast) => "ultrafast",
+        })
+        .collect();
+    if options.is_empty() {
+        options.push("default");
+    }
     renderer.line(
         MessageStyle::Info,
         &format!(
-            "Service tier – choose 'flex', 'priority', 'ultrafast', or 'default' for {}. Type 'skip' to keep {}.",
+            "Service tier – choose {} for {}. Type 'skip' to keep {}.",
+            options
+                .iter()
+                .map(|option| format!("'{option}'"))
+                .collect::<Vec<_>>()
+                .join(", "),
             selection.model_display,
             service_tier_label(current)
         ),

@@ -7,6 +7,7 @@
 pub use vtcode_commons::provider::Provider;
 
 use super::{ModelId, model_catalog_entry};
+use crate::core::OpenAIServiceTier;
 use std::str::FromStr;
 
 const GENERIC_REASONING_EFFORTS: &[&str] = &["low", "medium", "high"];
@@ -44,6 +45,19 @@ pub trait ProviderModelSupport: AsRef<str> {
 
     /// Determine if the provider supports the `service_tier` request parameter.
     fn supports_service_tier(&self, model: &str) -> bool;
+
+    /// Determine if the provider supports a specific `service_tier` value.
+    /// `ultrafast` is a native-OpenAI-only tier: every other provider,
+    /// including OpenAI-compatible gateways that omit it wire-side, reports
+    /// false even when it accepts `flex`/`priority`.
+    fn supports_service_tier_value(&self, model: &str, tier: OpenAIServiceTier) -> bool {
+        match tier {
+            OpenAIServiceTier::Ultrafast => {
+                self.as_ref() == Provider::OpenAI.as_ref() && self.supports_service_tier(model)
+            }
+            _ => self.supports_service_tier(model),
+        }
+    }
 }
 
 impl ProviderModelSupport for Provider {

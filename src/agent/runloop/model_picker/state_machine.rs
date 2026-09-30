@@ -472,6 +472,16 @@ impl ModelPickerState {
             "flex" => self.apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Flex)),
             "priority" => self.apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Priority)),
             "ultrafast" | "ultra-fast" | "ultra" => {
+                let offered =
+                    selection::available_service_tiers(selection).contains(&Some(OpenAIServiceTier::Ultrafast));
+                if !offered {
+                    renderer.line(
+                        MessageStyle::Error,
+                        "Ultrafast is only available for native OpenAI models. Use flex, priority, default, or skip.",
+                    )?;
+                    prompt_service_tier_plain(renderer, selection, self.settings.current_service_tier)?;
+                    return Ok(ModelPickerProgress::InProgress);
+                }
                 self.apply_service_tier_choice(renderer, Some(OpenAIServiceTier::Ultrafast))
             }
             "default" | "project" | "inherit" => self.apply_service_tier_choice(renderer, None),

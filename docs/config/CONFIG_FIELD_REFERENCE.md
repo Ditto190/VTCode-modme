@@ -681,7 +681,7 @@ python3 scripts/generate_config_field_reference.py
 | `provider.openai.responses_include` | `array` | no | `-` | Optional Responses API `include` selectors. Example: `["reasoning.encrypted_content"]` for encrypted reasoning continuity. |
 | `provider.openai.responses_include[]` | `string` | no | `-` | - |
 | `provider.openai.responses_store` | `boolean \| null` | no | `-` | Optional Responses API `store` flag. Set to `false` to avoid server-side storage when using Responses-compatible models. |
-| `provider.openai.service_tier` | `OpenAIServiceTier \| null` | no | `-` | Optional OpenAI `service_tier` request parameter for OpenAI-compatible models. Leave unset to inherit the Project-level default service tier. Options: "flex", "priority", "ultrafast" (ultrafast is fastest at higher cost, US/global processing only) |
+| `provider.openai.service_tier` | `OpenAIServiceTier \| null` | no | `-` | Optional OpenAI `service_tier` request parameter for OpenAI-compatible models. Leave unset to inherit the Project-level default service tier. Options: "flex", "priority", "ultrafast" (`ultrafast` is native-OpenAI-only: fastest at higher cost, US/global processing only, hidden for other providers) |
 | `provider.openai.tool_search.always_available_tools` | `array` | no | `[]` | Tool names that should never be deferred (always available). |
 | `provider.openai.tool_search.always_available_tools[]` | `string` | no | `-` | - |
 | `provider.openai.tool_search.defer_by_default` | `boolean` | no | `true` | Automatically defer loading of all tools except the core always-on set. |

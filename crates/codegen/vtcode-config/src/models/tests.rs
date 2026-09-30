@@ -520,6 +520,31 @@ fn test_service_tier_ultrafast_supported_on_openai_compatibles_only() {
 }
 
 #[test]
+fn test_service_tier_value_ultrafast_is_native_openai_only() {
+    use crate::core::OpenAIServiceTier;
+
+    // Native OpenAI: every tier allowed on supported models.
+    assert!(Provider::OpenAI.supports_service_tier_value(models::openai::GPT_6_1_SOL, OpenAIServiceTier::Flex));
+    assert!(Provider::OpenAI.supports_service_tier_value(models::openai::GPT_6_1_SOL, OpenAIServiceTier::Priority));
+    assert!(Provider::OpenAI.supports_service_tier_value(models::openai::GPT_6_1_SOL, OpenAIServiceTier::Ultrafast));
+    // ... but not on models outside the tier allowlist.
+    assert!(!Provider::OpenAI.supports_service_tier_value(models::openai::GPT_OSS_20B, OpenAIServiceTier::Ultrafast));
+    // Compat providers accept flex/priority yet must never offer ultrafast.
+    assert!(
+        Provider::MergeGateway
+            .supports_service_tier_value(models::merge_gateway::OPENAI_GPT_6_1_SOL, OpenAIServiceTier::Flex)
+    );
+    assert!(
+        !Provider::MergeGateway
+            .supports_service_tier_value(models::merge_gateway::OPENAI_GPT_6_1_SOL, OpenAIServiceTier::Ultrafast)
+    );
+    assert!(Provider::XAI.supports_service_tier_value("grok-4.7", OpenAIServiceTier::Priority));
+    assert!(!Provider::XAI.supports_service_tier_value("grok-4.7", OpenAIServiceTier::Ultrafast));
+    // Native non-compat APIs support no tier value.
+    assert!(!Provider::Anthropic.supports_service_tier_value("claude-sonnet-5", OpenAIServiceTier::Flex));
+}
+
+#[test]
 fn test_model_helpers_include_curated_opencode_models() {
     let zen_models = model_helpers::supported_for("opencode-zen").expect("opencode zen helpers");
     assert!(zen_models.contains(&models::opencode_zen::GPT_5_6_SOL));

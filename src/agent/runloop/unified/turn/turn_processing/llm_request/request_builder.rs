@@ -433,22 +433,24 @@ pub(super) async fn build_turn_request(
     // Canonical `provider.openai.service_tier` applies to any OpenAI-compatible
     // route that advertises support (native OpenAI honors it via provider
     // default; compat gateways forward `request.service_tier`). Custom
-    // providers with an OpenAI api_format ride the same path. Ultrafast is
-    // US/global only; the backend rejects EU-routed requests.
+    // providers with an OpenAI api_format ride the same path, except for
+    // `ultrafast`, which is native-OpenAI-only and never forwarded. Ultrafast
+    // is US/global only; the backend rejects EU-routed requests.
     if let Some(cfg) = ctx.vt_cfg
         && let Some(tier) = cfg.provider.openai.service_tier
     {
         let builtin_supported = turn_snapshot
             .provider_name
             .parse::<Provider>()
-            .map(|provider| provider.supports_service_tier(&turn_snapshot.active_model))
+            .map(|provider| provider.supports_service_tier_value(&turn_snapshot.active_model, tier))
             .unwrap_or(false);
-        let custom_openai = cfg.custom_provider(&turn_snapshot.provider_name).is_some_and(|custom| {
-            !matches!(
-                custom.resolved_profile(&turn_snapshot.active_model).api_format,
-                Some(vtcode_core::config::core::CustomProviderApiFormat::AnthropicMessages)
-            )
-        });
+        let custom_openai = tier != vtcode_config::OpenAIServiceTier::Ultrafast
+            && cfg.custom_provider(&turn_snapshot.provider_name).is_some_and(|custom| {
+                !matches!(
+                    custom.resolved_profile(&turn_snapshot.active_model).api_format,
+                    Some(vtcode_core::config::core::CustomProviderApiFormat::AnthropicMessages)
+                )
+            });
         if builtin_supported || custom_openai {
             request_plan.request.service_tier = Some(tier.as_str().to_string());
         }
